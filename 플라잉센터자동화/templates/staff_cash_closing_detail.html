@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero hero-row">
+  <div>
+    <p class="hero-kicker">Cash Closing</p>
+    <h2 class="hero-title">정산 상세 #{{ row.closing_id }}</h2>
+    <p class="hero-desc">{{ row.business_date }} 기준 시제 정산 내역입니다.</p>
+  </div>
+  <a class="btn btn-secondary" href="/staff/cash-closing">목록으로</a>
+</section>
+{% include "staff_menu.html" %}
+
+{% set total_diff = row.difference_amount + row.qr_difference_amount %}
+{% if total_diff > 0 %}
+  {% set total_diff_class = "is-plus" %}
+{% elif total_diff < 0 %}
+  {% set total_diff_class = "is-minus" %}
+{% else %}
+  {% set total_diff_class = "is-zero" %}
+{% endif %}
+
+<section class="card cash-detail-summary-card">
+  <h3 class="card-title">요약</h3>
+  <div class="cash-detail-kpi-grid">
+    <article class="cash-kpi-card cash-kpi-card-focus {{ total_diff_class }}">
+      <p class="cash-kpi-label">총 차액</p>
+      <p class="cash-kpi-value">{{ total_diff | yen }}</p>
+      <p class="cash-kpi-meta">현금 차액 + QR 차액</p>
+    </article>
+
+    <article class="cash-kpi-card">
+      <p class="cash-kpi-label">현금 차액</p>
+      <p class="cash-kpi-value">{{ row.difference_amount | yen }}</p>
+      <p class="cash-kpi-meta">현금 실사합계 - 현금 자동</p>
+    </article>
+
+    <article class="cash-kpi-card">
+      <p class="cash-kpi-label">QR 차액</p>
+      <p class="cash-kpi-value">{{ row.qr_difference_amount | yen }}</p>
+      <p class="cash-kpi-meta">QR 실수납 - QR 자동</p>
+    </article>
+
+    <article class="cash-kpi-card">
+      <p class="cash-kpi-label">현금 실사합계</p>
+      <p class="cash-kpi-value">{{ row.total_amount | yen }}</p>
+      <p class="cash-kpi-meta">권종별 실측 합계</p>
+    </article>
+
+    <article class="cash-kpi-card">
+      <p class="cash-kpi-label">현금 자동합계</p>
+      <p class="cash-kpi-value">{{ row.check_auto_amount | yen }}</p>
+      <p class="cash-kpi-meta">시스템 집계 현금 매출</p>
+    </article>
+
+    <article class="cash-kpi-card">
+      <p class="cash-kpi-label">QR 자동/실수납</p>
+      <p class="cash-kpi-value">{{ row.paypay_amount | yen }} / {{ row.actual_qr_amount | yen }}</p>
+      <p class="cash-kpi-meta">자동 집계 / 실수납 입력</p>
+    </article>
+  </div>
+</section>
+
+<section class="card cash-detail-meta-card">
+  <h3 class="card-title">기록 정보</h3>
+  <div class="summary-grid cash-detail-meta-grid">
+    <p><strong>영업일</strong><span>{{ row.business_date }}</span></p>
+    <p><strong>정산구분</strong><span>{{ display_cash_closing_type(row.closing_type) }}</span></p>
+    <p><strong>상태</strong><span class="status-pill {{ cash_closing_status_pill_class(row.workflow_status) }}">{{ display_cash_closing_status(row.workflow_status) }}</span></p>
+    <p><strong>작성자</strong><span>{{ created_by_name }}</span></p>
+    <p><strong>제출자</strong><span>{{ submitted_by_name }}</span></p>
+    <p><strong>확인자</strong><span>{{ verified_by_name }}</span></p>
+    <p><strong>최종수정자</strong><span>{{ last_modified_staff_name }}</span></p>
+    <p><strong>최종수정시각</strong><span>{{ to_jst_datetime(row.updated_at if row.updated_at else row.created_at).strftime('%Y-%m-%d %H:%M JST') }}</span></p>
+    <p><strong>제출시각</strong><span>{{ to_jst_datetime(row.submitted_at).strftime('%Y-%m-%d %H:%M JST') if row.submitted_at else '-' }}</span></p>
+    <p><strong>잠금시각</strong><span>{{ to_jst_datetime(row.verified_at).strftime('%Y-%m-%d %H:%M JST') if row.verified_at else '-' }}</span></p>
+    <p><strong>작성시각</strong><span>{{ to_jst_datetime(row.created_at).strftime('%Y-%m-%d %H:%M JST') }}</span></p>
+    <p class="cash-detail-note"><strong>비고</strong><span>{{ row.note if row.note else '-' }}</span></p>
+  </div>
+</section>
+
+{% if row.workflow_status == "DRAFT" %}
+<section class="card">
+  <h3 class="card-title">업무 처리</h3>
+  <p class="card-desc">정산 검토가 끝나면 제출 버튼으로 다음 근무자 확인 단계로 넘겨주세요.</p>
+  <form action="/staff/cash-closing/{{ row.closing_id }}/submit" method="post" onsubmit="return confirm('이 정산을 제출하시겠습니까?');">
+    <button class="btn btn-primary" type="submit">정산 제출</button>
+  </form>
+</section>
+{% elif row.workflow_status == "SUBMITTED" %}
+<section class="card">
+  <h3 class="card-title">상대 확인 잠금</h3>
+  {% if can_verify %}
+  <p class="card-desc">제출자와 다른 직원이 아래 체크리스트를 확인한 뒤 잠금하세요.</p>
+  <form action="/staff/cash-closing/{{ row.closing_id }}/verify-lock" method="post" class="cash-verify-form" onsubmit="return confirm('확인 완료 후 잠금하시겠습니까? 잠금 후 일반 직원은 수정할 수 없습니다.');">
+    <label class="check-row check-row-strong">
+      <input type="checkbox" name="check_cash_match" required />
+      <span>현금 실물과 입력값을 대조했습니다.</span>
+    </label>
+    <label class="check-row check-row-strong">
+      <input type="checkbox" name="check_qr_match" required />
+      <span>QR 실수납 금액을 확인했습니다.</span>
+    </label>
+    <label class="check-row check-row-strong">
+      <input type="checkbox" name="check_pending_items" required />
+      <span>미수금/보류건 여부를 확인했습니다.</span>
+    </label>
+    <label class="check-row check-row-strong">
+      <input type="checkbox" name="check_handover_note" required />
+      <span>인수인계 사항을 전달/확인했습니다.</span>
+    </label>
+    <button class="btn btn-primary" type="submit">확인 후 잠금</button>
+  </form>
+  {% else %}
+  <p class="card-desc">제출자 본인은 확인 잠금을 할 수 없습니다. 다른 직원이 처리해 주세요.</p>
+  {% endif %}
+</section>
+{% else %}
+<section class="card">
+  <h3 class="card-title">잠금 상태</h3>
+  <p class="card-desc">확인 완료된 정산입니다. 일반 직원은 수정할 수 없습니다.</p>
+</section>
+{% endif %}
+
+<section class="card">
+  <h3 class="card-title">권종별 입력값</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          {% for denom in COIN_BILL_DENOMS %}
+          <th>{{ denom }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          {% for denom in COIN_BILL_DENOMS %}
+          <td>{{ row|attr('count_' ~ denom) }}</td>
+          {% endfor %}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h3 class="card-title">변경 이력</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>시각</th>
+          <th>액션</th>
+          <th>담당자</th>
+          <th>사유</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for audit in audits %}
+        <tr>
+          <td>{{ to_jst_datetime(audit.created_at).strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>{{ display_cash_closing_audit_action(audit.action) }}</td>
+          <td>{{ staff_name_by_id.get(audit.staff_id, '-') if audit.staff_id else '-' }}</td>
+          <td class="note-cell">{{ audit.reason if audit.reason else '-' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">이력이 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

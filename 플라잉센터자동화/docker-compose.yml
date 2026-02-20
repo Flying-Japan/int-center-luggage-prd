@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    container_name: flying-japan-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads

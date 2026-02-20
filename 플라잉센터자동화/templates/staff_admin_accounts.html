@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero hero-row">
+  <div>
+    <p class="hero-kicker">Admin</p>
+    <h2 class="hero-title">계정관리</h2>
+    <p class="hero-desc">직원/매니저 계정을 생성하고 PIN(비밀번호)을 변경합니다.</p>
+  </div>
+</section>
+{% include "staff_menu.html" %}
+
+<section class="card">
+  <h3 class="card-title">신규 계정 생성</h3>
+  <p class="card-desc">PIN은 4자리 이상 입력해주세요.</p>
+  {% if msg %}
+  <p class="success-note">{{ msg }}</p>
+  {% endif %}
+  {% if err %}
+  <p class="error">{{ err }}</p>
+  {% endif %}
+
+  <form method="post" action="/staff/admin/staff-accounts" class="account-create-grid">
+    <label class="field">
+      <span class="field-label">계정 이름</span>
+      <input class="control" type="text" name="name" maxlength="100" required />
+    </label>
+
+    <label class="field">
+      <span class="field-label">PIN (비밀번호)</span>
+      <input class="control" type="password" name="pin" minlength="4" inputmode="numeric" required />
+    </label>
+
+    <label class="field">
+      <span class="field-label">권한</span>
+      <select class="control" name="is_admin" required>
+        <option value="0">직원</option>
+        <option value="1">매니저(관리자)</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span class="field-label">상태</span>
+      <select class="control" name="is_active" required>
+        <option value="1">활성</option>
+        <option value="0">비활성</option>
+      </select>
+    </label>
+
+    <div class="button-wrap account-create-action">
+      <button class="btn btn-primary" type="submit" onclick="return window.confirm('새 계정을 생성할까요?');">계정 생성</button>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h3 class="card-title">계정 목록 수정</h3>
+  <p class="card-desc">활성 관리자 계정은 최소 {{ active_admin_count }}명 유지 중입니다.</p>
+
+  <div class="account-list">
+    {% for row in staff_rows %}
+    {% set is_open = (row.staff_id == focus_staff_id or row.staff_id == staff.staff_id) %}
+    <article class="account-item" data-staff-id="{{ row.staff_id }}">
+      <div class="account-item-head">
+        <p class="account-item-title">
+          {{ row.name }}
+          <span class="status-pill {% if row.is_active %}status-paid{% else %}status-payment_pending{% endif %}">
+            {{ "활성" if row.is_active else "잠금" }}
+          </span>
+          <span class="status-pill {% if row.is_admin %}status-picked_up{% else %}status-payment_pending{% endif %}">
+            {{ "매니저" if row.is_admin else "직원" }}
+          </span>
+          {% if row.staff_id == staff.staff_id %}
+          <span class="status-pill status-picked_up">현재 로그인</span>
+          {% endif %}
+        </p>
+        <p class="muted">
+          ID {{ row.staff_id }} · 생성 {{ to_jst_datetime(row.created_at).strftime('%Y-%m-%d %H:%M') }}
+        </p>
+      </div>
+
+      <div class="account-item-toolbar">
+        <button
+          class="btn btn-secondary btn-sm account-toggle-btn"
+          type="button"
+          data-target-id="account-panel-{{ row.staff_id }}"
+          aria-expanded="{{ 'true' if is_open else 'false' }}"
+        >
+          {{ "수정 닫기" if is_open else "수정 열기" }}
+        </button>
+
+        <form method="post" action="/staff/admin/staff-accounts/{{ row.staff_id }}/toggle-active" onsubmit="return window.confirm('{{ '계정을 복구할까요?' if not row.is_active else '계정을 잠글까요?' }}');">
+          <button class="btn btn-sm {% if row.is_active %}pickup-undo-btn{% else %}pickup-complete-btn{% endif %}" type="submit">
+            {{ "계정 복구" if not row.is_active else "계정 잠금" }}
+          </button>
+        </form>
+      </div>
+
+      <div id="account-panel-{{ row.staff_id }}" class="account-item-body {% if not is_open %}is-collapsed{% endif %}">
+        <form
+          method="post"
+          action="/staff/admin/staff-accounts/{{ row.staff_id }}/update"
+          class="account-update-grid"
+          onsubmit="return window.confirm('계정 정보를 저장할까요?');"
+        >
+          <label class="field">
+            <span class="field-label">이름</span>
+            <input class="control" type="text" name="name" maxlength="100" value="{{ row.name }}" required />
+          </label>
+
+          <label class="field">
+            <span class="field-label">PIN 변경 (선택)</span>
+            <input class="control" type="password" name="pin" minlength="4" inputmode="numeric" placeholder="변경할 때만 입력" />
+          </label>
+
+          <label class="field">
+            <span class="field-label">권한</span>
+            <select class="control" name="is_admin" required>
+              <option value="0" {% if not row.is_admin %}selected{% endif %}>직원</option>
+              <option value="1" {% if row.is_admin %}selected{% endif %}>매니저(관리자)</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span class="field-label">상태</span>
+            <select class="control" name="is_active" required>
+              <option value="1" {% if row.is_active %}selected{% endif %}>활성</option>
+              <option value="0" {% if not row.is_active %}selected{% endif %}>비활성</option>
+            </select>
+          </label>
+
+          <div class="button-wrap account-update-action">
+            <button class="btn btn-secondary" type="submit">수정 저장</button>
+          </div>
+        </form>
+      </div>
+    </article>
+    {% else %}
+    <p class="muted">등록된 계정이 없습니다.</p>
+    {% endfor %}
+  </div>
+</section>
+
+<script>
+(function () {
+  const toggleButtons = Array.from(document.querySelectorAll(".account-toggle-btn"));
+  if (!toggleButtons.length) {
+    return;
+  }
+
+  toggleButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const targetId = button.getAttribute("data-target-id");
+      if (!targetId) {
+        return;
+      }
+      const panel = document.getElementById(targetId);
+      if (!panel) {
+        return;
+      }
+      const nextOpen = panel.classList.contains("is-collapsed");
+      panel.classList.toggle("is-collapsed", !nextOpen);
+      button.setAttribute("aria-expanded", nextOpen ? "true" : "false");
+      button.textContent = nextOpen ? "수정 닫기" : "수정 열기";
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <p class="hero-kicker">Reception Complete</p>
+  <h2 class="hero-title">{{ t.customer_title }}</h2>
+  <p class="hero-desc">{{ t.counter_notice }}</p>
+</section>
+
+<section class="card center card-primary success-toss-card">
+  <div class="success-check-badge">접수 완료</div>
+  <p class="success-primary-message">{{ success_primary_message }}</p>
+
+  <div class="success-benefit-card">
+    <p class="success-secondary-message">{{ success_secondary_message }}</p>
+  </div>
+</section>
+{% endblock %}

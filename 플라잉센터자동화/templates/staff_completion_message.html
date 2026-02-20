@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero hero-row">
+  <div>
+    <p class="hero-kicker">Admin</p>
+    <h2 class="hero-title">작성완료 문구 수정</h2>
+    <p class="hero-desc">한국어로 입력하면 영어/일본어 문구가 자동 생성됩니다.</p>
+  </div>
+</section>
+{% include "staff_menu.html" %}
+
+<section class="card">
+  <h3 class="card-title">한국어 원문 입력</h3>
+  <p class="card-desc"><code>{amount}</code>를 넣으면 실제 결제금액으로 자동 치환됩니다. (예: ¥4,800)</p>
+  <form method="post" action="/staff/admin/completion-message">
+    <label class="field">
+      <span class="field-label">1차 문구 (상단 안내)</span>
+      <textarea class="control" name="primary_message_ko" rows="4" required>{{ primary_message_ko }}</textarea>
+      <span class="field-hint">최근 수정: {{ updated_at.get(SUCCESS_PRIMARY_MESSAGE_KEY_KO, '-') }} / {{ updated_by.get(SUCCESS_PRIMARY_MESSAGE_KEY_KO, '-') }}</span>
+    </label>
+
+    <label class="field">
+      <span class="field-label">2차 문구 (혜택 안내)</span>
+      <textarea class="control" name="secondary_message_ko" rows="6" required>{{ secondary_message_ko }}</textarea>
+      <span class="field-hint">최근 수정: {{ updated_at.get(SUCCESS_SECONDARY_MESSAGE_KEY_KO, '-') }} / {{ updated_by.get(SUCCESS_SECONDARY_MESSAGE_KEY_KO, '-') }}</span>
+    </label>
+
+    <button class="btn btn-primary" type="submit">문구 저장 (자동 번역 포함)</button>
+  </form>
+</section>
+
+<section class="card">
+  <h3 class="card-title">언어별 미리보기</h3>
+  <div class="grid3 completion-preview-grid">
+    <article class="completion-preview-card">
+      <h4>KO</h4>
+      <div class="success-message-block">
+        <p class="success-primary-message">{{ preview_primary.ko }}</p>
+        <p class="success-secondary-message">{{ preview_secondary.ko }}</p>
+      </div>
+    </article>
+    <article class="completion-preview-card">
+      <h4>EN</h4>
+      <div class="success-message-block">
+        <p class="success-primary-message">{{ preview_primary.en }}</p>
+        <p class="success-secondary-message">{{ preview_secondary.en }}</p>
+      </div>
+    </article>
+    <article class="completion-preview-card">
+      <h4>JA</h4>
+      <div class="success-message-block">
+        <p class="success-primary-message">{{ preview_primary.ja }}</p>
+        <p class="success-secondary-message">{{ preview_secondary.ja }}</p>
+      </div>
+    </article>
+  </div>
+</section>
+{% endblock %}
