@@ -1,0 +1,320 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <p class="hero-kicker">Flying Japan 짐 보관 서비스</p>
+  <h2 class="hero-title">{{ t.customer_title }}</h2>
+  <p class="hero-desc">{{ t.pickup_note }}</p>
+</section>
+
+<section class="card card-primary">
+  <h3 class="card-title">{{ t.reception_title }}</h3>
+  <p class="card-desc">{{ t.reception_desc }}</p>
+
+  <form
+    id="customer-form"
+    action="/customer/submit"
+    method="post"
+    enctype="multipart/form-data"
+    data-preview-meta-empty="{{ t.preview_meta_empty }}"
+    data-preview-invalid-title="{{ t.preview_invalid_title }}"
+    data-preview-invalid-meta="{{ t.preview_invalid_meta }}"
+    data-preview-error-title="{{ t.preview_error_title }}"
+    data-preview-error-meta="{{ t.preview_error_meta }}"
+    data-pickup-late-warning="{{ t.pickup_late_warning }}"
+    data-preview-result-meta="{{ t.preview_result_meta }}"
+    data-upload-optimizing="{{ t.upload_optimizing }}"
+    data-upload-submitting="{{ t.upload_submitting }}"
+    data-upload-error="{{ t.upload_error }}"
+    data-file-optimized="{{ t.file_optimized }}"
+  >
+    <input type="hidden" name="lang" value="{{ lang }}" />
+    <input id="expected_pickup_at" type="hidden" name="expected_pickup_at" required />
+
+    <label class="field">
+      <span class="field-label">{{ t.name }}</span>
+      <input class="control" type="text" name="name" required maxlength="120" />
+    </label>
+
+    <label class="field">
+      <span class="field-label">{{ t.phone }}</span>
+      <input class="control" type="text" name="phone" required maxlength="40" />
+    </label>
+
+    <div class="grid2">
+      <label class="field">
+        <span class="field-label">{{ t.id_image }} <em class="inline-note">{{ t.id_image_hint }}</em></span>
+        <div class="file-picker">
+          <input id="id_image" class="file-input" type="file" name="id_image" accept="image/*" capture="environment" required />
+          <button class="file-btn" type="button" data-file-trigger="id_image">{{ t.file_select }}</button>
+          <span id="id_image_name" class="file-name" data-file-empty="{{ t.file_none }}">{{ t.file_none }}</span>
+        </div>
+        <span class="field-hint">{{ t.photo_retention_notice }}</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">{{ t.luggage_image }}</span>
+        <div class="file-picker">
+          <input id="luggage_image" class="file-input" type="file" name="luggage_image" accept="image/*" capture="environment" required />
+          <button class="file-btn" type="button" data-file-trigger="luggage_image">{{ t.file_select }}</button>
+          <span id="luggage_image_name" class="file-name" data-file-empty="{{ t.file_none }}">{{ t.file_none }}</span>
+        </div>
+        <span class="field-hint">{{ t.photo_retention_notice }}</span>
+      </label>
+    </div>
+
+    <div class="grid2">
+      <label class="field">
+        <span class="field-label">{{ t.suitcase_qty }}</span>
+        <div class="companion-picker bag-qty-picker">
+          <select id="suitcase_qty_select" class="control control-compact" required>
+            {% for n in range(0, 11) %}
+            <option value="{{ n }}" {% if n == 0 %}selected{% endif %}>{{ n }}</option>
+            {% endfor %}
+            <option value="custom">{{ t.bag_qty_custom_option }}</option>
+          </select>
+          <input
+            id="suitcase_qty_custom"
+            class="control control-compact is-hidden"
+            type="number"
+            min="11"
+            max="{{ max_bag_qty }}"
+            placeholder="{{ t.bag_qty_custom_placeholder }}"
+            inputmode="numeric"
+          />
+          <input id="suitcase_qty" type="hidden" name="suitcase_qty" value="0" />
+        </div>
+        <span class="field-hint">{{ t.suitcase_qty_hint }}</span>
+      </label>
+
+      <label class="field">
+        <span class="field-label">{{ t.backpack_qty }}</span>
+        <div class="companion-picker bag-qty-picker">
+          <select id="backpack_qty_select" class="control control-compact" required>
+            {% for n in range(0, 11) %}
+            <option value="{{ n }}" {% if n == 0 %}selected{% endif %}>{{ n }}</option>
+            {% endfor %}
+            <option value="custom">{{ t.bag_qty_custom_option }}</option>
+          </select>
+          <input
+            id="backpack_qty_custom"
+            class="control control-compact is-hidden"
+            type="number"
+            min="11"
+            max="{{ max_bag_qty }}"
+            placeholder="{{ t.bag_qty_custom_placeholder }}"
+            inputmode="numeric"
+          />
+          <input id="backpack_qty" type="hidden" name="backpack_qty" value="0" />
+        </div>
+        <span class="field-hint">{{ t.backpack_qty_hint }}</span>
+      </label>
+    </div>
+
+    <div class="pickup-time-grid">
+      <label class="field">
+        <span class="field-label">{{ t.expected_pickup_date }}</span>
+        <input id="expected_pickup_date" class="control" type="date" required />
+      </label>
+
+      <label class="field">
+        <span class="field-label">{{ t.expected_pickup_time }}</span>
+        <select id="expected_pickup_time" class="control" required></select>
+      </label>
+    </div>
+
+    <div class="pickup-guide">
+      <p>{{ t.pickup_flexible_note }}</p>
+    </div>
+
+    <div class="preview preview-with-options" id="price-preview" aria-live="polite">
+      <div class="preview-main">
+        <div class="preview-head">{{ t.price_preview }}</div>
+        <div id="price-value" class="preview-value">-</div>
+        <p id="price-meta" class="preview-meta">{{ t.preview_meta_default }}</p>
+      </div>
+
+      <div class="preview-side">
+        <label class="field field-compact">
+          <span class="field-label">{{ t.payment_method_label }}</span>
+          <div class="payment-toggle">
+            <label class="payment-chip">
+              <input type="radio" name="payment_method" value="PAY_QR" checked />
+              <span>{{ t.payment_method_pay_qr }}</span>
+            </label>
+            <label class="payment-chip">
+              <input type="radio" name="payment_method" value="CASH" />
+              <span>{{ t.payment_method_cash }}</span>
+            </label>
+          </div>
+          <span class="field-hint">{{ t.payment_method_pay_qr }} ({{ t.payment_method_pay_qr_note }})</span>
+        </label>
+
+        <label class="field field-compact">
+          <span class="field-label">{{ t.companion_count }}</span>
+          <div class="companion-picker">
+            <select id="companion_count_select" class="control control-compact" required>
+              {% for n in range(1, 11) %}
+              <option value="{{ n }}" {% if n == 1 %}selected{% endif %}>{{ n }}</option>
+              {% endfor %}
+              <option value="custom">{{ t.companion_count_custom_option }}</option>
+            </select>
+            <input
+              id="companion_count_custom"
+              class="control control-compact is-hidden"
+              type="number"
+              min="11"
+              max="{{ max_companion_count }}"
+              placeholder="{{ t.companion_count_custom_placeholder }}"
+              inputmode="numeric"
+            />
+            <input id="companion_count" type="hidden" name="companion_count" value="1" />
+          </div>
+          <span class="field-hint">{{ t.companion_count_hint }}</span>
+        </label>
+      </div>
+    </div>
+
+    <section class="notice-card" id="consent-notice">
+      <h3 class="card-title">{{ t.notice_title }}</h3>
+      {% if lang == "ko" %}
+      <article class="notice-panel notice-panel-static">
+        <h4>🧳 짐 보관 유의사항</h4>
+        <ul class="notice-list">
+          <li>요금은 선불 결제입니다.</li>
+          <li>맡기신 짐의 보관 전·후 상태 증명 책임은 고객님께 있습니다.</li>
+          <li>보관 중 발생한 파손, 오염, 내용물 분실 등에 대해서는 책임을 지지 않습니다.</li>
+          <li>단, 사업자의 고의 또는 중대한 과실이 없는 한 파손이나 분실에 대한 책임을 지지 않습니다.</li>
+          <li>고가품 및 귀중품은 반드시 별도로 보관해 주시기 바랍니다.</li>
+          <li>맡기신 짐은 영업시간(09:00~21:00) 내에서만 수령하실 수 있습니다.</li>
+          <li>불가피한 사유로 21:00 이후 수령이 필요한 경우, 직원과 연락이 닿는 상황에 한해 출동이 가능하며 8,000엔의 출동 수수료가 부과됩니다. (영업시간이 지난 경우 1일 보관료 별도 발생)</li>
+          <li>짐 보관 기간을 초과할 경우, 1일당 추가 요금이 부과됩니다.</li>
+          <li>보관기한이 지난 물품 및 분실물은 2주간 보관 후 폐기됩니다.</li>
+          <li>짐 분실 또는 부득이한 사유로 해외 배송이 필요한 경우, 1건당 50,000원의 수수료가 발생합니다. (배송비 별도)</li>
+          <li>해외 배송이 필요한 경우, 고객님이 직접 일본 현지 배송업체에 예약을 진행해야 합니다.</li>
+          <li>분실된 짐은 소유자 확인이 되면 맡기신 시점부터 일일 보관요금이 추가로 청구됩니다.</li>
+          <li>짐 보관료는 보관 일수에 따라 별도 청구됩니다.</li>
+        </ul>
+
+        <h4>🚫 보관불가 항목</h4>
+        <ul class="notice-list">
+          <li>한 변의 길이가 2m, 무게가 35kg을 초과하는 물품 (단, 골프백은 가능)</li>
+          <li>고가의 물건, 귀중품, 정밀기기(컴퓨터, 노트북, 태블릿PC, 카메라 등)</li>
+          <li>깨지기 쉬운 것, 동물, 위험물, 냉장·냉동 또는 부패하기 쉬운 물품</li>
+          <li>액체가 든 용기(음료수, 페트병 등)</li>
+          <li>그 외 직원이 취급에 문제가 있다고 판단한 물품</li>
+        </ul>
+
+        <h4>🔒 개인정보 수집 안내</h4>
+        <ul class="notice-list">
+          <li>수집 항목: 이름, 연락처, 이메일</li>
+          <li>수집 및 이용 목적: 짐 보관 신원 확인용</li>
+          <li>신분증/짐 사진은 14일 이내 자동 삭제됩니다.</li>
+        </ul>
+      </article>
+      {% elif lang == "en" %}
+      <article class="notice-panel notice-panel-static">
+        <h4>🧳 Baggage Storage Guidelines</h4>
+        <ul class="notice-list">
+          <li>Payment must be made in advance.</li>
+          <li>Customers are responsible for proving the condition of their baggage before and after storage.</li>
+          <li>We are not responsible for any damage, contamination, or loss of contents during storage.</li>
+          <li>The operator is not liable for damage or loss unless caused by willful misconduct or gross negligence.</li>
+          <li>Please store valuables and expensive items separately.</li>
+          <li>Stored baggage can be collected only during business hours (09:00-21:00).</li>
+          <li>In unavoidable circumstances requiring luggage pickup after 21:00, dispatch service may be provided only if staff can be reached. A dispatch fee of ¥8,000 will apply. (An additional one-day storage fee will also be charged if pickup occurs after business hours.)</li>
+          <li>An additional daily fee will be charged if the storage period is exceeded.</li>
+          <li>Unclaimed or overdue items will be kept for 2 weeks and then disposed of.</li>
+          <li>If loss or unavoidable circumstances require international delivery, a handling fee of 50,000 KRW per item will apply (shipping fee not included).</li>
+          <li>For international delivery, customers must make a reservation directly with a local Japanese delivery company.</li>
+          <li>If lost baggage is identified, daily storage fees will be charged retroactively from the original deposit date.</li>
+          <li>Storage fees are charged separately based on the total number of storage days.</li>
+        </ul>
+
+        <h4>🚫 Non-Storable Items</h4>
+        <ul class="notice-list">
+          <li>Items exceeding 2 meters in any dimension or weighing over 35 kg (golf bags are accepted)</li>
+          <li>Valuables, high-priced items, or precision equipment (computers, laptops, tablets, cameras, etc.)</li>
+          <li>Fragile items, animals, hazardous materials, or perishable goods requiring refrigeration or freezing</li>
+          <li>Liquids in containers such as beverages or PET bottles</li>
+          <li>Any other items deemed unsuitable for storage by staff</li>
+        </ul>
+
+        <h4>🔒 Personal Information Notice</h4>
+        <ul class="notice-list">
+          <li>Collected Information: Name, contact number, email</li>
+          <li>Purpose of Use: Identity verification for baggage storage service</li>
+          <li>ID/luggage photos are automatically deleted within 14 days.</li>
+        </ul>
+      </article>
+      {% else %}
+      <article class="notice-panel notice-panel-static">
+        <h4>🧳 手荷物預かりに関する注意事項</h4>
+        <ul class="notice-list">
+          <li>料金は前払い制です。</li>
+          <li>お預けになる手荷物の保管前後の状態証明はお客様の責任となります。</li>
+          <li>保管中の破損・汚損・内容物の紛失等については一切の責任を負いません。</li>
+          <li>ただし、事業者に故意または重大な過失がない場合、破損や紛失についての責任は負いません。</li>
+          <li>高価品・貴重品は必ず別途保管してください。</li>
+          <li>お預かりした手荷物は営業時間（09:00〜21:00）のみ受け取り可能です。</li>
+          <li>やむを得ない事情により21:00以降の荷物のお引き取りが必要な場合、スタッフと連絡が取れる場合に限り出動対応が可能です。その際、出動手数料として8,000円を申し受けます。（営業時間を過ぎた場合は、別途1日分の保管料金が発生いたします。）</li>
+          <li>保管期間を超過した場合、1日ごとに追加料金が発生します。</li>
+          <li>保管期限を過ぎた荷物や遺失物は2週間保管後、処分いたします。</li>
+          <li>紛失またはやむを得ない事情により海外配送が必要な場合、1件につき5万ウォンの手数料が発生します（送料別途）。</li>
+          <li>海外配送をご希望の場合は、お客様ご自身で日本現地の配送業者へ直接予約を行ってください。</li>
+          <li>紛失した荷物が確認された場合、預け入れ日から日数分の保管料金が遡って請求されます。</li>
+          <li>保管料金は保管日数に応じて別途請求されます。</li>
+        </ul>
+
+        <h4>🚫 保管できない物</h4>
+        <ul class="notice-list">
+          <li>一辺の長さが2mを超えるもの、または重量が35kgを超えるもの（ゴルフバッグは可）</li>
+          <li>高価な物品、貴重品、精密機器（パソコン、ノートPC、タブレット、カメラ等）</li>
+          <li>壊れやすい物、動物、危険物、冷蔵・冷凍または腐敗しやすい物</li>
+          <li>飲料やペットボトルなどの液体が入った容器</li>
+          <li>その他、スタッフが取り扱い困難と判断した物品</li>
+        </ul>
+
+        <h4>🔒 個人情報の取扱いについて</h4>
+        <ul class="notice-list">
+          <li>収集項目： 氏名、連絡先、メールアドレス</li>
+          <li>利用目的： 手荷物預かりサービスにおける本人確認のため</li>
+          <li>本人確認書類・荷物写真は14日以内に自動削除されます。</li>
+        </ul>
+      </article>
+      {% endif %}
+    </section>
+
+    <label class="check-row check-row-strong">
+      <input type="checkbox" name="consent_checked" required />
+      <span>{{ t.consent }}</span>
+    </label>
+
+    <p id="upload-status" class="upload-status" aria-live="polite"></p>
+
+    <div class="submit-dock">
+      <button id="customer-submit-btn" class="btn btn-primary btn-lg" type="submit">{{ t.submit }}</button>
+      <p class="submit-dock-hint">{{ t.mobile_submit_hint }}</p>
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <details class="discount-details">
+    <summary class="discount-summary">{{ t.discount_table_expand }}</summary>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Days</th><th>Discount</th></tr>
+        </thead>
+        <tbody>
+          {% for row in discount_table %}
+          <tr><td>{{ row.days }}</td><td>{{ row.rate }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
+
+<script src="/static/customer.js"></script>
+{% endblock %}

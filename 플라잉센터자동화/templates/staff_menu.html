@@ -1,0 +1,5 @@
+<nav class="staff-menu" aria-label="직원 메뉴">
+  {% for item in staff_menu_items %}
+  <a class="staff-menu-link {% if item.active %}is-active{% endif %}" href="{{ item.href }}">{{ item.label }}</a>
+  {% endfor %}
+</nav>

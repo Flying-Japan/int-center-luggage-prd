@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero hero-row">
+  <div>
+    <p class="hero-kicker">Operations</p>
+    <h2 class="hero-title">근무시간표</h2>
+    <p class="hero-desc">{{ staff.name }}</p>
+  </div>
+  <a class="btn btn-secondary" href="/staff/logout">로그아웃</a>
+</section>
+{% include "staff_menu.html" %}
+
+{% if staff.is_admin %}
+<section class="card">
+  <h3 class="card-title">Google Calendar 연동</h3>
+  <form action="/staff/schedule" method="post" class="grid2 schedule-config-grid">
+    <label class="field schedule-url-field">
+      <span class="field-label">임베드 URL</span>
+      <input
+        class="control"
+        type="url"
+        name="google_embed_url"
+        value="{{ schedule_embed_url }}"
+        placeholder="https://calendar.google.com/calendar/embed?..."
+      />
+      <span class="field-hint">Google Calendar 설정 및 공유 > 캘린더 통합 > 임베드 코드의 <code>src</code> 주소를 입력하세요.</span>
+      <span class="field-hint">최근 수정: {{ schedule_updated_at }} / {{ schedule_updated_by }}</span>
+    </label>
+
+    <label class="field schedule-enabled-field">
+      <span class="field-label">근무표 메뉴 표시</span>
+      <span class="checkbox-inline">
+        <input type="checkbox" name="schedule_enabled" value="1" {% if schedule_enabled %}checked{% endif %} />
+        <span>사용</span>
+      </span>
+    </label>
+
+    <label class="button-wrap">
+      <span class="field-label sr-only">저장</span>
+      <button class="btn btn-primary" type="submit">근무표 설정 저장</button>
+    </label>
+  </form>
+</section>
+{% endif %}
+
+<section class="card">
+  <h3 class="card-title">근무표 보기</h3>
+  {% if not schedule_enabled %}
+  <p class="card-desc">근무표 메뉴가 비활성화되어 있습니다. (관리자에서 다시 활성화 가능)</p>
+  {% elif schedule_embed_url %}
+  <div class="schedule-embed-wrap">
+    <iframe
+      src="{{ schedule_embed_url }}"
+      title="Google Calendar 근무표"
+      class="schedule-embed"
+      loading="lazy"
+      referrerpolicy="strict-origin-when-cross-origin"
+    ></iframe>
+  </div>
+  <a class="btn-link" href="{{ schedule_embed_url }}" target="_blank" rel="noopener">새 창에서 근무표 열기</a>
+  {% else %}
+  <p class="card-desc">아직 구글 캘린더 URL이 설정되지 않았습니다.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,6 +1,6 @@
 services:
   app:
-    build: .
+    image: ghcr.io/flying-japan/int-center-luggage-prd:latest
     container_name: flying-japan-app
     restart: unless-stopped
     env_file:
@@ -15,3 +15,18 @@ services:
     command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
     depends_on:
       - app
+
+  # Polls GHCR every 30s; auto-restarts app when a new image is pushed.
+  # One-time setup on the server:
+  #   docker login ghcr.io -u <github-username> -p <github-pat-with-read:packages>
+  watchtower:
+    image: containrrr/watchtower
+    container_name: flying-japan-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/.docker/config.json:/config.json:ro
+    environment:
+      DOCKER_CONFIG: /config.json
+      WATCHTOWER_POLL_INTERVAL: "30"
+      WATCHTOWER_CLEANUP: "true"

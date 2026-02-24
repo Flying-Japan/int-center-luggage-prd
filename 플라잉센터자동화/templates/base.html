@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="{{ lang if lang else 'ko' }}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title if title else 'Flying Japan 짐 보관' }}</title>
+  <link rel="icon" href="/static/favicon.ico" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+{% set is_staff_site = request.url.path.startswith('/staff') %}
+<body class="{{ 'staff-site' if is_staff_site else 'customer-site' }}">
+  <div class="bg-orb bg-orb-left" aria-hidden="true"></div>
+  <div class="bg-orb bg-orb-right" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="{{ '/staff/dashboard' if is_staff_site else '/customer' }}">
+        <img class="brand-logo" src="/static/logo.png" alt="Flying Japan" width="28" height="28" />
+        <span>{{ 'Flying Japan Staff' if is_staff_site else 'Flying Japan 짐 보관' }}</span>
+      </a>
+      <nav class="pill-nav">
+        {% if is_staff_site %}
+        <a class="pill-link {% if request.url.path.startswith('/staff/dashboard') %}pill-link-strong{% endif %}" href="/staff/dashboard">운영</a>
+        {% if staff is defined and staff and staff.is_admin %}
+        <a class="pill-link {% if request.url.path.startswith('/staff/admin/sales') %}pill-link-strong{% endif %}" href="/staff/admin/sales">Admin</a>
+        {% endif %}
+        <a class="pill-link" href="/customer">고객신청서</a>
+        {% if staff is defined and staff %}
+        <a class="pill-link" href="/staff/logout">로그아웃</a>
+        {% else %}
+        <a class="pill-link pill-link-strong" href="/staff/login">Login</a>
+        {% endif %}
+        {% else %}
+        <a class="pill-link" href="/customer?lang=ko">KO</a>
+        <a class="pill-link" href="/customer?lang=en">EN</a>
+        <a class="pill-link" href="/customer?lang=ja">JA</a>
+        <a class="pill-link" href="https://script.google.com/macros/s/AKfycbztXz0FhN90_Zs04h-f2AedkqHD4Koi-jtAnT0OE-HbzhMnShmMeWoYL-J8l9_07qlI/exec" target="_blank" rel="noopener">영수증 발급</a>
+        <a class="pill-link pill-link-strong" href="/staff/login">Staff</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

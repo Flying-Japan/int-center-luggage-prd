@@ -1,0 +1,11 @@
+# Local development override: build from source instead of pulling from GHCR.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+services:
+  app:
+    build: .
+    image: ghcr.io/flying-japan/int-center-luggage-prd:latest
+
+  # Disable watchtower in local dev
+  watchtower:
+    profiles:
+      - disabled

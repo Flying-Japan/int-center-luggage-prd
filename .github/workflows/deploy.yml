@@ -1,53 +1,30 @@
-name: Deploy to Production
+name: Build & Push
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
-        env:
-          APP_SECRET_KEY: ${{ secrets.APP_SECRET_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          TUNNEL_TOKEN: ${{ secrets.TUNNEL_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          envs: APP_SECRET_KEY,SUPABASE_URL,SUPABASE_SERVICE_ROLE_KEY,TUNNEL_TOKEN
-          script: |
-            set -e
-            REPO_DIR="/opt/int-center-luggage-prd"
-            DEPLOY_DIR="$REPO_DIR/플라잉센터자동화"
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-            # First-time setup: clone if not present
-            if [ ! -d "$REPO_DIR/.git" ]; then
-              sudo mkdir -p "$REPO_DIR"
-              sudo chown "$USER:$USER" "$REPO_DIR"
-              git clone https://github.com/Flying-Japan/int-center-luggage-prd.git "$REPO_DIR"
-            fi
-
-            cd "$DEPLOY_DIR"
-            git pull origin main
-
-            # Write .env from env vars passed via envs: (overwrites on each deploy)
-            printf '%s\n' \
-              'APP_ENV=production' \
-              "APP_SECRET_KEY=$APP_SECRET_KEY" \
-              "SUPABASE_URL=$SUPABASE_URL" \
-              "SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY" \
-              'UPLOAD_DIR=/app/uploads' \
-              'SESSION_HTTPS_ONLY=true' \
-              'AUTO_SEED_DEFAULT_STAFF=false' \
-              "TUNNEL_TOKEN=$TUNNEL_TOKEN" \
-              > .env
-
-            docker compose up -d --build
-            docker image prune -f
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./플라잉센터자동화
+          push: true
+          tags: ghcr.io/flying-japan/int-center-luggage-prd:latest

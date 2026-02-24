@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero hero-row">
+  <div>
+    <p class="hero-kicker">Operations</p>
+    <h2 class="hero-title">직원 대시보드</h2>
+    <p class="hero-desc">{{ staff.name }} ({{ 'ADMIN' if staff.is_admin else 'STAFF' }}) · {{ now_jst.strftime('%Y-%m-%d %H:%M JST') }}</p>
+  </div>
+  <a class="btn btn-secondary" href="/staff/logout">로그아웃</a>
+</section>
+{% include "staff_menu.html" %}
+
+<section class="card">
+  <h3 class="card-title">접수 검색</h3>
+  <form id="staff-search-form" method="get" action="/staff/dashboard" class="staff-search-form">
+    <div class="field">
+      <span class="field-label">상태 (복수 선택)</span>
+      <div class="status-filter-buttons" id="status-filter-buttons">
+        <button class="status-filter-all" id="status-filter-all" type="button" data-action="select-all-status">전체</button>
+
+        <label class="status-filter-chip">
+          <input class="status-filter-input" type="checkbox" name="status_filter" value="PAYMENT_PENDING" {% if 'PAYMENT_PENDING' in selected_status_filters %}checked{% endif %} />
+          <span>결제대기</span>
+        </label>
+
+        <label class="status-filter-chip">
+          <input class="status-filter-input" type="checkbox" name="status_filter" value="PAID" {% if 'PAID' in selected_status_filters %}checked{% endif %} />
+          <span>결제완료</span>
+        </label>
+
+        <label class="status-filter-chip">
+          <input class="status-filter-input" type="checkbox" name="status_filter" value="PICKED_UP" {% if 'PICKED_UP' in selected_status_filters %}checked{% endif %} />
+          <span>수령완료</span>
+        </label>
+      </div>
+      <label class="check-row">
+        <input id="show-all-picked-up" type="checkbox" name="show_all_picked_up" value="true" {% if show_all_picked_up %}checked{% endif %} />
+        <span>수령완료 전체보기 (기본은 최근 2일만 표시)</span>
+      </label>
+    </div>
+
+    <div class="staff-search-row">
+      <label class="field">
+        <span class="field-label">검색</span>
+        <input id="search-q" class="control" type="text" name="q" value="{{ q }}" placeholder="이름, 접수번호, 전화, 짐번호" autocomplete="off" />
+      </label>
+
+      <label class="button-wrap staff-search-button-wrap">
+        <span class="field-label sr-only">조회</span>
+        <button class="btn btn-primary" type="submit">조회</button>
+      </label>
+    </div>
+  </form>
+
+  <p class="card-desc">접수 순서대로(오래된 순) 정렬됩니다.</p>
+  <div class="table-wrap">
+    <table id="staff-orders-table">
+      <colgroup>
+        <col data-col-key="name" />
+        <col data-col-key="tag_no" />
+        <col data-col-key="price" />
+        <col data-col-key="pickup_time" />
+        <col data-col-key="luggage_image" />
+        <col data-col-key="pickup_action" />
+        <col data-col-key="note" />
+        <col data-col-key="detail" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th data-col-key="name">이름</th>
+          <th data-col-key="tag_no">짐번호</th>
+          <th data-col-key="price">짐보관가격/할인</th>
+          <th data-col-key="pickup_time">짐 찾는 시각</th>
+          <th data-col-key="luggage_image">짐 사진</th>
+          <th data-col-key="pickup_action">업무처리</th>
+          <th data-col-key="note">비고</th>
+          <th data-col-key="detail">상세</th>
+        </tr>
+      </thead>
+      <tbody
+        id="staff-orders-tbody"
+        data-empty-text="데이터가 없습니다."
+        data-confirm-save-text="입력한 내용으로 수정하시겠습니까?"
+        data-confirm-pickup-text="수령완료 처리하시겠습니까?"
+        data-confirm-undo-pickup-text="수령완료를 취소하시겠습니까?"
+      >
+        {% for order in orders %}
+        <tr data-order-id="{{ order.order_id }}">
+          <td><input class="control table-control" type="text" value="{{ order.name }}" /></td>
+          <td><input class="control table-control" type="text" value="{{ order.tag_no if order.tag_no else '' }}" /></td>
+          <td>
+            <div>{{ order.prepaid_amount | yen }}</div>
+          </td>
+          <td><input class="control table-control" type="time" value="{{ to_jst_datetime(order.expected_pickup_at).strftime('%H:%M') }}" /></td>
+          <td class="luggage-cell">
+            {% if order.luggage_image_url %}
+            <div class="luggage-hover-wrap">
+              <button class="btn btn-secondary btn-sm" type="button">보기</button>
+              <div class="luggage-hover-card" aria-hidden="true">
+                <img src="/staff/orders/{{ order.order_id }}/luggage-image" alt="{{ order.name }} 짐 사진" loading="lazy" />
+              </div>
+            </div>
+            {% else %}
+            -
+            {% endif %}
+          </td>
+          <td>
+            <div class="inline-actions">
+              <button class="btn btn-secondary btn-sm" type="button">{{ "결제완료" if order.status != "PAYMENT_PENDING" else "결제대기" }}</button>
+              {% if order.status != "PICKED_UP" %}
+              <button class="btn btn-secondary btn-sm" type="button">수령완료</button>
+              {% else %}
+              <button class="btn btn-secondary btn-sm" type="button">수령취소</button>
+              {% endif %}
+            </div>
+          </td>
+          <td><input class="control table-control" type="text" value="{{ order.note if order.note else '' }}" /></td>
+          <td><a class="btn btn-secondary btn-sm" href="/staff/orders/{{ order.order_id }}">상세</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8">데이터가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card" id="manual-tools">
+  {% if retention_msg %}
+  <p class="success-note">{{ retention_msg }}</p>
+  {% endif %}
+  {% if retention_err %}
+  <p class="error">{{ retention_err }}</p>
+  {% endif %}
+
+  <details class="discount-details" {% if retention_msg or retention_err %}open{% endif %}>
+    <summary class="discount-summary">장애 복구용 수기 접수</summary>
+    <p class="card-desc">생성되는 접수는 <code>manual_entry=true</code>로 기록됩니다.</p>
+
+    <form id="manual-order-form" action="/staff/orders/manual" method="post" class="grid2">
+      <label class="field">
+        <span class="field-label">이름</span>
+        <input class="control" type="text" name="name" required />
+      </label>
+
+      <label class="field">
+        <span class="field-label">전화번호</span>
+        <input class="control" type="text" name="phone" required />
+      </label>
+
+      <label class="field">
+        <span class="field-label">캐리어</span>
+        <input class="control" type="number" name="suitcase_qty" min="0" max="{{ max_bag_qty }}" value="1" required />
+      </label>
+
+      <label class="field">
+        <span class="field-label">백팩</span>
+        <input class="control" type="number" name="backpack_qty" min="0" max="{{ max_bag_qty }}" value="0" required />
+      </label>
+
+      <input id="manual_expected_pickup_at" type="hidden" name="expected_pickup_at" />
+
+      <label class="field">
+        <span class="field-label">예정 픽업일</span>
+        <input id="manual_expected_pickup_date" class="control" type="date" name="expected_pickup_date" value="{{ manual_default_pickup_date }}" required />
+      </label>
+
+      <label class="field">
+        <span class="field-label">예정 픽업 시간</span>
+        <select id="manual_expected_pickup_time" class="control" name="expected_pickup_time" required>
+          {% for hour in range(9, 22) %}
+          {% for minute in [0, 30] %}
+          {% if not (hour == 21 and minute == 30) %}
+          {% set time_value = "%02d:%02d" | format(hour, minute) %}
+          <option value="{{ time_value }}" {% if time_value == manual_default_pickup_time %}selected{% endif %}>{{ time_value }}</option>
+          {% endif %}
+          {% endfor %}
+          {% endfor %}
+        </select>
+        <span class="field-hint">영업시간 내(09:00~21:00) 시간만 선택 가능합니다.</span>
+        <p id="manual-pickup-warning" class="manual-late-warning is-hidden">
+          영업시간은 21:00까지입니다. 반드시 21:00 이전 수령 안내를 해주세요.
+        </p>
+      </label>
+
+      <div class="button-wrap">
+        <button class="btn btn-primary" type="submit">수기 접수 생성</button>
+      </div>
+    </form>
+
+    {% if staff.is_admin %}
+    <form action="/staff/admin/retention/run" method="post" class="admin-tools">
+      <button class="btn btn-secondary" type="submit">보관기간 정리 실행 (관리자)</button>
+    </form>
+    {% endif %}
+  </details>
+</section>
+
+<script src="/static/staff_dashboard.js?v=20260220c"></script>
+<script>
+(function () {
+  const formEl = document.getElementById("manual-order-form");
+  if (!formEl) {
+    return;
+  }
+  const dateEl = document.getElementById("manual_expected_pickup_date");
+  const timeEl = document.getElementById("manual_expected_pickup_time");
+  const hiddenEl = document.getElementById("manual_expected_pickup_at");
+  const warningEl = document.getElementById("manual-pickup-warning");
+  if (!dateEl || !timeEl || !hiddenEl || !warningEl) {
+    return;
+  }
+
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  dateEl.min = `${yyyy}-${mm}-${dd}`;
+
+  const syncHidden = () => {
+    hiddenEl.value = dateEl.value && timeEl.value ? `${dateEl.value}T${timeEl.value}` : "";
+  };
+
+  const isLate = (timeValue) => {
+    if (!timeValue) {
+      return false;
+    }
+    const parts = String(timeValue).split(":");
+    if (parts.length < 2) {
+      return false;
+    }
+    const hour = Number(parts[0]);
+    const minute = Number(parts[1]);
+    if (Number.isNaN(hour) || Number.isNaN(minute)) {
+      return false;
+    }
+    return hour >= 19 && (hour < 21 || minute === 0);
+  };
+
+  const applyLateStyle = () => {
+    const late = isLate(timeEl.value);
+    timeEl.classList.toggle("late-pickup", late);
+    warningEl.classList.toggle("is-hidden", !late);
+  };
+
+  dateEl.addEventListener("change", syncHidden);
+  timeEl.addEventListener("change", () => {
+    syncHidden();
+    applyLateStyle();
+  });
+  formEl.addEventListener("submit", () => {
+    syncHidden();
+    applyLateStyle();
+  });
+
+  syncHidden();
+  applyLateStyle();
+})();
+</script>
+{% endblock %}

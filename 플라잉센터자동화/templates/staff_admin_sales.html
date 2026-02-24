@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero hero-row">
+  <div>
+    <p class="hero-kicker">Admin</p>
+    <h2 class="hero-title">매출관리</h2>
+    <p class="hero-desc">기간별 짐보관/렌탈 매출과 인원, 결제수단 비중을 확인합니다.</p>
+  </div>
+</section>
+{% include "staff_menu.html" %}
+
+<section class="card">
+  <h3 class="card-title">조회 기간</h3>
+  <form method="get" action="/staff/admin/sales" class="grid3">
+    <label class="field">
+      <span class="field-label">시작일</span>
+      <input class="control" type="date" name="start_date" value="{{ start_date }}" required />
+    </label>
+    <label class="field">
+      <span class="field-label">종료일</span>
+      <input class="control" type="date" name="end_date" value="{{ end_date }}" required />
+    </label>
+    <label class="button-wrap">
+      <span class="field-label sr-only">조회</span>
+      <button class="btn btn-primary" type="submit">조회</button>
+    </label>
+  </form>
+</section>
+
+<section class="card">
+  <h3 class="card-title">기간 요약</h3>
+  <div class="summary-grid">
+    <p><strong>기간(일)</strong><span>{{ range_days }}</span></p>
+    <p><strong>짐보관 매출</strong><span>{{ totals.luggage_revenue | yen }}</span></p>
+    <p><strong>렌탈 매출</strong><span>{{ totals.rental_revenue | yen }}</span></p>
+    <p><strong>합계 매출</strong><span>{{ totals.combined_revenue | yen }}</span></p>
+    <p><strong>짐보관 인원</strong><span>{{ totals.luggage_customers }}</span></p>
+    <p><strong>렌탈 인원</strong><span>{{ totals.rental_customers }}</span></p>
+    <p><strong>현금(짐보관)</strong><span>{{ totals.luggage_cash | yen }}</span></p>
+    <p><strong>QR(짐보관)</strong><span>{{ totals.luggage_qr | yen }}</span></p>
+    <p><strong>일평균 매출</strong><span>{{ avg_daily_revenue | yen }}</span></p>
+    <p><strong>짐보관 평균 객단가</strong><span>{{ avg_luggage_order_revenue | yen }}</span></p>
+  </div>
+</section>
+
+<section class="card">
+  <h3 class="card-title">일자별 매출 그래프</h3>
+  <div class="chart-wrap">
+    <canvas id="daily-sales-chart"></canvas>
+  </div>
+</section>
+
+<section class="card">
+  <h3 class="card-title">월별 매출 그래프</h3>
+  <div class="chart-wrap">
+    <canvas id="monthly-sales-chart"></canvas>
+  </div>
+</section>
+
+<section class="card">
+  <h3 class="card-title">일자별 매출 표</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>짐보관 인원</th>
+          <th>짐보관 현금</th>
+          <th>짐보관 QR</th>
+          <th>짐보관 매출</th>
+          <th>렌탈 인원</th>
+          <th>렌탈 매출</th>
+          <th>합계 매출</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in daily_rows %}
+        <tr>
+          <td>{{ row.business_date }}</td>
+          <td>{{ row.luggage_customers }}</td>
+          <td>{{ row.luggage_cash | yen }}</td>
+          <td>{{ row.luggage_qr | yen }}</td>
+          <td>{{ row.luggage_revenue | yen }}</td>
+          <td>{{ row.rental_customers }}</td>
+          <td>{{ row.rental_revenue | yen }}</td>
+          <td><strong>{{ row.combined_revenue | yen }}</strong></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8">데이터가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h3 class="card-title">월별 매출 표</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>짐보관 인원</th>
+          <th>렌탈 인원</th>
+          <th>짐보관 매출</th>
+          <th>렌탈 매출</th>
+          <th>합계 매출</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in monthly_rows %}
+        <tr>
+          <td>{{ row.month }}</td>
+          <td>{{ row.luggage_customers }}</td>
+          <td>{{ row.rental_customers }}</td>
+          <td>{{ row.luggage_revenue | yen }}</td>
+          <td>{{ row.rental_revenue | yen }}</td>
+          <td><strong>{{ row.combined_revenue | yen }}</strong></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">데이터가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card">
+  <h3 class="card-title">{{ "렌탈 매출 수정" if editing_rental else "렌탈 매출 입력" }}</h3>
+  <form
+    method="post"
+    action="{% if editing_rental %}/staff/admin/sales/rental/{{ editing_rental.rental_id }}/update{% else %}/staff/admin/sales/rental{% endif %}"
+    class="grid2"
+  >
+    <input type="hidden" name="start_date" value="{{ start_date }}" />
+    <input type="hidden" name="end_date" value="{{ end_date }}" />
+
+    <label class="field">
+      <span class="field-label">영업일</span>
+      <input class="control" type="date" name="business_date" value="{{ editing_rental.business_date if editing_rental else end_date }}" required />
+    </label>
+
+    <label class="field">
+      <span class="field-label">렌탈 매출</span>
+      <input class="control" type="number" min="0" name="revenue_amount" value="{{ editing_rental.revenue_amount if editing_rental else 0 }}" required />
+    </label>
+
+    <label class="field">
+      <span class="field-label">렌탈 인원</span>
+      <input class="control" type="number" min="0" name="customer_count" value="{{ editing_rental.customer_count if editing_rental else 0 }}" required />
+    </label>
+
+    <label class="field">
+      <span class="field-label">비고</span>
+      <input class="control" type="text" name="note" value="{{ editing_rental.note if editing_rental and editing_rental.note else '' }}" />
+    </label>
+
+    <label class="button-wrap">
+      <span class="field-label sr-only">저장</span>
+      <button class="btn btn-primary" type="submit">{{ "수정 저장" if editing_rental else "저장" }}</button>
+      {% if editing_rental %}
+      <a class="btn btn-secondary" href="/staff/admin/sales?start_date={{ start_date }}&end_date={{ end_date }}">취소</a>
+      {% endif %}
+    </label>
+  </form>
+</section>
+
+<section class="card">
+  <h3 class="card-title">렌탈 매출 내역</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>매출</th>
+          <th>인원</th>
+          <th>비고</th>
+          <th>최종수정자</th>
+          <th>최종수정시각</th>
+          <th>편집</th>
+          <th>삭제</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rental_rows %}
+        <tr>
+          <td>{{ row.business_date }}</td>
+          <td>{{ row.revenue_amount | yen }}</td>
+          <td>{{ row.customer_count }}</td>
+          <td class="note-cell cash-note-cell">{{ row.note if row.note else '-' }}</td>
+          <td>{{ staff_name_by_id.get(row.staff_id, '-') if row.staff_id else '-' }}</td>
+          <td>{{ to_jst_datetime(row.updated_at if row.updated_at else row.created_at).strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>
+            <a class="btn btn-secondary btn-sm" href="/staff/admin/sales?start_date={{ start_date }}&end_date={{ end_date }}&edit_rental_id={{ row.rental_id }}">편집</a>
+          </td>
+          <td>
+            <form method="post" action="/staff/admin/sales/rental/{{ row.rental_id }}/delete" onsubmit="return window.confirm('삭제하시겠습니까?');">
+              <input type="hidden" name="start_date" value="{{ start_date }}" />
+              <input type="hidden" name="end_date" value="{{ end_date }}" />
+              <button class="btn btn-secondary btn-sm" type="submit">삭제</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8">렌탈 매출 데이터가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+  if (!window.Chart) {
+    return;
+  }
+
+  const chartData = {{ chart | tojson }};
+  const yenFormatter = new Intl.NumberFormat("ja-JP");
+
+  function formatYen(value) {
+    const amount = Math.trunc(Number(value || 0));
+    const safeAmount = Number.isFinite(amount) ? amount : 0;
+    const sign = safeAmount < 0 ? "-" : "";
+    return `${sign}¥ ${yenFormatter.format(Math.abs(safeAmount))}`;
+  }
+
+  const commonOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: {
+      tooltip: {
+        callbacks: {
+          label(context) {
+            const label = context.dataset && context.dataset.label ? `${context.dataset.label}: ` : "";
+            return `${label}${formatYen(context.parsed.y)}`;
+          },
+        },
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        ticks: {
+          callback(value) {
+            return formatYen(value);
+          },
+        },
+      },
+    },
+  };
+
+  const dailyCanvas = document.getElementById("daily-sales-chart");
+  if (dailyCanvas) {
+    new window.Chart(dailyCanvas, {
+      type: "line",
+      data: {
+        labels: chartData.daily_labels || [],
+        datasets: [
+          { label: "짐보관 매출", data: chartData.daily_luggage || [], borderColor: "#3182f6", backgroundColor: "rgba(49,130,246,0.15)" },
+          { label: "렌탈 매출", data: chartData.daily_rental || [], borderColor: "#ef4444", backgroundColor: "rgba(239,68,68,0.15)" },
+          { label: "합계 매출", data: chartData.daily_combined || [], borderColor: "#f59e0b", backgroundColor: "rgba(245,158,11,0.15)" },
+        ],
+      },
+      options: commonOptions,
+    });
+  }
+
+  const monthlyCanvas = document.getElementById("monthly-sales-chart");
+  if (monthlyCanvas) {
+    new window.Chart(monthlyCanvas, {
+      type: "bar",
+      data: {
+        labels: chartData.monthly_labels || [],
+        datasets: [
+          { label: "짐보관 매출", data: chartData.monthly_luggage || [], backgroundColor: "rgba(49,130,246,0.72)" },
+          { label: "렌탈 매출", data: chartData.monthly_rental || [], backgroundColor: "rgba(239,68,68,0.72)" },
+          { label: "합계 매출", data: chartData.monthly_combined || [], backgroundColor: "rgba(245,158,11,0.72)" },
+        ],
+      },
+      options: commonOptions,
+    });
+  }
+})();
+</script>
+{% endblock %}

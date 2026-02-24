@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero hero-row">
+  <div>
+    <p class="hero-kicker">Operations</p>
+    <h2 class="hero-title">마감 시제 정산</h2>
+    <p class="hero-desc">{{ staff.name }} · 권종별 개수 입력 + QR 실수납 기록이 가능합니다.</p>
+  </div>
+  {% if editing_closing %}
+  <a class="btn btn-secondary" href="/staff/cash-closing">편집 취소</a>
+  {% endif %}
+</section>
+{% include "staff_menu.html" %}
+
+<section class="card cash-compact-card">
+  <h3 class="card-title">오늘 자동 매출 ({{ today }})</h3>
+  <div class="summary-grid cash-top-summary">
+    <p><strong>자동 현금매출</strong><span>{{ today_auto_cash_sales | yen }}</span></p>
+    <p><strong>자동 QR매출</strong><span>{{ today_auto_qr_sales | yen }}</span></p>
+    <p><strong>현금 차액합계</strong><span>{{ today_diff_sum | yen }}</span></p>
+    <p><strong>QR 차액합계</strong><span>{{ today_qr_diff_sum | yen }}</span></p>
+    <p><strong>총 차액합계</strong><span>{{ today_total_diff_sum | yen }}</span></p>
+  </div>
+  <p class="card-desc">PayPay 사이트 직접 확인: <a class="table-link" href="https://merchant.paypay.ne.jp/" target="_blank" rel="noopener">PayPay Merchant</a></p>
+</section>
+
+<section class="card cash-compact-card">
+  <h3 class="card-title">{{ "정산 수정" if editing_closing else "정산 입력" }}</h3>
+  <p class="card-desc">오전 인수인계 / 최종 마감 2회 정산을 분리해 제출하고, 다른 직원이 확인 잠금합니다. (추적: 작성자/확인자)</p>
+  <form
+    action="{% if editing_closing %}/staff/cash-closing/{{ editing_closing.closing_id }}/update{% else %}/staff/cash-closing{% endif %}"
+    method="post"
+    id="cash-closing-form"
+    class="cash-entry-form"
+  >
+    <div class="cash-entry-top">
+      <label class="field">
+        <span class="field-label">정산 구분</span>
+        <select class="control" name="closing_type" required>
+          {% for type_value in CASH_CLOSING_TYPES %}
+          <option value="{{ type_value }}" {% if (editing_closing and editing_closing.closing_type == type_value) or (not editing_closing and default_closing_type == type_value) %}selected{% endif %}>
+            {{ display_cash_closing_type(type_value) }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">date</span>
+        <input id="cash-business-date" class="control" type="date" name="business_date" value="{{ editing_closing.business_date if editing_closing else today }}" required />
+      </label>
+      <label class="field cash-entry-note">
+        <span class="field-label">Note</span>
+        <input class="control" type="text" name="note" value="{{ editing_closing.note if editing_closing and editing_closing.note else '' }}" placeholder="비고" />
+      </label>
+      {% if editing_closing %}
+      <p class="cash-inline-status">
+        현재 상태:
+        <span class="status-pill {{ cash_closing_status_pill_class(editing_closing.workflow_status) }}">{{ display_cash_closing_status(editing_closing.workflow_status) }}</span>
+      </p>
+      {% endif %}
+      {% if editing_is_locked and staff.is_admin %}
+      <label class="field cash-entry-note">
+        <span class="field-label">잠금 해제 수정 사유(관리자)</span>
+        <input class="control" type="text" name="admin_edit_reason" placeholder="예: 인수인계 후 실수납 재확인으로 정정" required />
+      </label>
+      {% endif %}
+    </div>
+
+    <div class="cash-denom-panel">
+      <p class="field-label cash-section-label">권종별 개수 입력</p>
+      <div class="cash-denom-grid">
+        {% for denom in COIN_BILL_DENOMS %}
+        <label class="cash-denom-item">
+          <span>{{ denom }}엔</span>
+          <input class="control cash-count-input" type="number" min="0" name="count_{{ denom }}" value="{{ editing_closing|attr('count_' ~ denom) if editing_closing else 0 }}" data-denom="{{ denom }}" required />
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="cash-summary-panel">
+      <p class="field-label cash-section-label">자동 계산 요약</p>
+      <div class="cash-summary-grid">
+        <label class="field">
+          <span class="field-label">현금 실사합계</span>
+          <input id="cash-total-preview" class="control cash-money-preview" type="text" value="{{ editing_closing.total_amount | yen if editing_closing else (0 | yen) }}" readonly />
+        </label>
+        <label class="field">
+          <span class="field-label">QR 자동</span>
+          <input id="cash-qr-preview" class="control cash-money-preview" type="text" value="{{ editing_closing.paypay_amount | yen if editing_closing else (0 | yen) }}" readonly />
+        </label>
+        <label class="field">
+          <span class="field-label">QR 실수납</span>
+          <input id="cash-actual-qr-input" class="control" type="number" min="0" name="actual_qr_amount" value="{{ editing_closing.actual_qr_amount if editing_closing else '' }}" placeholder="자동동일" />
+        </label>
+        <label class="field">
+          <span class="field-label">현금자동</span>
+          <input id="cash-auto-preview" class="control cash-money-preview" type="text" value="{{ editing_closing.check_auto_amount | yen if editing_closing else (0 | yen) }}" readonly />
+        </label>
+        <label class="field">
+          <span class="field-label">현금차액</span>
+          <input id="cash-diff-preview" class="control cash-money-preview" type="text" value="{{ editing_closing.difference_amount | yen if editing_closing else (0 | yen) }}" readonly />
+        </label>
+        <label class="field">
+          <span class="field-label">QR차액</span>
+          <input id="cash-qr-diff-preview" class="control cash-money-preview" type="text" value="{{ editing_closing.qr_difference_amount | yen if editing_closing else (0 | yen) }}" readonly />
+        </label>
+        <label class="field">
+          <span class="field-label">총차액</span>
+          <input id="cash-total-diff-preview" class="control cash-money-preview" type="text" value="{{ (editing_closing.difference_amount + editing_closing.qr_difference_amount) | yen if editing_closing else (0 | yen) }}" readonly />
+        </label>
+      </div>
+    </div>
+
+    <div class="cash-entry-actions">
+      {% if editing_is_locked and not staff.is_admin %}
+      <span class="muted">잠금된 정산은 관리자만 수정할 수 있습니다.</span>
+      {% else %}
+      <button class="btn btn-primary" type="submit">{{ "수정 저장" if editing_closing else "저장" }}</button>
+      {% endif %}
+    </div>
+  </form>
+</section>
+
+<section class="card">
+  <h3 class="card-title">정산 내역</h3>
+  <div class="table-wrap">
+    <table class="cash-sheet-table cash-sheet-history">
+      <thead>
+        <tr>
+          <th>date</th>
+          <th>구분</th>
+          <th>패스할인</th>
+          <th>현금차액</th>
+          <th>QR차액</th>
+          <th>총차액</th>
+          <th>작성자</th>
+          <th>확인자</th>
+          <th>비고</th>
+          <th>최종수정자</th>
+          <th>최종수정시각</th>
+          <th>상세</th>
+          <th>편집</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in closings %}
+        {% set total_diff = row.difference_amount + row.qr_difference_amount %}
+        <tr>
+          <td>{{ row.business_date }}</td>
+          <td>{{ display_cash_closing_type(row.closing_type) }}</td>
+          <td>{{ pass_discount_by_date.get(row.business_date, 0) | yen }}</td>
+          <td>{{ row.difference_amount | yen }}</td>
+          <td>{{ row.qr_difference_amount | yen }}</td>
+          <td>
+            <span class="status-pill {% if total_diff == 0 %}status-paid{% elif total_diff > 0 %}status-picked_up{% else %}status-payment_pending{% endif %}">
+              {{ total_diff | yen }}
+            </span>
+          </td>
+          <td>{{ creator_name_by_closing.get(row.closing_id, staff_name_by_id.get(row.staff_id, '-') if row.staff_id else '-') }}</td>
+          <td>{{ staff_name_by_id.get(row.verified_by_staff_id, '-') if row.verified_by_staff_id else '-' }}</td>
+          <td class="note-cell cash-note-cell">{{ row.note if row.note else '-' }}</td>
+          <td>{{ staff_name_by_id.get(row.staff_id, '-') if row.staff_id else '-' }}</td>
+          <td>{{ to_jst_datetime(row.updated_at if row.updated_at else row.created_at).strftime('%Y-%m-%d %H:%M') }}</td>
+          <td><a class="btn btn-secondary btn-sm" href="/staff/cash-closing/{{ row.closing_id }}">상세</a></td>
+          <td>
+            {% if row.workflow_status == "LOCKED" and not staff.is_admin %}
+            <span class="muted">관리자</span>
+            {% else %}
+            <a class="btn btn-secondary btn-sm" href="/staff/cash-closing?edit_id={{ row.closing_id }}">편집</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="13">데이터가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+(function () {
+  const countInputs = Array.from(document.querySelectorAll(".cash-count-input"));
+  const dateInput = document.getElementById("cash-business-date");
+  const totalPreview = document.getElementById("cash-total-preview");
+  const qrPreview = document.getElementById("cash-qr-preview");
+  const actualQrInput = document.getElementById("cash-actual-qr-input");
+  const autoPreview = document.getElementById("cash-auto-preview");
+  const diffPreview = document.getElementById("cash-diff-preview");
+  const qrDiffPreview = document.getElementById("cash-qr-diff-preview");
+  const totalDiffPreview = document.getElementById("cash-total-diff-preview");
+
+  if (!countInputs.length || !dateInput || !totalPreview || !qrPreview || !actualQrInput || !autoPreview || !diffPreview || !qrDiffPreview || !totalDiffPreview) {
+    return;
+  }
+
+  let autoCash = 0;
+  let autoQr = 0;
+  let actualQrTouched = false;
+  const yenFormatter = new Intl.NumberFormat("ja-JP");
+
+  function toInteger(value) {
+    const num = Number(value || 0);
+    if (Number.isNaN(num)) {
+      return 0;
+    }
+    return Math.trunc(num);
+  }
+
+  function formatYen(value) {
+    const amount = toInteger(value);
+    const sign = amount < 0 ? "-" : "";
+    return `${sign}¥ ${yenFormatter.format(Math.abs(amount))}`;
+  }
+
+  function toNumber(value) {
+    const num = Number(value || 0);
+    if (Number.isNaN(num) || num < 0) {
+      return 0;
+    }
+    return Math.floor(num);
+  }
+
+  function recalc() {
+    let total = 0;
+    countInputs.forEach((input) => {
+      const denom = toNumber(input.dataset.denom);
+      const count = toNumber(input.value);
+      total += denom * count;
+    });
+
+    const actualQr = toNumber(actualQrInput.value);
+    const cashDiff = total - autoCash;
+    const qrDiff = actualQr - autoQr;
+    const totalDiff = cashDiff + qrDiff;
+
+    totalPreview.value = formatYen(total);
+    qrPreview.value = formatYen(autoQr);
+    autoPreview.value = formatYen(autoCash);
+    diffPreview.value = formatYen(cashDiff);
+    qrDiffPreview.value = formatYen(qrDiff);
+    totalDiffPreview.value = formatYen(totalDiff);
+  }
+
+  async function fetchAutoSales() {
+    const businessDate = String(dateInput.value || "").trim();
+    if (!businessDate) {
+      autoCash = 0;
+      autoQr = 0;
+      if (!actualQrTouched) {
+        actualQrInput.value = "0";
+      }
+      recalc();
+      return;
+    }
+    try {
+      const response = await fetch(`/staff/api/cash-closing/auto-sales?business_date=${encodeURIComponent(businessDate)}`);
+      if (!response.ok) {
+        return;
+      }
+      const data = await response.json();
+      autoCash = toNumber(data.cash_amount);
+      autoQr = toNumber(data.qr_amount);
+      if (!actualQrTouched || actualQrInput.value === "") {
+        actualQrInput.value = String(autoQr);
+      }
+      recalc();
+    } catch (_error) {
+      // Ignore temporary fetch errors.
+    }
+  }
+
+  countInputs.forEach((input) => {
+    input.addEventListener("input", recalc);
+  });
+  actualQrInput.addEventListener("input", () => {
+    actualQrTouched = true;
+    recalc();
+  });
+  dateInput.addEventListener("change", fetchAutoSales);
+  fetchAutoSales();
+})();
+</script>
+{% endblock %}

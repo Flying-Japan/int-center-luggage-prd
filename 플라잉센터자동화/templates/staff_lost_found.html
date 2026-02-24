@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero hero-row">
+  <div>
+    <p class="hero-kicker">Operations</p>
+    <h2 class="hero-title">분실물 관리대장</h2>
+    <p class="hero-desc">{{ staff.name }} · {{ now_jst.strftime('%Y-%m-%d %H:%M JST') }}</p>
+  </div>
+  <a class="btn btn-secondary" href="/staff/logout">로그아웃</a>
+</section>
+{% include "staff_menu.html" %}
+
+<section class="card">
+  <h3 class="card-title">{% if editing_entry %}분실물 편집{% else %}분실물 등록{% endif %}</h3>
+  <form action="{% if editing_entry %}/staff/lost-found/{{ editing_entry.entry_id }}/update{% else %}/staff/lost-found{% endif %}" method="post" class="grid2">
+    <label class="field">
+      <span class="field-label">발견 시각</span>
+      <input class="control" type="datetime-local" name="found_at" value="{% if editing_entry %}{{ to_jst_datetime(editing_entry.found_at).strftime('%Y-%m-%dT%H:%M') }}{% else %}{{ default_found_at }}{% endif %}" required />
+    </label>
+
+    <label class="field">
+      <span class="field-label">물품명</span>
+      <input class="control" type="text" name="item_name" value="{{ editing_entry.item_name if editing_entry else '' }}" placeholder="예: 검정 지갑" required />
+    </label>
+
+    <label class="field">
+      <span class="field-label">수량</span>
+      <input class="control" type="number" name="quantity" min="1" max="99" value="{{ editing_entry.quantity if editing_entry else 1 }}" required />
+    </label>
+
+    <label class="field">
+      <span class="field-label">발견 위치</span>
+      <input class="control" type="text" name="found_location" value="{{ editing_entry.found_location if editing_entry else '' }}" placeholder="예: 카운터 앞 좌석" required />
+    </label>
+
+    <label class="field">
+      <span class="field-label">상태</span>
+      <select class="control" name="status_value">
+        {% for status_value in LOST_FOUND_STATUSES %}
+        <option value="{{ status_value }}" {% if editing_entry and editing_entry.status == status_value %}selected{% endif %}>{{ display_lost_found_status(status_value) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label class="field">
+      <span class="field-label">인수자(선택)</span>
+      <input class="control" type="text" name="claimed_by" value="{{ editing_entry.claimed_by if editing_entry and editing_entry.claimed_by else '' }}" placeholder="예: 김OO" />
+    </label>
+
+    <label class="field" style="grid-column: 1 / -1;">
+      <span class="field-label">비고</span>
+      <textarea class="control" name="note" rows="2" placeholder="특이사항 입력">{{ editing_entry.note if editing_entry and editing_entry.note else '' }}</textarea>
+    </label>
+    {% if q %}
+    <input type="hidden" name="q" value="{{ q }}" />
+    {% endif %}
+
+    <label class="button-wrap">
+      <span class="field-label sr-only">{% if editing_entry %}수정 저장{% else %}등록{% endif %}</span>
+      <button class="btn btn-primary" type="submit">{% if editing_entry %}수정 저장{% else %}등록{% endif %}</button>
+    </label>
+    {% if editing_entry %}
+    <a class="btn btn-secondary" href="/staff/lost-found">편집 취소</a>
+    {% endif %}
+  </form>
+</section>
+
+<section class="card">
+  <h3 class="card-title">분실물 목록</h3>
+  <form action="/staff/lost-found" method="get" class="staff-search-form">
+    <div class="staff-search-row">
+      <label class="field">
+        <span class="field-label">분실물 검색</span>
+        <input class="control" type="text" name="q" value="{{ q }}" placeholder="물품명, 위치, 인수자, 비고, 상태 검색" />
+      </label>
+      <label class="button-wrap staff-search-button-wrap">
+        <span class="field-label sr-only">검색</span>
+        <button class="btn btn-primary" type="submit">검색</button>
+      </label>
+    </div>
+    {% if q %}
+    <div class="inline-actions">
+      <a class="btn btn-secondary btn-sm" href="/staff/lost-found">검색 초기화</a>
+      <span class="muted">"{{ q }}" 검색 결과</span>
+    </div>
+    {% endif %}
+  </form>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>발견 시각</th>
+          <th>물품</th>
+          <th>수량</th>
+          <th>발견 위치</th>
+          <th>상태</th>
+          <th>인수자</th>
+          <th>비고</th>
+          <th>관리</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in entries %}
+        <tr>
+          <td>{{ to_jst_datetime(entry.found_at).strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>{{ entry.item_name }}</td>
+          <td>{{ entry.quantity }}</td>
+          <td>{{ entry.found_location }}</td>
+          <td>{{ display_lost_found_status(entry.status) }}</td>
+          <td>{{ entry.claimed_by if entry.claimed_by else '-' }}</td>
+          <td class="note-cell">{{ entry.note if entry.note else '-' }}</td>
+          <td>
+            <div class="inline-actions">
+              <a class="btn btn-secondary btn-sm" href="/staff/lost-found?edit_id={{ entry.entry_id }}">편집</a>
+              <form action="/staff/lost-found/{{ entry.entry_id }}/delete" method="post" onsubmit="return confirm('이 항목을 삭제하시겠습니까?');">
+                {% if q %}
+                <input type="hidden" name="q" value="{{ q }}" />
+                {% endif %}
+                <button class="btn btn-secondary btn-sm" type="submit">삭제</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8">데이터가 없습니다.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
