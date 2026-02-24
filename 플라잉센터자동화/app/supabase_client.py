@@ -182,6 +182,10 @@ class SupabaseQuery:
                     q = q.lt(col, val)
                 elif op == "<=":
                     q = q.lte(col, val)
+                elif op == "IS NULL":
+                    q = q.is_(col, None)
+                elif op == "IS NOT NULL":
+                    q = q.not_.is_(col, None)
 
         for order_str in self._order_cols:
             parts = order_str.strip().split()
