@@ -10,7 +10,7 @@ services:
       - ./uploads:/app/uploads
 
   tunnel:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.2.0
     container_name: flying-japan-tunnel
     restart: unless-stopped
     command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
