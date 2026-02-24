@@ -1,5 +1,4 @@
-tunnel: int-center-luggage-prd
-credentials-file: /etc/cloudflared/creds.json
+tunnel: ffd669ef-6bda-48cc-9c22-e1e600625eff
 
 ingress:
   - hostname: luggage.flyingjp.com
