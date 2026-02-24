@@ -16,17 +16,17 @@ services:
     depends_on:
       - app
 
-  # Polls GHCR every 30s; auto-restarts app when a new image is pushed.
-  # One-time setup on the server:
-  #   docker login ghcr.io -u <github-username> -p <github-pat-with-read:packages>
+  # Auto-updates app when a new image is pushed to GHCR.
+  # Polls every 30 seconds. Requires GHCR_USER + GHCR_TOKEN in .env.
+  # Create token at: https://github.com/settings/tokens (read:packages scope)
   watchtower:
     image: containrrr/watchtower
     container_name: flying-japan-watchtower
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${HOME}/.docker/config.json:/config.json:ro
     environment:
-      DOCKER_CONFIG: /config.json
-      WATCHTOWER_POLL_INTERVAL: "30"
+      REPO_USER: ${GHCR_USER}
+      REPO_PASS: ${GHCR_TOKEN}
+      WATCHTOWER_POLL_INTERVAL: "300"
       WATCHTOWER_CLEANUP: "true"
