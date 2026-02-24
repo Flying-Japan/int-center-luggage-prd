@@ -6,7 +6,6 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data:/app/data
       - ./uploads:/app/uploads
 
   tunnel:

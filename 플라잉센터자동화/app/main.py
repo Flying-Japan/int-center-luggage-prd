@@ -14,13 +14,10 @@ from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Re
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import desc, or_
-from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.auth import get_current_staff, hash_pin, verify_pin
+from app.auth import get_current_staff
 from app.config import (
-    AUTO_SEED_DEFAULT_STAFF,
     ID_UPLOAD_DIR,
     JST,
     LUGGAGE_UPLOAD_DIR,
@@ -30,23 +27,12 @@ from app.config import (
     SESSION_HTTPS_ONLY,
     SESSION_MAX_AGE,
     SESSION_SAME_SITE,
+    SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY,
 )
-from app.database import Base, SessionLocal, engine, get_db
+from app.supabase_client import SupabaseDB
+from app.database import get_db
 from app.i18n import get_translations
-from app.models import (
-    AppSetting,
-    AuditLog,
-    CashClosing,
-    CashClosingAudit,
-    DailyTagCounter,
-    HandoverComment,
-    HandoverNote,
-    HandoverRead,
-    LostFoundEntry,
-    Order,
-    RentalDailySales,
-    Staff,
-)
 from app.schemas import OrderSummaryResponse, PricePreviewResponse
 from app.services.order_number import build_order_id, build_tag_no
 from app.services.pricing import calculate_prepaid_amount, calculate_price_per_day
@@ -213,7 +199,10 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def ensure_utc_datetime(dt: datetime) -> datetime:
+def ensure_utc_datetime(dt) -> datetime:
+    # Supabase REST API returns TIMESTAMPTZ columns as ISO 8601 strings
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt)
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
@@ -269,7 +258,7 @@ def save_image_file(upload: UploadFile, directory: Path, order_id: str, label: s
     return str(destination.resolve())
 
 
-def order_to_response(order: Order) -> OrderSummaryResponse:
+def order_to_response(order) -> OrderSummaryResponse:
     return OrderSummaryResponse(
         order_id=order.order_id,
         created_at=order.created_at,
@@ -295,11 +284,11 @@ def generate_qr_base64(data: str) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
-def ensure_staff(request: Request, db: Session) -> Staff:
+def ensure_staff(request: Request, db: SupabaseDB):
     return get_current_staff(request, db)
 
 
-def build_staff_menu(db: Session, active_key: str, is_admin: bool = False) -> list[dict[str, object]]:
+def build_staff_menu(db: SupabaseDB, active_key: str, is_admin: bool = False) -> list[dict[str, object]]:
     items = list(STAFF_BASE_MENU_ITEMS)
     if not is_schedule_feature_enabled(db) and not is_admin:
         items = [item for item in items if item[0] != "schedule"]
@@ -351,7 +340,7 @@ def flying_pass_discount_amount(base_prepaid: int, tier: str) -> int:
 
 
 def recalculate_order_prepaid(
-    order: Order,
+    order,
     *,
     expected_storage_days: Optional[int] = None,
     flying_pass_tier: Optional[str] = None,
@@ -407,14 +396,14 @@ def auto_pickup_note(created_at: datetime, expected_pickup_at: datetime) -> str:
     return f"{pickup_jst.strftime('%m/%d')} 수령예정"
 
 
-def resolved_note(order: Order) -> str:
+def resolved_note(order) -> str:
     manual_note = (order.note or "").strip()
     if manual_note:
         return manual_note
     return auto_pickup_note(order.created_at, order.expected_pickup_at)
 
 
-def payment_status_of(order: Order) -> str:
+def payment_status_of(order) -> str:
     return "PAYMENT_PENDING" if order.status == "PAYMENT_PENDING" else "PAID"
 
 
@@ -492,40 +481,43 @@ def parse_cash_closing_type(raw_value: str) -> str:
 
 
 def ensure_unique_cash_closing_type(
-    db: Session,
+    db: SupabaseDB,
     business_date: str,
     closing_type: str,
     *,
     exclude_closing_id: Optional[int] = None,
 ) -> None:
-    query = db.query(CashClosing).filter(
-        CashClosing.business_date == business_date,
-        CashClosing.closing_type == closing_type,
+    q = db.query("cash_closings").filter(
+        ("business_date", "=", business_date),
+        ("closing_type", "=", closing_type),
     )
     if exclude_closing_id:
-        query = query.filter(CashClosing.closing_id != exclude_closing_id)
-    exists = query.first()
+        q = q.filter(("closing_id", "!=", exclude_closing_id))
+    exists = q.first()
     if exists:
-        raise HTTPException(status_code=400, detail="같은 날짜/정산구분은 1건만 등록할 수 있습니다.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"해당 날짜({business_date})의 {closing_type} 정산이 이미 존재합니다.",
+        )
 
 
 def create_cash_closing_audit(
-    db: Session,
-    row: CashClosing,
+    db: SupabaseDB,
+    row,
     *,
     action: str,
     staff_id: int,
     reason: str = "",
-    payload: Optional[dict[str, object]] = None,
+    payload: dict | None = None,
 ) -> None:
-    audit = CashClosingAudit(
-        closing_id=row.closing_id,
-        action=action,
-        reason=reason.strip() or None,
-        payload=json.dumps(payload, ensure_ascii=False) if payload else None,
-        staff_id=staff_id,
-    )
-    db.add(audit)
+    db.insert("cash_closing_audits", {
+        "closing_id": row.closing_id,
+        "action": action,
+        "reason": reason.strip() or None,
+        "payload": json.dumps(payload, ensure_ascii=False) if payload else None,
+        "staff_id": staff_id,
+        "created_at": utc_now(),
+    })
 
 
 def calc_cash_total(counts_by_denom: dict[int, int]) -> int:
@@ -563,14 +555,14 @@ def iter_business_dates(start_date: date, end_date: date) -> list[str]:
     return values
 
 
-def summarize_order_sales_for_date(db: Session, business_date: str) -> dict[str, int]:
+def summarize_order_sales_for_date(db: SupabaseDB, business_date: str) -> dict[str, int]:
     start_utc, end_utc = business_date_range_utc(business_date)
     orders = (
-        db.query(Order)
+        db.query("orders")
         .filter(
-            Order.created_at >= start_utc,
-            Order.created_at < end_utc,
-            Order.status.in_(("PAID", "PICKED_UP")),
+            ("created_at", ">=", start_utc),
+            ("created_at", "<", end_utc),
+            ("status", "IN", ["PAID", "PICKED_UP"]),
         )
         .all()
     )
@@ -591,18 +583,18 @@ def summarize_order_sales_for_date(db: Session, business_date: str) -> dict[str,
     }
 
 
-def summarize_order_pass_discount_for_date(db: Session, business_date: str) -> int:
+def summarize_order_pass_discount_for_date(db: SupabaseDB, business_date: str) -> int:
     start_utc, end_utc = business_date_range_utc(business_date)
     rows = (
-        db.query(Order.flying_pass_discount_amount)
+        db.query("orders")
         .filter(
-            Order.created_at >= start_utc,
-            Order.created_at < end_utc,
-            Order.status.in_(("PAID", "PICKED_UP")),
+            ("created_at", ">=", start_utc),
+            ("created_at", "<", end_utc),
+            ("status", "IN", ["PAID", "PICKED_UP"]),
         )
         .all()
     )
-    return sum(max(int(row[0] or 0), 0) for row in rows)
+    return sum(max(int(row.flying_pass_discount_amount or 0), 0) for row in rows)
 
 
 def parse_actual_qr_amount(raw_value: int, auto_qr_amount: int) -> int:
@@ -612,7 +604,7 @@ def parse_actual_qr_amount(raw_value: int, auto_qr_amount: int) -> int:
 
 
 def summarize_luggage_sales_for_period(
-    db: Session,
+    db: SupabaseDB,
     start_date: str,
     end_date: str,
 ) -> dict[str, dict[str, int]]:
@@ -625,11 +617,11 @@ def summarize_luggage_sales_for_period(
     _, end_exclusive_utc = business_date_range_utc(date_to_ymd(end_date_value))
 
     orders = (
-        db.query(Order)
+        db.query("orders")
         .filter(
-            Order.created_at >= start_utc,
-            Order.created_at < end_exclusive_utc,
-            Order.status.in_(("PAID", "PICKED_UP")),
+            ("created_at", ">=", start_utc),
+            ("created_at", "<", end_exclusive_utc),
+            ("status", "IN", ["PAID", "PICKED_UP"]),
         )
         .all()
     )
@@ -662,7 +654,7 @@ def summarize_luggage_sales_for_period(
 
 
 def build_sales_analytics(
-    db: Session,
+    db: SupabaseDB,
     start_date: str,
     end_date: str,
 ) -> dict[str, object]:
@@ -675,10 +667,10 @@ def build_sales_analytics(
     luggage_by_date = summarize_luggage_sales_for_period(db, start_date, end_date)
 
     rental_rows = (
-        db.query(RentalDailySales)
+        db.query("rental_daily_sales")
         .filter(
-            RentalDailySales.business_date >= start_date,
-            RentalDailySales.business_date <= end_date,
+            ("business_date", ">=", start_date),
+            ("business_date", "<=", end_date),
         )
         .all()
     )
@@ -825,7 +817,7 @@ def build_staff_accounts_redirect(
     *,
     msg: str = "",
     err: str = "",
-    focus_staff_id: Optional[int] = None,
+    focus_staff_id: Optional[str] = None,
 ) -> str:
     query: dict[str, str] = {}
     if msg.strip():
@@ -839,15 +831,14 @@ def build_staff_accounts_redirect(
     return "/staff/admin/staff-accounts"
 
 
-def get_app_setting(db: Session, setting_key: str, default_value: str) -> str:
-    row = db.query(AppSetting).filter(AppSetting.setting_key == setting_key).first()
+def get_app_setting(db: SupabaseDB, setting_key: str, default_value: str) -> str:
+    row = db.query("app_settings").filter(("setting_key", "=", setting_key)).first()
     if row is None:
         return default_value
-    value = (row.setting_value or "").strip()
-    return value if value else default_value
+    return row.setting_value or default_value
 
 
-def is_schedule_feature_enabled(db: Session) -> bool:
+def is_schedule_feature_enabled(db: SupabaseDB) -> bool:
     value = get_app_setting(db, SCHEDULE_FEATURE_ENABLED_KEY, "1")
     return value.lower() not in {"0", "false", "off", "no"}
 
@@ -899,22 +890,20 @@ def normalize_schedule_embed_url(raw_value: str) -> str:
     )
 
 
-def upsert_app_setting(db: Session, setting_key: str, setting_value: str, staff_id: int) -> AppSetting:
-    row = db.query(AppSetting).filter(AppSetting.setting_key == setting_key).first()
+def upsert_app_setting(db: SupabaseDB, setting_key: str, setting_value: str, staff_id: str):
+    row = db.query("app_settings").filter(("setting_key", "=", setting_key)).first()
     normalized_value = setting_value.strip()
     if row is None:
-        row = AppSetting(
-            setting_key=setting_key,
-            setting_value=normalized_value,
-            staff_id=staff_id,
-            updated_at=utc_now(),
-        )
-        db.add(row)
+        return db.insert("app_settings", {
+            "setting_key": setting_key,
+            "setting_value": normalized_value,
+            "staff_id": staff_id,
+        })
     else:
         row.setting_value = normalized_value
         row.staff_id = staff_id
-        row.updated_at = utc_now()
-    return row
+        db.update(row)
+        return row
 
 
 def normalize_completion_message_text(text: str) -> str:
@@ -1024,7 +1013,7 @@ def build_completion_messages_from_ko(
     }
 
 
-def load_completion_messages(db: Session) -> dict[str, dict[str, str]]:
+def load_completion_messages(db: SupabaseDB) -> dict[str, dict[str, str]]:
     ko_primary = get_app_setting(
         db,
         SUCCESS_PRIMARY_MESSAGE_KEYS["ko"],
@@ -1056,7 +1045,7 @@ def load_completion_messages(db: Session) -> dict[str, dict[str, str]]:
     }
 
 
-def serialize_staff_order(order: Order) -> dict[str, object]:
+def serialize_staff_order(order) -> dict[str, object]:
     expected_jst = to_jst_datetime(order.expected_pickup_at)
     resolved_tier = normalize_flying_pass_tier(order.flying_pass_tier)
     _discount_rate, base_prepaid_amount = calculate_prepaid_amount(order.price_per_day, order.expected_storage_days)
@@ -1090,7 +1079,7 @@ def serialize_staff_order(order: Order) -> dict[str, object]:
     }
 
 
-def apply_pickup_completion(order: Order, staff_id: int) -> None:
+def apply_pickup_completion(order, staff_id: str) -> None:
     now = utc_now()
     actual_days = calculate_storage_days(order.created_at, now)
     extra_days = max(actual_days - order.expected_storage_days, 0)
@@ -1105,7 +1094,7 @@ def apply_pickup_completion(order: Order, staff_id: int) -> None:
     order.staff_id = staff_id
 
 
-def undo_pickup_completion(order: Order, staff_id: int) -> None:
+def undo_pickup_completion(order, staff_id: str) -> None:
     order.actual_pickup_at = None
     order.actual_storage_days = None
     order.extra_days = 0
@@ -1116,46 +1105,40 @@ def undo_pickup_completion(order: Order, staff_id: int) -> None:
 
 
 def query_staff_orders(
-    db: Session,
+    db: SupabaseDB,
     status_filters: list[str],
     q: str,
     limit: int = 300,
     show_all_picked_up: bool = False,
-) -> list[Order]:
-    query = db.query(Order)
+) -> list:
+    query = db.query("orders")
     if status_filters:
-        query = query.filter(Order.status.in_(status_filters))
+        query = query.filter(("status", "IN", status_filters))
     if not show_all_picked_up:
         cutoff_jst = (
             utc_now().astimezone(JST).replace(hour=0, minute=0, second=0, microsecond=0)
             - timedelta(days=RECENT_PICKED_UP_DAYS - 1)
         )
         cutoff_utc = cutoff_jst.astimezone(timezone.utc)
-        query = query.filter(
-            or_(
-                Order.status != "PICKED_UP",
-                Order.actual_pickup_at.is_(None),
-                Order.actual_pickup_at >= cutoff_utc,
-            )
-        )
+        query = query.filter_or([
+            ("status", "!=", "PICKED_UP"),
+            ("actual_pickup_at", "IS NULL", None),
+            ("actual_pickup_at", ">=", cutoff_utc),
+        ])
     if q.strip():
         keyword = f"%{q.strip()}%"
-        query = query.filter(
-            or_(
-                Order.order_id.like(keyword),
-                Order.name.like(keyword),
-                Order.phone.like(keyword),
-                Order.tag_no.like(keyword),
-            )
-        )
-
-    return query.order_by(Order.created_at.asc(), Order.order_id.asc()).limit(limit).all()
+        query = query.filter_or([
+            ("order_id", "LIKE", keyword),
+            ("name", "LIKE", keyword),
+            ("phone", "LIKE", keyword),
+            ("tag_no", "LIKE", keyword),
+        ])
+    return query.order_by("created_at ASC", "order_id ASC").limit(limit).all()
 
 
-def backfill_missing_tag_numbers(db: Session) -> None:
-    orders = db.query(Order).order_by(Order.created_at.asc(), Order.order_id.asc()).all()
+def backfill_missing_tag_numbers(db: SupabaseDB) -> None:
+    orders = db.query("orders").order_by("created_at ASC", "order_id ASC").all()
     last_by_day: dict[str, int] = {}
-    has_changes = False
 
     for order in orders:
         business_date = to_jst_datetime(order.created_at).strftime("%Y%m%d")
@@ -1171,152 +1154,25 @@ def backfill_missing_tag_numbers(db: Session) -> None:
         next_seq = current_last + 1
         order.tag_no = str(next_seq)
         last_by_day[business_date] = next_seq
-        has_changes = True
+        db.update(order)
 
     for business_date, last_seq in last_by_day.items():
-        counter = db.get(DailyTagCounter, business_date)
+        counter = db.get("daily_tag_counters", "business_date", business_date)
         if counter is None:
-            db.add(DailyTagCounter(business_date=business_date, last_seq=last_seq))
-            has_changes = True
+            db.insert("daily_tag_counters", {"business_date": business_date, "last_seq": last_seq})
             continue
         if counter.last_seq < last_seq:
             counter.last_seq = last_seq
-            has_changes = True
-
-    if has_changes:
-        db.commit()
+            db.update(counter)
 
 
-def run_db_compat_migrations() -> None:
-    with engine.begin() as conn:
-        columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(orders)").fetchall()}
-        if "companion_count" not in columns:
-            conn.exec_driver_sql(
-                "ALTER TABLE orders ADD COLUMN companion_count INTEGER NOT NULL DEFAULT 0"
-            )
-        if "note" not in columns:
-            conn.exec_driver_sql("ALTER TABLE orders ADD COLUMN note TEXT")
-        if "flying_pass_tier" not in columns:
-            conn.exec_driver_sql(
-                "ALTER TABLE orders ADD COLUMN flying_pass_tier VARCHAR(20) NOT NULL DEFAULT 'NONE'"
-            )
-        if "flying_pass_discount_amount" not in columns:
-            conn.exec_driver_sql(
-                "ALTER TABLE orders ADD COLUMN flying_pass_discount_amount INTEGER NOT NULL DEFAULT 0"
-            )
-        if "staff_prepaid_override_amount" not in columns:
-            conn.exec_driver_sql("ALTER TABLE orders ADD COLUMN staff_prepaid_override_amount INTEGER")
-        conn.exec_driver_sql("UPDATE orders SET companion_count = 1 WHERE companion_count < 1")
-        conn.exec_driver_sql("UPDATE orders SET flying_pass_tier = 'NONE' WHERE flying_pass_tier IS NULL OR flying_pass_tier = ''")
-        conn.exec_driver_sql("UPDATE orders SET flying_pass_discount_amount = 0 WHERE flying_pass_discount_amount IS NULL OR flying_pass_discount_amount < 0")
-        conn.exec_driver_sql("UPDATE orders SET staff_prepaid_override_amount = NULL WHERE staff_prepaid_override_amount < 0")
-
-        cash_columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(cash_closings)").fetchall()}
-        cash_int_defaults = {
-            "count_10000": 0,
-            "count_5000": 0,
-            "count_2000": 0,
-            "count_1000": 0,
-            "count_500": 0,
-            "count_100": 0,
-            "count_50": 0,
-            "count_10": 0,
-            "count_5": 0,
-            "count_1": 0,
-            "total_amount": 0,
-            "paypay_amount": 0,
-            "actual_qr_amount": 0,
-            "qr_difference_amount": 0,
-            "check_auto_amount": 0,
-            "check_cash_match": 0,
-            "check_qr_match": 0,
-            "check_pending_items": 0,
-            "check_handover_note": 0,
-        }
-        for column_name, default_value in cash_int_defaults.items():
-            if column_name not in cash_columns:
-                conn.exec_driver_sql(
-                    f"ALTER TABLE cash_closings ADD COLUMN {column_name} INTEGER NOT NULL DEFAULT {default_value}"
-                )
-
-        if "closing_type" not in cash_columns:
-            conn.exec_driver_sql(
-                "ALTER TABLE cash_closings ADD COLUMN closing_type VARCHAR(30) NOT NULL DEFAULT 'FINAL_CLOSE'"
-            )
-        if "workflow_status" not in cash_columns:
-            conn.exec_driver_sql(
-                "ALTER TABLE cash_closings ADD COLUMN workflow_status VARCHAR(20) NOT NULL DEFAULT 'DRAFT'"
-            )
-        if "submitted_at" not in cash_columns:
-            conn.exec_driver_sql("ALTER TABLE cash_closings ADD COLUMN submitted_at DATETIME")
-        if "verified_at" not in cash_columns:
-            conn.exec_driver_sql("ALTER TABLE cash_closings ADD COLUMN verified_at DATETIME")
-        if "submitted_by_staff_id" not in cash_columns:
-            conn.exec_driver_sql("ALTER TABLE cash_closings ADD COLUMN submitted_by_staff_id INTEGER")
-        if "verified_by_staff_id" not in cash_columns:
-            conn.exec_driver_sql("ALTER TABLE cash_closings ADD COLUMN verified_by_staff_id INTEGER")
-        if "owner_name" not in cash_columns:
-            conn.exec_driver_sql("ALTER TABLE cash_closings ADD COLUMN owner_name VARCHAR(80)")
-        if "updated_at" not in cash_columns:
-            conn.exec_driver_sql("ALTER TABLE cash_closings ADD COLUMN updated_at DATETIME")
-        conn.exec_driver_sql(
-            "UPDATE cash_closings SET updated_at = created_at "
-            "WHERE updated_at IS NULL"
-        )
-        conn.exec_driver_sql(
-            "UPDATE cash_closings SET total_amount = actual_amount "
-            "WHERE total_amount = 0 AND actual_amount > 0"
-        )
-        conn.exec_driver_sql(
-            "UPDATE cash_closings SET check_auto_amount = expected_amount "
-            "WHERE check_auto_amount = 0 AND expected_amount > 0"
-        )
-        conn.exec_driver_sql(
-            "UPDATE cash_closings SET actual_qr_amount = paypay_amount "
-            "WHERE actual_qr_amount = 0 AND paypay_amount > 0"
-        )
-        conn.exec_driver_sql(
-            "UPDATE cash_closings SET qr_difference_amount = actual_qr_amount - paypay_amount "
-            "WHERE qr_difference_amount = 0 AND (actual_qr_amount != 0 OR paypay_amount != 0)"
-        )
-        conn.exec_driver_sql(
-            "UPDATE cash_closings SET difference_amount = total_amount - check_auto_amount "
-            "WHERE difference_amount = 0 AND (total_amount != 0 OR check_auto_amount != 0)"
-        )
-        conn.exec_driver_sql(
-            "UPDATE cash_closings SET submitted_by_staff_id = NULL WHERE submitted_by_staff_id = 0"
-        )
-        conn.exec_driver_sql(
-            "UPDATE cash_closings SET verified_by_staff_id = NULL WHERE verified_by_staff_id = 0"
-        )
-        conn.exec_driver_sql(
-            "UPDATE cash_closings SET closing_type = 'FINAL_CLOSE' WHERE closing_type IS NULL OR closing_type = ''"
-        )
-        conn.exec_driver_sql(
-            "UPDATE cash_closings SET workflow_status = 'DRAFT' "
-            "WHERE workflow_status IS NULL OR workflow_status = ''"
-        )
 
 
 @app.on_event("startup")
 def on_startup() -> None:
-    Base.metadata.create_all(bind=engine)
-    # Compatibility migrations use SQLite-specific PRAGMA statements.
-    if engine.dialect.name == "sqlite":
-        run_db_compat_migrations()
-
-    migration_db = SessionLocal()
+    db = SupabaseDB(url=SUPABASE_URL, service_role_key=SUPABASE_SERVICE_ROLE_KEY)
     try:
-        backfill_missing_tag_numbers(migration_db)
-    finally:
-        migration_db.close()
-
-    db = SessionLocal()
-    try:
-        if AUTO_SEED_DEFAULT_STAFF and db.query(Staff).count() == 0:
-            db.add(Staff(name="admin", pin_hash=hash_pin("1234"), is_admin=True, is_active=True))
-            db.add(Staff(name="staff", pin_hash=hash_pin("0000"), is_admin=False, is_active=True))
-            db.commit()
+        backfill_missing_tag_numbers(db)
     finally:
         db.close()
 
@@ -1392,7 +1248,7 @@ def customer_submit(
     lang: str = Form("ko"),
     id_image: UploadFile = File(...),
     luggage_image: UploadFile = File(...),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     if not name.strip() or not phone.strip():
         raise HTTPException(status_code=400, detail="Name and phone are required.")
@@ -1432,39 +1288,37 @@ def customer_submit(
     id_image_path = save_image_file(id_image, ID_UPLOAD_DIR, order_id, "ID image")
     luggage_image_path = save_image_file(luggage_image, LUGGAGE_UPLOAD_DIR, order_id, "Luggage image")
 
-    order = Order(
-        order_id=order_id,
-        created_at=now,
-        name=name.strip(),
-        phone=phone.strip(),
-        companion_count=companion_count,
-        suitcase_qty=suitcase_qty,
-        backpack_qty=backpack_qty,
-        set_qty=pricing.set_qty,
-        expected_pickup_at=pickup_at,
-        expected_storage_days=expected_storage_days,
-        actual_storage_days=None,
-        extra_days=0,
-        price_per_day=pricing.price_per_day,
-        discount_rate=discount_rate,
-        prepaid_amount=prepaid_amount,
-        flying_pass_tier="NONE",
-        flying_pass_discount_amount=0,
-        staff_prepaid_override_amount=None,
-        extra_amount=0,
-        final_amount=prepaid_amount,
-        payment_method=payment_method,
-        status="PAYMENT_PENDING",
-        tag_no=build_tag_no(db, now),
-        note=auto_pickup_note(now, pickup_at) or None,
-        id_image_url=id_image_path,
-        luggage_image_url=luggage_image_path,
-        consent_checked=True,
-        staff_id=None,
-    )
-
-    db.add(order)
-    db.commit()
+    order = db.insert("orders", {
+        "order_id": order_id,
+        "created_at": now,
+        "name": name.strip(),
+        "phone": phone.strip(),
+        "companion_count": companion_count,
+        "suitcase_qty": suitcase_qty,
+        "backpack_qty": backpack_qty,
+        "set_qty": pricing.set_qty,
+        "expected_pickup_at": pickup_at,
+        "expected_storage_days": expected_storage_days,
+        "actual_storage_days": None,
+        "extra_days": 0,
+        "price_per_day": pricing.price_per_day,
+        "discount_rate": discount_rate,
+        "prepaid_amount": prepaid_amount,
+        "flying_pass_tier": "NONE",
+        "flying_pass_discount_amount": 0,
+        "staff_prepaid_override_amount": None,
+        "extra_amount": 0,
+        "final_amount": prepaid_amount,
+        "payment_method": payment_method,
+        "status": "PAYMENT_PENDING",
+        "tag_no": build_tag_no(db, now),
+        "note": auto_pickup_note(now, pickup_at) or None,
+        "id_image_url": id_image_path,
+        "luggage_image_url": luggage_image_path,
+        "consent_checked": True,
+        "manual_entry": False,
+        "staff_id": None,
+    })
 
     return RedirectResponse(
         url=f"/customer/orders/{order_id}?lang={lang}",
@@ -1477,9 +1331,9 @@ def customer_success(
     request: Request,
     order_id: str,
     lang: str = "ko",
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
-    order = db.get(Order, order_id)
+    order = db.get("orders", "order_id", order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -1508,8 +1362,8 @@ def customer_success(
 
 
 @app.get("/api/orders/{order_id}", response_model=OrderSummaryResponse)
-def api_order(order_id: str, db: Session = Depends(get_db)) -> OrderSummaryResponse:
-    order = db.get(Order, order_id)
+def api_order(order_id: str, db: SupabaseDB = Depends(get_db)) -> OrderSummaryResponse:
+    order = db.get("orders", "order_id", order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
     return order_to_response(order)
@@ -1523,19 +1377,33 @@ def staff_login_page(request: Request) -> HTMLResponse:
 @app.post("/staff/login", response_class=HTMLResponse)
 def staff_login(
     request: Request,
-    name: str = Form(...),
-    pin: str = Form(...),
-    db: Session = Depends(get_db),
+    email: str = Form(...),
+    password: str = Form(...),
+    db: SupabaseDB = Depends(get_db),
 ):
-    staff = db.query(Staff).filter(Staff.name == name.strip(), Staff.is_active.is_(True)).first()
-    if not staff or not verify_pin(pin.strip(), staff.pin_hash):
+    import supabase as _supabase
+    try:
+        auth_client = _supabase.create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        response = auth_client.auth.sign_in_with_password({"email": email.strip(), "password": password.strip()})
+        user = response.user
+        if not user:
+            raise ValueError("No user returned")
+    except Exception:
         return templates.TemplateResponse(
             "staff_login.html",
-            {"request": request, "error": "로그인 실패: 이름 또는 PIN을 확인하세요."},
+            {"request": request, "error": "로그인 실패: 이메일 또는 비밀번호를 확인하세요."},
             status_code=401,
         )
 
-    request.session["staff_id"] = staff.staff_id
+    profile = db.get("user_profiles", "id", str(user.id))
+    if not profile or not profile.is_active:
+        return templates.TemplateResponse(
+            "staff_login.html",
+            {"request": request, "error": "접근 권한이 없습니다."},
+            status_code=403,
+        )
+
+    request.session["user_id"] = str(user.id)
     return RedirectResponse(url="/staff/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -1553,7 +1421,7 @@ def staff_dashboard(
     q: str = "",
     retention_msg: str = "",
     retention_err: str = "",
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
     staff = ensure_staff(request, db)
     now_utc = utc_now()
@@ -1596,30 +1464,28 @@ def staff_lost_found_page(
     request: Request,
     edit_id: Optional[int] = None,
     q: str = "",
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
     staff = ensure_staff(request, db)
     search_query = q.strip()
-    entry_query = db.query(LostFoundEntry)
+    entry_query = db.query("lost_found_entries")
     if search_query:
         search_like = f"%{search_query}%"
-        entry_query = entry_query.filter(
-            or_(
-                LostFoundEntry.item_name.ilike(search_like),
-                LostFoundEntry.found_location.ilike(search_like),
-                LostFoundEntry.claimed_by.ilike(search_like),
-                LostFoundEntry.note.ilike(search_like),
-                LostFoundEntry.status.ilike(search_like),
-            )
-        )
+        entry_query = entry_query.filter_or([
+            ("item_name", "LIKE", search_like),
+            ("found_location", "LIKE", search_like),
+            ("claimed_by", "LIKE", search_like),
+            ("note", "LIKE", search_like),
+            ("status", "LIKE", search_like),
+        ])
 
     entries = (
         entry_query
-        .order_by(desc(LostFoundEntry.found_at), desc(LostFoundEntry.entry_id))
+        .order_by("found_at DESC", "entry_id DESC")
         .limit(300)
         .all()
     )
-    editing_entry = db.get(LostFoundEntry, edit_id) if edit_id else None
+    editing_entry = db.get("lost_found_entries", "entry_id", edit_id) if edit_id else None
     now_jst = utc_now().astimezone(JST)
     return templates.TemplateResponse(
         "staff_lost_found.html",
@@ -1649,7 +1515,7 @@ def staff_lost_found_create(
     status_value: str = Form("STORED"),
     claimed_by: str = Form(""),
     note: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
 
@@ -1666,18 +1532,17 @@ def staff_lost_found_create(
 
     found_at_utc = parse_pickup_datetime(found_at)
 
-    entry = LostFoundEntry(
-        found_at=found_at_utc,
-        item_name=item_name.strip(),
-        quantity=quantity,
-        found_location=found_location.strip(),
-        status=normalized_status,
-        claimed_by=claimed_by.strip() or None,
-        note=note.strip() or None,
-        staff_id=staff.staff_id,
-    )
-    db.add(entry)
-    db.commit()
+    db.insert("lost_found_entries", {
+        "found_at": found_at_utc,
+        "item_name": item_name.strip(),
+        "quantity": quantity,
+        "found_location": found_location.strip(),
+        "status": normalized_status,
+        "claimed_by": claimed_by.strip() or None,
+        "note": note.strip() or None,
+        "staff_id": staff.staff_id,
+        "created_at": utc_now(),
+    })
     return RedirectResponse(url="/staff/lost-found", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -1693,10 +1558,10 @@ def staff_lost_found_update(
     claimed_by: str = Form(""),
     note: str = Form(""),
     q: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
-    entry = db.get(LostFoundEntry, entry_id)
+    entry = db.get("lost_found_entries", "entry_id", entry_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Entry not found.")
 
@@ -1719,7 +1584,7 @@ def staff_lost_found_update(
     entry.claimed_by = claimed_by.strip() or None
     entry.note = note.strip() or None
     entry.staff_id = staff.staff_id
-    db.commit()
+    db.update(entry)
     redirect_url = "/staff/lost-found"
     if q.strip():
         redirect_url = f"{redirect_url}?{urlencode({'q': q.strip()})}"
@@ -1731,14 +1596,13 @@ def staff_lost_found_delete(
     request: Request,
     entry_id: int,
     q: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     _ = ensure_staff(request, db)
-    entry = db.get(LostFoundEntry, entry_id)
+    entry = db.get("lost_found_entries", "entry_id", entry_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Entry not found.")
-    db.delete(entry)
-    db.commit()
+    db.delete_row("lost_found_entries", "entry_id", entry.entry_id)
     redirect_url = "/staff/lost-found"
     if q.strip():
         redirect_url = f"{redirect_url}?{urlencode({'q': q.strip()})}"
@@ -1751,54 +1615,45 @@ def staff_handover_page(
     edit_id: Optional[int] = None,
     q: str = "",
     unread_only: bool = False,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
     staff = ensure_staff(request, db)
     search_query = q.strip()
-    note_query = db.query(HandoverNote)
+    note_query = db.query("handover_notes")
     if search_query:
         search_like = f"%{search_query}%"
         matched_staff_ids = [
-            row.staff_id for row in db.query(Staff.staff_id).filter(Staff.name.ilike(search_like)).all()
+            row.id for row in db.query("user_profiles").filter(("username", "LIKE", search_like)).all()
         ]
-        matched_note_ids_from_comments = [
+        matched_note_ids_from_comments = list({
             row.note_id
-            for row in (
-                db.query(HandoverComment.note_id)
-                .filter(HandoverComment.content.ilike(search_like))
-                .distinct()
-                .all()
-            )
-        ]
-        filters = [
-            HandoverNote.title.ilike(search_like),
-            HandoverNote.content.ilike(search_like),
+            for row in db.query("handover_comments").filter(("content", "LIKE", search_like)).all()
+        })
+        filters: list[tuple] = [
+            ("title", "LIKE", search_like),
+            ("content", "LIKE", search_like),
         ]
         if matched_staff_ids:
-            filters.append(HandoverNote.staff_id.in_(matched_staff_ids))
+            filters.append(("staff_id", "IN", matched_staff_ids))
         if matched_note_ids_from_comments:
-            filters.append(HandoverNote.note_id.in_(matched_note_ids_from_comments))
-        note_query = note_query.filter(or_(*filters))
+            filters.append(("note_id", "IN", matched_note_ids_from_comments))
+        note_query = note_query.filter_or(filters)
 
     notes = (
-        note_query.order_by(
-            desc(HandoverNote.is_pinned),
-            desc(HandoverNote.created_at),
-            desc(HandoverNote.note_id),
-        )
+        note_query.order_by("is_pinned DESC", "created_at DESC", "note_id DESC")
         .limit(500)
         .all()
     )
-    editing_note = db.get(HandoverNote, edit_id) if edit_id else None
+    editing_note = db.get("handover_notes", "note_id", edit_id) if edit_id else None
 
     note_ids = [note.note_id for note in notes]
-    reads: list[HandoverRead] = []
+    reads: list = []
     current_staff_read_note_ids: set[int] = set()
     if note_ids:
         reads = (
-            db.query(HandoverRead)
-            .filter(HandoverRead.note_id.in_(note_ids))
-            .order_by(HandoverRead.note_id.asc(), HandoverRead.read_at.asc(), HandoverRead.read_id.asc())
+            db.query("handover_reads")
+            .filter(("note_id", "IN", note_ids))
+            .order_by("note_id ASC", "read_at ASC", "read_id ASC")
             .all()
         )
     current_staff_read_note_ids = {read.note_id for read in reads if read.staff_id == staff.staff_id}
@@ -1811,12 +1666,12 @@ def staff_handover_page(
     notes = notes[:300]
     note_ids = [note.note_id for note in notes]
 
-    comments: list[HandoverComment] = []
+    comments: list = []
     if note_ids:
         comments = (
-            db.query(HandoverComment)
-            .filter(HandoverComment.note_id.in_(note_ids))
-            .order_by(HandoverComment.note_id.asc(), HandoverComment.created_at.asc(), HandoverComment.comment_id.asc())
+            db.query("handover_comments")
+            .filter(("note_id", "IN", note_ids))
+            .order_by("note_id ASC", "created_at ASC", "comment_id ASC")
             .all()
         )
 
@@ -1825,8 +1680,8 @@ def staff_handover_page(
     staff_ids.update(comment.staff_id for comment in comments if comment.staff_id)
     staff_name_by_id: dict[int, str] = {}
     if staff_ids:
-        staff_rows = db.query(Staff).filter(Staff.staff_id.in_(staff_ids)).all()
-        staff_name_by_id = {row.staff_id: row.name for row in staff_rows}
+        staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
+        staff_name_by_id = {row.id: row.username for row in staff_rows}
 
     author_name_by_note = {
         note.note_id: staff_name_by_id.get(note.staff_id or -1, "알 수 없음")
@@ -1840,7 +1695,7 @@ def staff_handover_page(
         if name not in names:
             names.append(name)
 
-    comments_by_note: dict[int, list[HandoverComment]] = {note.note_id: [] for note in notes}
+    comments_by_note: dict[int, list] = {note.note_id: [] for note in notes}
     comment_author_name_by_id: dict[int, str] = {}
     note_search_text_by_note: dict[int, str] = {}
     for comment in comments:
@@ -1890,7 +1745,7 @@ def staff_handover_create(
     title: str = Form(...),
     content: str = Form(...),
     is_pinned: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
 
@@ -1902,15 +1757,14 @@ def staff_handover_create(
     if not content.strip():
         raise HTTPException(status_code=400, detail="Content is required.")
 
-    note = HandoverNote(
-        category=normalized_category,
-        title=title.strip(),
-        content=content.strip(),
-        is_pinned=is_pinned == "on",
-        staff_id=staff.staff_id,
-    )
-    db.add(note)
-    db.commit()
+    db.insert("handover_notes", {
+        "category": normalized_category,
+        "title": title.strip(),
+        "content": content.strip(),
+        "is_pinned": is_pinned == "on",
+        "staff_id": staff.staff_id,
+        "created_at": utc_now(),
+    })
     return RedirectResponse(url="/staff/handover", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -1922,10 +1776,10 @@ def staff_handover_update(
     title: str = Form(...),
     content: str = Form(...),
     is_pinned: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     _ = ensure_staff(request, db)
-    note = db.get(HandoverNote, note_id)
+    note = db.get("handover_notes", "note_id", note_id)
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found.")
 
@@ -1941,7 +1795,7 @@ def staff_handover_update(
     note.title = title.strip()
     note.content = content.strip()
     note.is_pinned = is_pinned == "on"
-    db.commit()
+    db.update(note)
     return RedirectResponse(url="/staff/handover", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -1949,17 +1803,16 @@ def staff_handover_update(
 def staff_handover_delete(
     request: Request,
     note_id: int,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     _ = ensure_staff(request, db)
-    note = db.get(HandoverNote, note_id)
+    note = db.get("handover_notes", "note_id", note_id)
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found.")
 
-    db.query(HandoverComment).filter(HandoverComment.note_id == note_id).delete(synchronize_session=False)
-    db.query(HandoverRead).filter(HandoverRead.note_id == note_id).delete(synchronize_session=False)
-    db.delete(note)
-    db.commit()
+    db.delete_where("handover_comments", [("note_id", "=", note_id)])
+    db.delete_where("handover_reads", [("note_id", "=", note_id)])
+    db.delete_row("handover_notes", "note_id", note_id)
     return RedirectResponse(url="/staff/handover", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -1970,10 +1823,10 @@ def staff_handover_comment_create(
     content: str = Form(...),
     q: str = Form(""),
     unread_only: str = Form("0"),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
-    note = db.get(HandoverNote, note_id)
+    note = db.get("handover_notes", "note_id", note_id)
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found.")
 
@@ -1983,13 +1836,12 @@ def staff_handover_comment_create(
     if len(normalized_content) > 1000:
         raise HTTPException(status_code=400, detail="Comment must be 1000 characters or less.")
 
-    comment = HandoverComment(
-        note_id=note_id,
-        staff_id=staff.staff_id,
-        content=normalized_content,
-    )
-    db.add(comment)
-    db.commit()
+    db.insert("handover_comments", {
+        "note_id": note_id,
+        "staff_id": staff.staff_id,
+        "content": normalized_content,
+        "created_at": utc_now(),
+    })
 
     query: dict[str, str] = {}
     if q.strip():
@@ -2008,17 +1860,16 @@ def staff_handover_comment_delete(
     comment_id: int,
     q: str = Form(""),
     unread_only: str = Form("0"),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
-    comment = db.get(HandoverComment, comment_id)
+    comment = db.get("handover_comments", "comment_id", comment_id)
     if comment is None:
         raise HTTPException(status_code=404, detail="Comment not found.")
     if not staff.is_admin and comment.staff_id != staff.staff_id:
         raise HTTPException(status_code=403, detail="Not allowed to delete this comment.")
 
-    db.delete(comment)
-    db.commit()
+    db.delete_row("handover_comments", "comment_id", comment_id)
 
     query: dict[str, str] = {}
     if q.strip():
@@ -2038,42 +1889,40 @@ def staff_handover_read_toggle(
     is_read: str = Form("0"),
     q: str = Form(""),
     unread_only: str = Form("0"),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
-    note = db.get(HandoverNote, note_id)
+    note = db.get("handover_notes", "note_id", note_id)
     if note is None:
         raise HTTPException(status_code=404, detail="Note not found.")
 
     should_mark_read = is_read.strip() in {"1", "true", "on", "yes"}
     existing = (
-        db.query(HandoverRead)
-        .filter(HandoverRead.note_id == note_id, HandoverRead.staff_id == staff.staff_id)
+        db.query("handover_reads")
+        .filter(("note_id", "=", note_id), ("staff_id", "=", staff.staff_id))
         .all()
     )
 
     if should_mark_read and not existing:
-        db.add(HandoverRead(note_id=note_id, staff_id=staff.staff_id))
-        db.commit()
+        db.insert("handover_reads", {
+            "note_id": note_id,
+            "staff_id": staff.staff_id,
+            "read_at": utc_now(),
+        })
     elif not should_mark_read and existing:
-        (
-            db.query(HandoverRead)
-            .filter(HandoverRead.note_id == note_id, HandoverRead.staff_id == staff.staff_id)
-            .delete(synchronize_session=False)
-        )
-        db.commit()
+        db.delete_where("handover_reads", [("note_id", "=", note_id), ("staff_id", "=", staff.staff_id)])
 
     reads = (
-        db.query(HandoverRead)
-        .filter(HandoverRead.note_id == note_id)
-        .order_by(HandoverRead.read_at.asc(), HandoverRead.read_id.asc())
+        db.query("handover_reads")
+        .filter(("note_id", "=", note_id))
+        .order_by("read_at ASC", "read_id ASC")
         .all()
     )
     staff_ids = {row.staff_id for row in reads}
     staff_name_by_id: dict[int, str] = {}
     if staff_ids:
-        staff_rows = db.query(Staff).filter(Staff.staff_id.in_(staff_ids)).all()
-        staff_name_by_id = {row.staff_id: row.name for row in staff_rows}
+        staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
+        staff_name_by_id = {row.id: row.username for row in staff_rows}
     reader_names: list[str] = []
     for read in reads:
         name = staff_name_by_id.get(read.staff_id, f"ID {read.staff_id}")
@@ -2106,33 +1955,29 @@ def staff_handover_read_toggle(
 def staff_cash_closing_page(
     request: Request,
     edit_id: Optional[int] = None,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
     staff = ensure_staff(request, db)
     closings = (
-        db.query(CashClosing)
-        .order_by(desc(CashClosing.business_date), desc(CashClosing.created_at), desc(CashClosing.closing_id))
+        db.query("cash_closings")
+        .order_by("business_date DESC", "created_at DESC", "closing_id DESC")
         .limit(300)
         .all()
     )
-    editing_closing = db.get(CashClosing, edit_id) if edit_id else None
+    editing_closing = db.get("cash_closings", "closing_id", edit_id) if edit_id else None
     if edit_id and editing_closing is None:
         raise HTTPException(status_code=404, detail="Cash closing not found.")
 
     closing_ids = [row.closing_id for row in closings]
-    create_audits: list[CashClosingAudit] = []
+    create_audits: list = []
     if closing_ids:
         create_audits = (
-            db.query(CashClosingAudit)
+            db.query("cash_closing_audits")
             .filter(
-                CashClosingAudit.closing_id.in_(closing_ids),
-                CashClosingAudit.action == "CREATE",
+                ("closing_id", "IN", closing_ids),
+                ("action", "=", "CREATE"),
             )
-            .order_by(
-                CashClosingAudit.closing_id.asc(),
-                CashClosingAudit.created_at.asc(),
-                CashClosingAudit.audit_id.asc(),
-            )
+            .order_by("closing_id ASC", "created_at ASC", "audit_id ASC")
             .all()
         )
 
@@ -2149,8 +1994,8 @@ def staff_cash_closing_page(
             staff_ids.add(editing_closing.verified_by_staff_id)
     staff_name_by_id: dict[int, str] = {}
     if staff_ids:
-        staff_rows = db.query(Staff).filter(Staff.staff_id.in_(staff_ids)).all()
-        staff_name_by_id = {row.staff_id: row.name for row in staff_rows}
+        staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
+        staff_name_by_id = {row.id: row.username for row in staff_rows}
     creator_name_by_closing: dict[int, str] = {}
     for audit in create_audits:
         if audit.closing_id in creator_name_by_closing:
@@ -2227,17 +2072,17 @@ def staff_cash_closing_create(
     actual_qr_amount: int = Form(-1),
     owner_name: str = Form(""),
     note: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
 
     _ = business_date_range_utc(business_date)
     normalized_closing_type = parse_cash_closing_type(closing_type)
     existing_row = (
-        db.query(CashClosing)
+        db.query("cash_closings")
         .filter(
-            CashClosing.business_date == business_date,
-            CashClosing.closing_type == normalized_closing_type,
+            ("business_date", "=", business_date),
+            ("closing_type", "=", normalized_closing_type),
         )
         .first()
     )
@@ -2272,42 +2117,40 @@ def staff_cash_closing_create(
     check_auto_amount = sales["cash_amount"]
     difference_amount = total_amount - check_auto_amount
 
-    row = CashClosing(
-        business_date=business_date,
-        closing_type=normalized_closing_type,
-        workflow_status="DRAFT",
-        count_10000=count_10000,
-        count_5000=count_5000,
-        count_2000=count_2000,
-        count_1000=count_1000,
-        count_500=count_500,
-        count_100=count_100,
-        count_50=count_50,
-        count_10=count_10,
-        count_5=count_5,
-        count_1=count_1,
-        total_amount=total_amount,
-        paypay_amount=paypay_amount,
-        actual_qr_amount=resolved_actual_qr_amount,
-        qr_difference_amount=qr_difference_amount,
-        check_auto_amount=check_auto_amount,
-        expected_amount=check_auto_amount,
-        actual_amount=total_amount,
-        difference_amount=difference_amount,
-        submitted_by_staff_id=None,
-        submitted_at=None,
-        verified_by_staff_id=None,
-        verified_at=None,
-        check_cash_match=False,
-        check_qr_match=False,
-        check_pending_items=False,
-        check_handover_note=False,
-        owner_name=owner_name.strip() or staff.name,
-        note=note.strip() or None,
-        staff_id=staff.staff_id,
-    )
-    db.add(row)
-    db.flush()
+    row = db.insert("cash_closings", {
+        "business_date": business_date,
+        "closing_type": normalized_closing_type,
+        "workflow_status": "DRAFT",
+        "count_10000": count_10000,
+        "count_5000": count_5000,
+        "count_2000": count_2000,
+        "count_1000": count_1000,
+        "count_500": count_500,
+        "count_100": count_100,
+        "count_50": count_50,
+        "count_10": count_10,
+        "count_5": count_5,
+        "count_1": count_1,
+        "total_amount": total_amount,
+        "paypay_amount": paypay_amount,
+        "actual_qr_amount": resolved_actual_qr_amount,
+        "qr_difference_amount": qr_difference_amount,
+        "check_auto_amount": check_auto_amount,
+        "expected_amount": check_auto_amount,
+        "actual_amount": total_amount,
+        "difference_amount": difference_amount,
+        "submitted_by_staff_id": None,
+        "submitted_at": None,
+        "verified_by_staff_id": None,
+        "verified_at": None,
+        "check_cash_match": False,
+        "check_qr_match": False,
+        "check_pending_items": False,
+        "check_handover_note": False,
+        "owner_name": owner_name.strip() or staff.name,
+        "note": note.strip() or None,
+        "staff_id": staff.staff_id,
+    })
     create_cash_closing_audit(
         db,
         row,
@@ -2322,7 +2165,6 @@ def staff_cash_closing_create(
             "qr_difference_amount": row.qr_difference_amount,
         },
     )
-    db.commit()
     return RedirectResponse(url="/staff/cash-closing", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -2346,10 +2188,10 @@ def staff_cash_closing_update(
     owner_name: str = Form(""),
     note: str = Form(""),
     admin_edit_reason: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
-    row = db.get(CashClosing, closing_id)
+    row = db.get("cash_closings", "closing_id", closing_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Cash closing not found.")
 
@@ -2433,7 +2275,6 @@ def staff_cash_closing_update(
     row.owner_name = owner_name.strip() or staff.name
     row.note = note.strip() or None
     row.staff_id = staff.staff_id
-    row.updated_at = utc_now()
 
     create_cash_closing_audit(
         db,
@@ -2450,7 +2291,7 @@ def staff_cash_closing_update(
             "qr_difference_amount": row.qr_difference_amount,
         },
     )
-    db.commit()
+    db.update(row)
     return RedirectResponse(url="/staff/cash-closing", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -2458,10 +2299,10 @@ def staff_cash_closing_update(
 def staff_cash_closing_submit(
     request: Request,
     closing_id: int,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
-    row = db.get(CashClosing, closing_id)
+    row = db.get("cash_closings", "closing_id", closing_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Cash closing not found.")
     if row.workflow_status == "LOCKED":
@@ -2477,7 +2318,6 @@ def staff_cash_closing_submit(
     row.check_pending_items = False
     row.check_handover_note = False
     row.staff_id = staff.staff_id
-    row.updated_at = utc_now()
 
     create_cash_closing_audit(
         db,
@@ -2489,7 +2329,7 @@ def staff_cash_closing_submit(
             "submitted_by_staff_id": row.submitted_by_staff_id,
         },
     )
-    db.commit()
+    db.update(row)
     return RedirectResponse(url="/staff/cash-closing", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -2501,10 +2341,10 @@ def staff_cash_closing_verify_lock(
     check_qr_match: str = Form(""),
     check_pending_items: str = Form(""),
     check_handover_note: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
-    row = db.get(CashClosing, closing_id)
+    row = db.get("cash_closings", "closing_id", closing_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Cash closing not found.")
     if row.workflow_status != "SUBMITTED":
@@ -2531,7 +2371,6 @@ def staff_cash_closing_verify_lock(
     row.verified_by_staff_id = staff.staff_id
     row.verified_at = utc_now()
     row.staff_id = staff.staff_id
-    row.updated_at = utc_now()
 
     create_cash_closing_audit(
         db,
@@ -2545,7 +2384,7 @@ def staff_cash_closing_verify_lock(
             **checks,
         },
     )
-    db.commit()
+    db.update(row)
     return RedirectResponse(url=f"/staff/cash-closing/{closing_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -2553,17 +2392,17 @@ def staff_cash_closing_verify_lock(
 def staff_cash_closing_detail(
     request: Request,
     closing_id: int,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
     staff = ensure_staff(request, db)
-    row = db.get(CashClosing, closing_id)
+    row = db.get("cash_closings", "closing_id", closing_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Cash closing not found.")
 
     audits = (
-        db.query(CashClosingAudit)
-        .filter(CashClosingAudit.closing_id == row.closing_id)
-        .order_by(desc(CashClosingAudit.created_at), desc(CashClosingAudit.audit_id))
+        db.query("cash_closing_audits")
+        .filter(("closing_id", "=", row.closing_id))
+        .order_by("created_at DESC", "audit_id DESC")
         .limit(60)
         .all()
     )
@@ -2571,7 +2410,7 @@ def staff_cash_closing_detail(
     staff_ids.update(audit.staff_id for audit in audits if audit.staff_id)
     staff_name_by_id: dict[int, str] = {}
     if staff_ids:
-        staff_rows = db.query(Staff).filter(Staff.staff_id.in_(staff_ids)).all()
+        staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
         staff_name_by_id = {staff_row.staff_id: staff_row.name for staff_row in staff_rows}
 
     created_by_staff_id = row.staff_id
@@ -2617,7 +2456,7 @@ def staff_cash_closing_detail(
 def staff_cash_closing_auto_sales(
     request: Request,
     business_date: str,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> JSONResponse:
     _ = ensure_staff(request, db)
     sales = summarize_order_sales_for_date(db, business_date)
@@ -2627,17 +2466,17 @@ def staff_cash_closing_auto_sales(
 @app.get("/staff/schedule", response_class=HTMLResponse)
 def staff_schedule_page(
     request: Request,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
     staff = ensure_staff(request, db)
     schedule_enabled = is_schedule_feature_enabled(db)
     schedule_embed_url = get_app_setting(db, SCHEDULE_GOOGLE_EMBED_URL_KEY, "")
-    schedule_setting_row = db.query(AppSetting).filter(AppSetting.setting_key == SCHEDULE_GOOGLE_EMBED_URL_KEY).first()
+    schedule_setting_row = db.query("app_settings").filter(("setting_key", "=", SCHEDULE_GOOGLE_EMBED_URL_KEY)).first()
     updated_by = "-"
     updated_at = "-"
     if schedule_setting_row:
         if schedule_setting_row.staff_id:
-            updater = db.get(Staff, schedule_setting_row.staff_id)
+            updater = db.get("user_profiles", "id", schedule_setting_row.staff_id)
             if updater:
                 updated_by = updater.name
             else:
@@ -2663,7 +2502,7 @@ def staff_schedule_update(
     request: Request,
     google_embed_url: str = Form(""),
     schedule_enabled: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = get_current_staff(request, db, require_admin=True)
     normalized_embed_url = normalize_schedule_embed_url(google_embed_url)
@@ -2681,7 +2520,6 @@ def staff_schedule_update(
         "1" if is_enabled else "0",
         staff.staff_id,
     )
-    db.commit()
     return RedirectResponse(url="/staff/schedule", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -2691,7 +2529,7 @@ def admin_sales_dashboard(
     start_date: str = "",
     end_date: str = "",
     edit_rental_id: Optional[int] = None,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
     staff = get_current_staff(request, db, require_admin=True)
     today_jst = utc_now().astimezone(JST).date()
@@ -2702,12 +2540,12 @@ def admin_sales_dashboard(
     analytics = build_sales_analytics(db, selected_start, selected_end)
 
     rental_rows = (
-        db.query(RentalDailySales)
-        .order_by(desc(RentalDailySales.business_date), desc(RentalDailySales.updated_at), desc(RentalDailySales.rental_id))
+        db.query("rental_daily_sales")
+        .order_by("business_date DESC", "updated_at DESC", "rental_id DESC")
         .limit(400)
         .all()
     )
-    editing_rental = db.get(RentalDailySales, edit_rental_id) if edit_rental_id else None
+    editing_rental = db.get("rental_daily_sales", "rental_id", edit_rental_id) if edit_rental_id else None
     if edit_rental_id and editing_rental is None:
         raise HTTPException(status_code=404, detail="Rental row not found.")
 
@@ -2716,8 +2554,8 @@ def admin_sales_dashboard(
         staff_ids.add(editing_rental.staff_id)
     staff_name_by_id: dict[int, str] = {}
     if staff_ids:
-        staff_rows = db.query(Staff).filter(Staff.staff_id.in_(staff_ids)).all()
-        staff_name_by_id = {row.staff_id: row.name for row in staff_rows}
+        staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
+        staff_name_by_id = {row.id: row.username for row in staff_rows}
 
     return templates.TemplateResponse(
         "staff_admin_sales.html",
@@ -2751,7 +2589,7 @@ def admin_sales_rental_create_or_upsert(
     note: str = Form(""),
     start_date: str = Form(""),
     end_date: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = get_current_staff(request, db, require_admin=True)
 
@@ -2761,23 +2599,22 @@ def admin_sales_rental_create_or_upsert(
     if customer_count < 0:
         raise HTTPException(status_code=400, detail="Customer count must be non-negative.")
 
-    row = db.query(RentalDailySales).filter(RentalDailySales.business_date == business_date).first()
+    row = db.query("rental_daily_sales").filter(("business_date", "=", business_date)).first()
     if row is None:
-        row = RentalDailySales(
-            business_date=business_date,
-            revenue_amount=revenue_amount,
-            customer_count=customer_count,
-            note=note.strip() or None,
-            staff_id=staff.staff_id,
-        )
-        db.add(row)
+        db.insert("rental_daily_sales", {
+            "business_date": business_date,
+            "revenue_amount": revenue_amount,
+            "customer_count": customer_count,
+            "note": note.strip() or None,
+            "staff_id": staff.staff_id,
+            "created_at": utc_now(),
+        })
     else:
         row.revenue_amount = revenue_amount
         row.customer_count = customer_count
         row.note = note.strip() or None
         row.staff_id = staff.staff_id
-        row.updated_at = utc_now()
-    db.commit()
+        db.update(row)
 
     redirect_start = start_date.strip() or business_date
     redirect_end = end_date.strip() or business_date
@@ -2797,10 +2634,10 @@ def admin_sales_rental_update(
     note: str = Form(""),
     start_date: str = Form(""),
     end_date: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = get_current_staff(request, db, require_admin=True)
-    row = db.get(RentalDailySales, rental_id)
+    row = db.get("rental_daily_sales", "rental_id", rental_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Rental row not found.")
 
@@ -2811,8 +2648,8 @@ def admin_sales_rental_update(
         raise HTTPException(status_code=400, detail="Customer count must be non-negative.")
 
     duplicated = (
-        db.query(RentalDailySales)
-        .filter(RentalDailySales.business_date == business_date, RentalDailySales.rental_id != rental_id)
+        db.query("rental_daily_sales")
+        .filter(("business_date", "=", business_date), ("rental_id", "!=", rental_id))
         .first()
     )
     if duplicated:
@@ -2823,8 +2660,7 @@ def admin_sales_rental_update(
     row.customer_count = customer_count
     row.note = note.strip() or None
     row.staff_id = staff.staff_id
-    row.updated_at = utc_now()
-    db.commit()
+    db.update(row)
 
     redirect_start = start_date.strip() or business_date
     redirect_end = end_date.strip() or business_date
@@ -2840,16 +2676,15 @@ def admin_sales_rental_delete(
     rental_id: int,
     start_date: str = Form(""),
     end_date: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     _ = get_current_staff(request, db, require_admin=True)
-    row = db.get(RentalDailySales, rental_id)
+    row = db.get("rental_daily_sales", "rental_id", rental_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Rental row not found.")
 
     fallback_date = row.business_date
-    db.delete(row)
-    db.commit()
+    db.delete_row("rental_daily_sales", "rental_id", rental_id)
 
     redirect_start = start_date.strip() or fallback_date
     redirect_end = end_date.strip() or fallback_date
@@ -2862,7 +2697,7 @@ def admin_sales_rental_delete(
 @app.get("/staff/admin/completion-message", response_class=HTMLResponse)
 def admin_completion_message_page(
     request: Request,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
     staff = get_current_staff(request, db, require_admin=True)
     completion_messages = load_completion_messages(db)
@@ -2881,14 +2716,12 @@ def admin_completion_message_page(
     }
 
     rows = (
-        db.query(AppSetting)
+        db.query("app_settings")
         .filter(
-            AppSetting.setting_key.in_(
-                (
-                    SUCCESS_PRIMARY_MESSAGE_KEYS["ko"],
-                    SUCCESS_SECONDARY_MESSAGE_KEYS["ko"],
-                )
-            )
+            ("setting_key", "IN", [
+                SUCCESS_PRIMARY_MESSAGE_KEYS["ko"],
+                SUCCESS_SECONDARY_MESSAGE_KEYS["ko"],
+            ])
         )
         .all()
     )
@@ -2898,8 +2731,8 @@ def admin_completion_message_page(
         staff_ids = {row.staff_id for row in rows if row.staff_id}
         staff_name_by_id: dict[int, str] = {}
         if staff_ids:
-            staff_rows = db.query(Staff).filter(Staff.staff_id.in_(staff_ids)).all()
-            staff_name_by_id = {row.staff_id: row.name for row in staff_rows}
+            staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
+            staff_name_by_id = {row.id: row.username for row in staff_rows}
         for row in rows:
             if row.staff_id:
                 updated_by[row.setting_key] = staff_name_by_id.get(row.staff_id, f"ID {row.staff_id}")
@@ -2928,7 +2761,7 @@ def admin_completion_message_update(
     request: Request,
     primary_message_ko: str = Form(...),
     secondary_message_ko: str = Form(...),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = get_current_staff(request, db, require_admin=True)
     if not primary_message_ko.strip():
@@ -2950,7 +2783,6 @@ def admin_completion_message_update(
             resolved["secondary"][lang_code],
             staff.staff_id,
         )
-    db.commit()
     return RedirectResponse(url="/staff/admin/completion-message", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -2959,18 +2791,19 @@ def admin_staff_accounts_page(
     request: Request,
     msg: str = "",
     err: str = "",
-    focus_staff_id: Optional[int] = None,
-    db: Session = Depends(get_db),
+    focus_staff_id: Optional[str] = None,
+    db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
     staff = get_current_staff(request, db, require_admin=True)
     staff_rows = (
-        db.query(Staff)
-        .order_by(desc(Staff.is_admin), desc(Staff.is_active), Staff.name.asc(), Staff.staff_id.asc())
+        db.query("user_profiles")
+        .filter(("role", "IN", ["admin", "editor"]))
+        .order_by("role DESC", "is_active DESC", "username ASC")
         .all()
     )
     active_admin_count = (
-        db.query(Staff)
-        .filter(Staff.is_admin.is_(True), Staff.is_active.is_(True))
+        db.query("user_profiles")
+        .filter(("role", "=", "admin"), ("is_active", "=", True))
         .count()
     )
     return templates.TemplateResponse(
@@ -2992,45 +2825,59 @@ def admin_staff_accounts_page(
 @app.post("/staff/admin/staff-accounts")
 def admin_staff_accounts_create(
     request: Request,
-    name: str = Form(...),
-    pin: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    display_name: str = Form(""),
     is_admin: str = Form("0"),
-    is_active: str = Form("1"),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     _ = get_current_staff(request, db, require_admin=True)
-    resolved_name = name.strip()
-    resolved_pin = pin.strip()
-    resolved_admin = is_admin in {"1", "on", "true", "yes"}
-    resolved_active = is_active in {"1", "on", "true", "yes"}
+    import supabase as _supabase
+    resolved_email = email.strip()
+    resolved_display = display_name.strip() or resolved_email.split("@")[0]
+    resolved_role = "admin" if is_admin in {"1", "on", "true", "yes"} else "editor"
 
-    if not resolved_name:
+    if not resolved_email:
         return RedirectResponse(
-            url=build_staff_accounts_redirect(err="계정 이름을 입력해주세요."),
+            url=build_staff_accounts_redirect(err="이메일을 입력해주세요."),
             status_code=status.HTTP_303_SEE_OTHER,
         )
-    if len(resolved_pin) < 4:
+    if len(password.strip()) < 6:
         return RedirectResponse(
-            url=build_staff_accounts_redirect(err="PIN은 4자리 이상 입력해주세요."),
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-    duplicated = db.query(Staff).filter(Staff.name == resolved_name).first()
-    if duplicated:
-        return RedirectResponse(
-            url=build_staff_accounts_redirect(err="같은 이름의 계정이 이미 있습니다."),
+            url=build_staff_accounts_redirect(err="비밀번호는 6자리 이상 입력해주세요."),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    row = Staff(
-        name=resolved_name,
-        pin_hash=hash_pin(resolved_pin),
-        is_admin=resolved_admin,
-        is_active=resolved_active,
-    )
-    db.add(row)
-    db.commit()
+    try:
+        admin_client = _supabase.create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        auth_resp = admin_client.auth.admin.create_user({
+            "email": resolved_email,
+            "password": password.strip(),
+            "email_confirm": True,
+        })
+        new_user = auth_resp.user
+    except Exception as e:
+        return RedirectResponse(
+            url=build_staff_accounts_redirect(err=f"계정 생성 실패: {e}"),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    try:
+        db.insert("user_profiles", {
+            "id": str(new_user.id),
+            "username": resolved_email.split("@")[0],
+            "display_name": resolved_display,
+            "role": resolved_role,
+            "is_active": True,
+        })
+    except Exception as e:
+        return RedirectResponse(
+            url=build_staff_accounts_redirect(err=f"프로필 생성 실패: {e}"),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
     return RedirectResponse(
-        url=build_staff_accounts_redirect(msg=f"{resolved_name} 계정을 생성했습니다."),
+        url=build_staff_accounts_redirect(msg=f"{resolved_email} 계정을 생성했습니다."),
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -3038,57 +2885,39 @@ def admin_staff_accounts_create(
 @app.post("/staff/admin/staff-accounts/{target_staff_id}/update")
 def admin_staff_accounts_update(
     request: Request,
-    target_staff_id: int,
-    name: str = Form(...),
-    pin: str = Form(""),
+    target_staff_id: str,
+    display_name: str = Form(...),
     is_admin: str = Form("0"),
     is_active: str = Form("1"),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     actor = get_current_staff(request, db, require_admin=True)
-    row = db.get(Staff, target_staff_id)
+    row = db.get("user_profiles", "id", target_staff_id)
     if row is None:
         return RedirectResponse(
             url=build_staff_accounts_redirect(err="대상 계정을 찾을 수 없습니다."),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    resolved_name = name.strip()
-    resolved_pin = pin.strip()
-    resolved_admin = is_admin in {"1", "on", "true", "yes"}
+    resolved_display = display_name.strip()
+    resolved_role = "admin" if is_admin in {"1", "on", "true", "yes"} else "editor"
     resolved_active = is_active in {"1", "on", "true", "yes"}
 
-    if not resolved_name:
+    if not resolved_display:
         return RedirectResponse(
-            url=build_staff_accounts_redirect(err="계정 이름을 입력해주세요."),
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-    if resolved_pin and len(resolved_pin) < 4:
-        return RedirectResponse(
-            url=build_staff_accounts_redirect(err="PIN을 변경할 때는 4자리 이상 입력해주세요."),
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
-
-    duplicated = (
-        db.query(Staff)
-        .filter(Staff.name == resolved_name, Staff.staff_id != row.staff_id)
-        .first()
-    )
-    if duplicated:
-        return RedirectResponse(
-            url=build_staff_accounts_redirect(err="같은 이름의 계정이 이미 있습니다."),
+            url=build_staff_accounts_redirect(err="표시 이름을 입력해주세요."),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
     active_admin_count = (
-        db.query(Staff)
-        .filter(Staff.is_admin.is_(True), Staff.is_active.is_(True))
+        db.query("user_profiles")
+        .filter(("role", "=", "admin"), ("is_active", "=", True))
         .count()
     )
     removing_last_active_admin = (
-        row.is_admin
+        row.role == "admin"
         and row.is_active
-        and (not resolved_admin or not resolved_active)
+        and (resolved_role != "admin" or not resolved_active)
         and active_admin_count <= 1
     )
     if removing_last_active_admin:
@@ -3097,22 +2926,20 @@ def admin_staff_accounts_update(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    if row.staff_id == actor.staff_id and not resolved_active:
+    if str(row.id) == str(actor.id) and not resolved_active:
         return RedirectResponse(
             url=build_staff_accounts_redirect(err="현재 로그인한 본인 계정은 비활성화할 수 없습니다."),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    row.name = resolved_name
-    row.is_admin = resolved_admin
+    row.display_name = resolved_display
+    row.role = resolved_role
     row.is_active = resolved_active
-    if resolved_pin:
-        row.pin_hash = hash_pin(resolved_pin)
-    db.commit()
+    db.update(row)
     return RedirectResponse(
         url=build_staff_accounts_redirect(
-            msg=f"{resolved_name} 계정을 수정했습니다.",
-            focus_staff_id=row.staff_id,
+            msg=f"{resolved_display} 계정을 수정했습니다.",
+            focus_staff_id=str(row.id),
         ),
         status_code=status.HTTP_303_SEE_OTHER,
     )
@@ -3121,11 +2948,11 @@ def admin_staff_accounts_update(
 @app.post("/staff/admin/staff-accounts/{target_staff_id}/toggle-active")
 def admin_staff_accounts_toggle_active(
     request: Request,
-    target_staff_id: int,
-    db: Session = Depends(get_db),
+    target_staff_id: str,
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     actor = get_current_staff(request, db, require_admin=True)
-    row = db.get(Staff, target_staff_id)
+    row = db.get("user_profiles", "id", target_staff_id)
     if row is None:
         return RedirectResponse(
             url=build_staff_accounts_redirect(err="대상 계정을 찾을 수 없습니다."),
@@ -3133,37 +2960,37 @@ def admin_staff_accounts_toggle_active(
         )
 
     target_active = not bool(row.is_active)
-    if not target_active and row.staff_id == actor.staff_id:
+    if not target_active and str(row.id) == str(actor.id):
         return RedirectResponse(
             url=build_staff_accounts_redirect(
                 err="현재 로그인한 본인 계정은 잠글 수 없습니다.",
-                focus_staff_id=row.staff_id,
+                focus_staff_id=str(row.id),
             ),
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    if row.is_admin and row.is_active and not target_active:
+    if row.role == "admin" and row.is_active and not target_active:
         active_admin_count = (
-            db.query(Staff)
-            .filter(Staff.is_admin.is_(True), Staff.is_active.is_(True))
+            db.query("user_profiles")
+            .filter(("role", "=", "admin"), ("is_active", "=", True))
             .count()
         )
         if active_admin_count <= 1:
             return RedirectResponse(
                 url=build_staff_accounts_redirect(
                     err="최소 1명의 활성 관리자 계정은 유지되어야 합니다.",
-                    focus_staff_id=row.staff_id,
+                    focus_staff_id=str(row.id),
                 ),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
 
     row.is_active = target_active
-    db.commit()
+    db.update(row)
     state_label = "복구" if target_active else "잠금"
     return RedirectResponse(
         url=build_staff_accounts_redirect(
-            msg=f"{row.name} 계정을 {state_label}했습니다.",
-            focus_staff_id=row.staff_id,
+            msg=f"{row.username} 계정을 {state_label}했습니다.",
+            focus_staff_id=str(row.id),
         ),
         status_code=status.HTTP_303_SEE_OTHER,
     )
@@ -3175,7 +3002,7 @@ def staff_orders_api(
     status_filter: list[str] = Query(default=[]),
     show_all_picked_up: bool = False,
     q: str = "",
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> JSONResponse:
     _ = ensure_staff(request, db)
     selected_status_filters = normalize_status_filters(status_filter)
@@ -3194,10 +3021,10 @@ def staff_inline_update_order(
     request: Request,
     order_id: str,
     payload: dict = Body(...),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> JSONResponse:
     staff = ensure_staff(request, db)
-    order = db.get(Order, order_id)
+    order = db.get("orders", "order_id", order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -3270,8 +3097,7 @@ def staff_inline_update_order(
     order.note = note if note else (auto_note or None)
 
     order.staff_id = staff.staff_id
-    db.commit()
-    db.refresh(order)
+    db.update(order)
     return JSONResponse({"order": serialize_staff_order(order)})
 
 
@@ -3279,10 +3105,10 @@ def staff_inline_update_order(
 def staff_inline_pickup_order(
     request: Request,
     order_id: str,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> JSONResponse:
     staff = ensure_staff(request, db)
-    order = db.get(Order, order_id)
+    order = db.get("orders", "order_id", order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -3291,8 +3117,7 @@ def staff_inline_pickup_order(
             apply_pickup_completion(order, staff.staff_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        db.commit()
-        db.refresh(order)
+        db.update(order)
 
     return JSONResponse({"order": serialize_staff_order(order)})
 
@@ -3301,17 +3126,16 @@ def staff_inline_pickup_order(
 def staff_inline_undo_pickup_order(
     request: Request,
     order_id: str,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> JSONResponse:
     staff = ensure_staff(request, db)
-    order = db.get(Order, order_id)
+    order = db.get("orders", "order_id", order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
     if order.status == "PICKED_UP":
         undo_pickup_completion(order, staff.staff_id)
-        db.commit()
-        db.refresh(order)
+        db.update(order)
 
     return JSONResponse({"order": serialize_staff_order(order)})
 
@@ -3320,13 +3144,13 @@ def staff_inline_undo_pickup_order(
 def staff_order_detail(
     request: Request,
     order_id: str,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
     staff = ensure_staff(request, db)
-    order = db.get(Order, order_id)
+    order = db.get("orders", "order_id", order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
-    last_modified_staff = db.get(Staff, order.staff_id) if order.staff_id else None
+    last_modified_staff = db.get("user_profiles", "id", order.staff_id) if order.staff_id else None
 
     return templates.TemplateResponse(
         "staff_order_detail.html",
@@ -3351,10 +3175,10 @@ def staff_mark_paid(
     order_id: str,
     payment_method: str = Form(...),
     tag_no: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
-    order = db.get(Order, order_id)
+    order = db.get("orders", "order_id", order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -3372,8 +3196,7 @@ def staff_mark_paid(
     elif not order.tag_no:
         order.tag_no = build_tag_no(db, order.created_at)
     order.staff_id = staff.staff_id
-
-    db.commit()
+    db.update(order)
     return RedirectResponse(url=f"/staff/orders/{order_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -3387,10 +3210,10 @@ def staff_update_order(
     note: str = Form(""),
     expected_pickup_at: str = Form(...),
     status_value: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
-    order = db.get(Order, order_id)
+    order = db.get("orders", "order_id", order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
@@ -3430,7 +3253,7 @@ def staff_update_order(
         order.status = normalized_status
 
     order.staff_id = staff.staff_id
-    db.commit()
+    db.update(order)
     return RedirectResponse(url=f"/staff/orders/{order_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -3438,10 +3261,10 @@ def staff_update_order(
 def staff_mark_picked_up(
     request: Request,
     order_id: str,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
-    order = db.get(Order, order_id)
+    order = db.get("orders", "order_id", order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
     try:
@@ -3449,7 +3272,7 @@ def staff_mark_picked_up(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    db.commit()
+    db.update(order)
     return RedirectResponse(url=f"/staff/orders/{order_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -3457,16 +3280,16 @@ def staff_mark_picked_up(
 def staff_undo_picked_up(
     request: Request,
     order_id: str,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
-    order = db.get(Order, order_id)
+    order = db.get("orders", "order_id", order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
     if order.status == "PICKED_UP":
         undo_pickup_completion(order, staff.staff_id)
-        db.commit()
+        db.update(order)
 
     return RedirectResponse(url=f"/staff/orders/{order_id}", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -3481,7 +3304,7 @@ def create_manual_order(
     expected_pickup_at: str = Form(""),
     expected_pickup_date: str = Form(""),
     expected_pickup_time: str = Form(""),
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
 
@@ -3513,40 +3336,37 @@ def create_manual_order(
     discount_rate, prepaid_amount = calculate_prepaid_amount(pricing.price_per_day, expected_storage_days)
 
     order_id = f"M-{build_order_id(db, now)}"
-    order = Order(
-        order_id=order_id,
-        created_at=now,
-        name=name.strip(),
-        phone=phone.strip(),
-        companion_count=1,
-        suitcase_qty=suitcase_qty,
-        backpack_qty=backpack_qty,
-        set_qty=pricing.set_qty,
-        expected_pickup_at=pickup_at,
-        expected_storage_days=expected_storage_days,
-        actual_storage_days=None,
-        extra_days=0,
-        price_per_day=pricing.price_per_day,
-        discount_rate=discount_rate,
-        prepaid_amount=prepaid_amount,
-        flying_pass_tier="NONE",
-        flying_pass_discount_amount=0,
-        staff_prepaid_override_amount=None,
-        extra_amount=0,
-        final_amount=prepaid_amount,
-        payment_method=None,
-        status="PAYMENT_PENDING",
-        tag_no=build_tag_no(db, now),
-        note=auto_pickup_note(now, pickup_at) or None,
-        id_image_url="",
-        luggage_image_url="",
-        consent_checked=True,
-        manual_entry=True,
-        staff_id=staff.staff_id,
-    )
-
-    db.add(order)
-    db.commit()
+    order = db.insert("orders", {
+        "order_id": order_id,
+        "created_at": now,
+        "name": name.strip(),
+        "phone": phone.strip(),
+        "companion_count": 1,
+        "suitcase_qty": suitcase_qty,
+        "backpack_qty": backpack_qty,
+        "set_qty": pricing.set_qty,
+        "expected_pickup_at": pickup_at,
+        "expected_storage_days": expected_storage_days,
+        "actual_storage_days": None,
+        "extra_days": 0,
+        "price_per_day": pricing.price_per_day,
+        "discount_rate": discount_rate,
+        "prepaid_amount": prepaid_amount,
+        "flying_pass_tier": "NONE",
+        "flying_pass_discount_amount": 0,
+        "staff_prepaid_override_amount": None,
+        "extra_amount": 0,
+        "final_amount": prepaid_amount,
+        "payment_method": None,
+        "status": "PAYMENT_PENDING",
+        "tag_no": build_tag_no(db, now),
+        "note": auto_pickup_note(now, pickup_at) or None,
+        "id_image_url": "",
+        "luggage_image_url": "",
+        "consent_checked": True,
+        "manual_entry": True,
+        "staff_id": staff.staff_id,
+    })
     return RedirectResponse(url=f"/staff/orders/{order_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -3554,22 +3374,20 @@ def create_manual_order(
 def staff_view_id_image(
     request: Request,
     order_id: str,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> FileResponse:
     staff = ensure_staff(request, db)
-    order = db.get(Order, order_id)
+    order = db.get("orders", "order_id", order_id)
     if order is None or not order.id_image_url:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    db.add(
-        AuditLog(
-            order_id=order.order_id,
-            staff_id=staff.staff_id,
-            device_id=request.headers.get("x-device-id", request.client.host if request.client else "unknown"),
-            action="VIEW_ID",
-        )
-    )
-    db.commit()
+    db.insert("audit_logs", {
+        "order_id": order.order_id,
+        "staff_id": staff.staff_id,
+        "device_id": request.headers.get("x-device-id", request.client.host if request.client else "unknown"),
+        "action": "VIEW_ID",
+        "timestamp": utc_now(),
+    })
 
     return FileResponse(
         order.id_image_url,
@@ -3581,22 +3399,20 @@ def staff_view_id_image(
 def staff_view_luggage_image(
     request: Request,
     order_id: str,
-    db: Session = Depends(get_db),
+    db: SupabaseDB = Depends(get_db),
 ) -> FileResponse:
     staff = ensure_staff(request, db)
-    order = db.get(Order, order_id)
+    order = db.get("orders", "order_id", order_id)
     if order is None or not order.luggage_image_url:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    db.add(
-        AuditLog(
-            order_id=order.order_id,
-            staff_id=staff.staff_id,
-            device_id=request.headers.get("x-device-id", request.client.host if request.client else "unknown"),
-            action="VIEW_LUGGAGE",
-        )
-    )
-    db.commit()
+    db.insert("audit_logs", {
+        "order_id": order.order_id,
+        "staff_id": staff.staff_id,
+        "device_id": request.headers.get("x-device-id", request.client.host if request.client else "unknown"),
+        "action": "VIEW_LUGGAGE",
+        "timestamp": utc_now(),
+    })
 
     return FileResponse(
         order.luggage_image_url,
@@ -3605,7 +3421,7 @@ def staff_view_luggage_image(
 
 
 @app.post("/staff/admin/retention/run")
-def admin_run_retention(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+def admin_run_retention(request: Request, db: SupabaseDB = Depends(get_db)) -> RedirectResponse:
     _ = get_current_staff(request, db, require_admin=True)
     try:
         result = run_retention_cleanup(db)

@@ -21,3 +21,9 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# OMC state
+.omc/
+
+# Supabase CLI local state
+supabase/.temp/

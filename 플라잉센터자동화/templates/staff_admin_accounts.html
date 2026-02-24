@@ -4,14 +4,14 @@
   <div>
     <p class="hero-kicker">Admin</p>
     <h2 class="hero-title">계정관리</h2>
-    <p class="hero-desc">직원/매니저 계정을 생성하고 PIN(비밀번호)을 변경합니다.</p>
+    <p class="hero-desc">직원/매니저 계정을 생성하고 관리합니다.</p>
   </div>
 </section>
 {% include "staff_menu.html" %}
 
 <section class="card">
   <h3 class="card-title">신규 계정 생성</h3>
-  <p class="card-desc">PIN은 4자리 이상 입력해주세요.</p>
+  <p class="card-desc">이메일과 임시 비밀번호를 입력해주세요.</p>
   {% if msg %}
   <p class="success-note">{{ msg }}</p>
   {% endif %}
@@ -21,13 +21,13 @@
 
   <form method="post" action="/staff/admin/staff-accounts" class="account-create-grid">
     <label class="field">
-      <span class="field-label">계정 이름</span>
-      <input class="control" type="text" name="name" maxlength="100" required />
+      <span class="field-label">이메일</span>
+      <input class="control" type="email" name="email" maxlength="100" required />
     </label>
 
     <label class="field">
-      <span class="field-label">PIN (비밀번호)</span>
-      <input class="control" type="password" name="pin" minlength="4" inputmode="numeric" required />
+      <span class="field-label">임시 비밀번호</span>
+      <input class="control" type="password" name="password" required />
     </label>
 
     <label class="field">
@@ -35,14 +35,6 @@
       <select class="control" name="is_admin" required>
         <option value="0">직원</option>
         <option value="1">매니저(관리자)</option>
-      </select>
-    </label>
-
-    <label class="field">
-      <span class="field-label">상태</span>
-      <select class="control" name="is_active" required>
-        <option value="1">활성</option>
-        <option value="0">비활성</option>
       </select>
     </label>
 
@@ -58,23 +50,23 @@
 
   <div class="account-list">
     {% for row in staff_rows %}
-    {% set is_open = (row.staff_id == focus_staff_id or row.staff_id == staff.staff_id) %}
-    <article class="account-item" data-staff-id="{{ row.staff_id }}">
+    {% set is_open = (row.id == focus_staff_id or row.id == staff.id) %}
+    <article class="account-item" data-staff-id="{{ row.id }}">
       <div class="account-item-head">
         <p class="account-item-title">
-          {{ row.name }}
+          {{ row.username }}
           <span class="status-pill {% if row.is_active %}status-paid{% else %}status-payment_pending{% endif %}">
             {{ "활성" if row.is_active else "잠금" }}
           </span>
-          <span class="status-pill {% if row.is_admin %}status-picked_up{% else %}status-payment_pending{% endif %}">
-            {{ "매니저" if row.is_admin else "직원" }}
+          <span class="status-pill {% if row.role == 'admin' %}status-picked_up{% else %}status-payment_pending{% endif %}">
+            {{ "매니저" if row.role == 'admin' else "직원" }}
           </span>
-          {% if row.staff_id == staff.staff_id %}
+          {% if row.id == staff.id %}
           <span class="status-pill status-picked_up">현재 로그인</span>
           {% endif %}
         </p>
         <p class="muted">
-          ID {{ row.staff_id }} · 생성 {{ to_jst_datetime(row.created_at).strftime('%Y-%m-%d %H:%M') }}
+          {{ row.username }} · 생성 {{ to_jst_datetime(row.created_at).strftime('%Y-%m-%d %H:%M') }}
         </p>
       </div>
 
@@ -82,41 +74,36 @@
         <button
           class="btn btn-secondary btn-sm account-toggle-btn"
           type="button"
-          data-target-id="account-panel-{{ row.staff_id }}"
+          data-target-id="account-panel-{{ row.id }}"
           aria-expanded="{{ 'true' if is_open else 'false' }}"
         >
           {{ "수정 닫기" if is_open else "수정 열기" }}
         </button>
 
-        <form method="post" action="/staff/admin/staff-accounts/{{ row.staff_id }}/toggle-active" onsubmit="return window.confirm('{{ '계정을 복구할까요?' if not row.is_active else '계정을 잠글까요?' }}');">
+        <form method="post" action="/staff/admin/staff-accounts/{{ row.id }}/toggle-active" onsubmit="return window.confirm('{{ '계정을 복구할까요?' if not row.is_active else '계정을 잠글까요?' }}');">
           <button class="btn btn-sm {% if row.is_active %}pickup-undo-btn{% else %}pickup-complete-btn{% endif %}" type="submit">
             {{ "계정 복구" if not row.is_active else "계정 잠금" }}
           </button>
         </form>
       </div>
 
-      <div id="account-panel-{{ row.staff_id }}" class="account-item-body {% if not is_open %}is-collapsed{% endif %}">
+      <div id="account-panel-{{ row.id }}" class="account-item-body {% if not is_open %}is-collapsed{% endif %}">
         <form
           method="post"
-          action="/staff/admin/staff-accounts/{{ row.staff_id }}/update"
+          action="/staff/admin/staff-accounts/{{ row.id }}/update"
           class="account-update-grid"
           onsubmit="return window.confirm('계정 정보를 저장할까요?');"
         >
           <label class="field">
-            <span class="field-label">이름</span>
-            <input class="control" type="text" name="name" maxlength="100" value="{{ row.name }}" required />
-          </label>
-
-          <label class="field">
-            <span class="field-label">PIN 변경 (선택)</span>
-            <input class="control" type="password" name="pin" minlength="4" inputmode="numeric" placeholder="변경할 때만 입력" />
+            <span class="field-label">표시 이름</span>
+            <input class="control" type="text" name="display_name" maxlength="100" value="{{ row.username }}" required />
           </label>
 
           <label class="field">
             <span class="field-label">권한</span>
             <select class="control" name="is_admin" required>
-              <option value="0" {% if not row.is_admin %}selected{% endif %}>직원</option>
-              <option value="1" {% if row.is_admin %}selected{% endif %}>매니저(관리자)</option>
+              <option value="0" {% if row.role != 'admin' %}selected{% endif %}>직원</option>
+              <option value="1" {% if row.role == 'admin' %}selected{% endif %}>매니저(관리자)</option>
             </select>
           </label>
 

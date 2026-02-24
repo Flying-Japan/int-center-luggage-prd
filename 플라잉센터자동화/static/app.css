@@ -125,6 +125,13 @@ a {
   box-shadow: 0 4px 10px rgba(31, 104, 232, 0.35);
 }
 
+.brand-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+
 .pill-nav {
   display: inline-flex;
   gap: 8px;

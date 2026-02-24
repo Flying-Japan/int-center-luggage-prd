@@ -5,8 +5,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "8000:8000"
     volumes:
-      - ./data:/app/data
       - ./uploads:/app/uploads
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.2.0
+    container_name: flying-japan-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    depends_on:
+      - app

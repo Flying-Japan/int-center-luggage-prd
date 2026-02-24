@@ -19,8 +19,8 @@ DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")))
 ID_UPLOAD_DIR = UPLOAD_DIR / "id"
 LUGGAGE_UPLOAD_DIR = UPLOAD_DIR / "luggage"
-DB_PATH = Path(os.getenv("DB_PATH", str(DATA_DIR / "flying_japan.db")))
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 SECRET_KEY = os.getenv("APP_SECRET_KEY", "dev-secret-change-me")
 SESSION_HTTPS_ONLY = _env_bool("SESSION_HTTPS_ONLY", IS_PRODUCTION)
