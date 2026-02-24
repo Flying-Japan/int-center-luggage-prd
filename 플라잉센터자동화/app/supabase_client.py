@@ -92,6 +92,8 @@ class Row:
                 return data.get("role") == "admin"
             if name == "name":
                 return data.get("username") or data.get("display_name", "")
+            if name == "is_active":
+                return data.get("is_active", True)
         raise AttributeError(f"Row '{table}' has no column '{name}'")
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -141,7 +143,8 @@ class SupabaseQuery:
             if isinstance(cond, list):
                 # OR group
                 or_parts = []
-                for col, op, val in cond:
+                for col, op, *rest in cond:
+                    val = rest[0] if rest else None
                     if op == "=":
                         or_parts.append(f"{col}.eq.{val}")
                     elif op == "!=":
@@ -153,6 +156,10 @@ class SupabaseQuery:
                     elif op == "IN":
                         vals = ",".join(str(v) for v in val)
                         or_parts.append(f"{col}.in.({vals})")
+                    elif op == "IS NULL":
+                        or_parts.append(f"{col}.is.null")
+                    elif op == "IS NOT NULL":
+                        or_parts.append(f"{col}.not.is.null")
                 if or_parts:
                     q = q.or_(",".join(or_parts))
             else:
@@ -263,7 +270,7 @@ class SupabaseDB:
         full = _full_table(table)
         self.client.table(full).delete().eq(pk_col, pk_val).execute()
 
-    def delete_where(self, table: str, conditions: list[tuple]) -> None:
+    def delete_where(self, table: str, conditions: list[tuple]) -> int:
         full = _full_table(table)
         q = self.client.table(full).delete()
         for col, op, val in conditions:
@@ -273,7 +280,8 @@ class SupabaseDB:
                 q = q.in_(col, val)
             elif op == "!=":
                 q = q.neq(col, val)
-        q.execute()
+        result = q.execute()
+        return len(result.data) if result.data else 0
 
     def execute_sql(self, sql: str, params: list) -> list:
         """Execute raw SQL via Supabase RPC. Returns list of dicts."""
