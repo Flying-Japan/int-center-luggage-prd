@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    container_name: flying-japan-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: flying-japan-tunnel
+    restart: unless-stopped
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ../.cloudflared/config.yml:/etc/cloudflared/config.yml
+      - ../.cloudflared/creds.json:/etc/cloudflared/creds.json
+    depends_on:
+      - app

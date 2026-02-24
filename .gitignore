@@ -1,0 +1,23 @@
+# Cloudflare credentials — never commit
+.cloudflared/creds.json
+.cloudflared/cert.pem
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# DB files
+*.db
+
+# Uploads (user data)
+플라잉센터자동화/uploads/
+
+# OS
+.DS_Store

@@ -1,0 +1,9 @@
+.env
+.env.local
+__pycache__/
+*.py[cod]
+.venv/
+*.db
+uploads/id/
+uploads/luggage/
+.DS_Store

@@ -1,0 +1,7 @@
+tunnel: int-center-luggage-prd
+credentials-file: /etc/cloudflared/creds.json
+
+ingress:
+  - hostname: luggage.flyingjp.com
+    service: http://app:8000
+  - service: http_status:404
