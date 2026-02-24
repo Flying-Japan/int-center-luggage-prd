@@ -28,5 +28,5 @@ services:
     environment:
       REPO_USER: ${GHCR_USER}
       REPO_PASS: ${GHCR_TOKEN}
-      WATCHTOWER_POLL_INTERVAL: "30"
+      WATCHTOWER_POLL_INTERVAL: "300"
       WATCHTOWER_CLEANUP: "true"

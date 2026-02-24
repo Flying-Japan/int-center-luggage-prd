@@ -1,0 +1,24 @@
+# Never bake secrets or local state into the image
+.env
+.env.*
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+
+# User-uploaded files (mounted at runtime)
+uploads/
+
+# Local SQLite data (replaced by Supabase)
+data/
+*.db
+
+# Dev/tooling state
+.omc/
+.DS_Store
+*.egg-info/

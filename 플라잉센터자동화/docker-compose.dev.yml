@@ -5,7 +5,12 @@ services:
     build: .
     image: ghcr.io/flying-japan/int-center-luggage-prd:latest
 
-  # Disable watchtower in local dev
+  # Do not expose the live Cloudflare tunnel in local dev
+  tunnel:
+    profiles:
+      - disabled
+
+  # Do not run auto-updater in local dev
   watchtower:
     profiles:
       - disabled
