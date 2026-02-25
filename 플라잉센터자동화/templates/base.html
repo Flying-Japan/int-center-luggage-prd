@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{ title if title else 'Flying Japan 짐 보관' }}</title>
-  <link rel="icon" href="/static/favicon.ico" />
+  <link rel="icon" type="image/png" href="/static/logo.png" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
   <link rel="stylesheet" href="/static/app.css" />
@@ -17,7 +17,7 @@
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="{{ '/staff/dashboard' if is_staff_site else '/customer' }}">
-        <img class="brand-logo" src="/static/logo.png" alt="Flying Japan" width="28" height="28" />
+        <img class="brand-logo" src="/static/logo.png" alt="Flying Japan" width="40" height="40" />
         <span>{{ 'Flying Japan Staff' if is_staff_site else 'Flying Japan 짐 보관' }}</span>
       </a>
       <nav class="pill-nav">

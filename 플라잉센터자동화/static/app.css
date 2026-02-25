@@ -126,10 +126,9 @@ a {
 }
 
 .brand-logo {
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
   object-fit: contain;
-  border-radius: 6px;
 }
 
 .pill-nav {
@@ -866,6 +865,35 @@ button {
   color: #fff;
   border-color: rgba(15, 73, 166, 0.18);
   box-shadow: 0 10px 24px rgba(47, 128, 248, 0.26);
+}
+
+.btn-google {
+  background: #fff;
+  color: #3c4043;
+  border: 1.5px solid #dadce0;
+  gap: 10px;
+  font-weight: 600;
+  justify-content: center;
+}
+.btn-google:hover {
+  background: #f8f9fa;
+  border-color: #bdc1c6;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #999;
+  font-size: 13px;
+  margin: 4px 0;
+}
+.login-divider::before,
+.login-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #e2e8f0;
 }
 
 .btn-secondary {
