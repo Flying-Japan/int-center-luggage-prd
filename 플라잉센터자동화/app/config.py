@@ -21,6 +21,7 @@ ID_UPLOAD_DIR = UPLOAD_DIR / "id"
 LUGGAGE_UPLOAD_DIR = UPLOAD_DIR / "luggage"
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+APP_BASE_URL = os.getenv("APP_BASE_URL", "").rstrip("/")
 
 SECRET_KEY = os.getenv("APP_SECRET_KEY", "dev-secret-change-me")
 SESSION_HTTPS_ONLY = _env_bool("SESSION_HTTPS_ONLY", IS_PRODUCTION)

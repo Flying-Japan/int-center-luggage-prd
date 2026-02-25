@@ -27,6 +27,7 @@ from app.config import (
     SESSION_HTTPS_ONLY,
     SESSION_MAX_AGE,
     SESSION_SAME_SITE,
+    APP_BASE_URL,
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
 )
@@ -1377,9 +1378,10 @@ def auth_google(request: Request):
         hashlib.sha256(code_verifier.encode()).digest()
     ).rstrip(b"=").decode()
     request.session["oauth_code_verifier"] = code_verifier
+    base = APP_BASE_URL or str(request.base_url).rstrip("/")
     params = urlencode({
         "provider": "google",
-        "redirect_to": f"{request.base_url}auth/callback",
+        "redirect_to": f"{base}/auth/callback",
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
         "flow_type": "pkce",
