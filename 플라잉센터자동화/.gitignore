@@ -4,6 +4,5 @@ __pycache__/
 *.py[cod]
 .venv/
 *.db
-uploads/id/
-uploads/luggage/
+uploads/
 .DS_Store
