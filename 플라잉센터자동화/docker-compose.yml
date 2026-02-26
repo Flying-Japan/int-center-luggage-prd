@@ -12,7 +12,10 @@ services:
     image: cloudflare/cloudflared:2026.2.0
     container_name: flying-japan-tunnel
     restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    # --config forces local ingress rules (http://app:8000) regardless of remote API config
+    command: tunnel --no-autoupdate --config /etc/cloudflared/ingress.yml run --token ${TUNNEL_TOKEN}
+    volumes:
+      - ../.cloudflared/docker-ingress.yml:/etc/cloudflared/ingress.yml:ro
     depends_on:
       - app
 
@@ -25,8 +28,9 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ${HOME}/.docker/config.json:/config.json:ro
     environment:
-      REPO_USER: ${GHCR_USER}
-      REPO_PASS: ${GHCR_TOKEN}
+      DOCKER_CONFIG: /
       WATCHTOWER_POLL_INTERVAL: "300"
       WATCHTOWER_CLEANUP: "true"
+      DOCKER_API_VERSION: "1.44"

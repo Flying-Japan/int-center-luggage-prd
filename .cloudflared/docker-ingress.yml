@@ -1,0 +1,6 @@
+# Ingress-only config for Docker deployment.
+# Used with --token (credentials come from token, not this file).
+ingress:
+  - hostname: luggage.flyingjp.com
+    service: http://app:8000
+  - service: http_status:404
