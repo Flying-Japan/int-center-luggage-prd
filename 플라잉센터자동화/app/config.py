@@ -21,6 +21,7 @@ ID_UPLOAD_DIR = UPLOAD_DIR / "id"
 LUGGAGE_UPLOAD_DIR = UPLOAD_DIR / "luggage"
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+APP_BASE_URL = os.getenv("APP_BASE_URL", "").rstrip("/")
 
 SECRET_KEY = os.getenv("APP_SECRET_KEY", "dev-secret-change-me")
 SESSION_HTTPS_ONLY = _env_bool("SESSION_HTTPS_ONLY", IS_PRODUCTION)
@@ -39,3 +40,7 @@ ORDER_RETENTION_DAYS = 60
 
 MAX_BAG_QTY = 99
 MAX_COMPANION_COUNT = 99
+
+R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
+R2_API_TOKEN = os.getenv("R2_API_TOKEN", os.getenv("CLOUDFLARE_API_TOKEN", ""))
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "luggage-images")

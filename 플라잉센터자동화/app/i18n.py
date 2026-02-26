@@ -6,7 +6,7 @@ DEFAULT_LANG = "ko"
 
 TRANSLATIONS: dict[str, dict[str, Any]] = {
     "ko": {
-        "customer_title": "Flying Japan 짐보관 접수",
+        "customer_title": "짐보관 접수",
         "reception_title": "접수 입력",
         "reception_desc": "입력 즉시 선결제 금액이 계산됩니다. 요금은 선결제입니다.",
         "notice_title": "유의사항 및 개인정보 수집 동의",
@@ -57,9 +57,10 @@ TRANSLATIONS: dict[str, dict[str, Any]] = {
         "discount_table_expand": "장기보관 할인표 보기",
         "pickup_note": "영업시간: 09:00~21:00 (JST)",
         "counter_notice": "아래 안내를 확인해주세요.",
+        "receipt_link": "영수증 발급",
     },
     "en": {
-        "customer_title": "Flying Japan Luggage Storage",
+        "customer_title": "Luggage Storage",
         "reception_title": "Reception",
         "reception_desc": "Prepaid amount is calculated instantly. Payment is prepaid.",
         "notice_title": "Guidelines and Consent to Personal Information",
@@ -110,9 +111,10 @@ TRANSLATIONS: dict[str, dict[str, Any]] = {
         "discount_table_expand": "View long-stay discount table",
         "pickup_note": "Business hours: 09:00~21:00 (JST)",
         "counter_notice": "Please review the guidance below.",
+        "receipt_link": "Receipt",
     },
     "ja": {
-        "customer_title": "Flying Japan 荷物預かり受付",
+        "customer_title": "荷物預かり受付",
         "reception_title": "受付入力",
         "reception_desc": "入力すると事前決済金額が即時に計算されます。料金は前払いです。",
         "notice_title": "注意事項および個人情報同意",
@@ -163,6 +165,7 @@ TRANSLATIONS: dict[str, dict[str, Any]] = {
         "discount_table_expand": "長期保管割引表を表示",
         "pickup_note": "営業時間: 09:00~21:00 (JST)",
         "counter_notice": "以下の案内をご確認ください。",
+        "receipt_link": "領収書発行",
     },
 }
 

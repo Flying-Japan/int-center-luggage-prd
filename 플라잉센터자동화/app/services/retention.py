@@ -1,19 +1,19 @@
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from app.config import (
     ID_IMAGE_RETENTION_DAYS,
     LUGGAGE_IMAGE_RETENTION_DAYS,
     ORDER_RETENTION_DAYS,
 )
+from app.r2 import r2_delete
 from app.supabase_client import SupabaseDB
 
 
-def _safe_unlink(path: Path) -> None:
+def _safe_r2_delete(path: str) -> None:
     try:
-        if path.exists():
-            path.unlink()
-    except OSError:
+        if path:
+            r2_delete([path])
+    except Exception:
         pass
 
 
@@ -30,12 +30,12 @@ def run_retention_cleanup(db: SupabaseDB) -> dict[str, int]:
     for order in image_expired_orders:
         changed = False
         if order.id_image_url:
-            _safe_unlink(Path(order.id_image_url))
+            _safe_r2_delete(order.id_image_url)
             image_deleted += 1
             order.id_image_url = ""
             changed = True
         if order.luggage_image_url:
-            _safe_unlink(Path(order.luggage_image_url))
+            _safe_r2_delete(order.luggage_image_url)
             image_deleted += 1
             order.luggage_image_url = ""
             changed = True
@@ -44,8 +44,8 @@ def run_retention_cleanup(db: SupabaseDB) -> dict[str, int]:
 
     old_orders = db.query("orders").filter(("created_at", "<", order_threshold)).all()
     for order in old_orders:
-        _safe_unlink(Path(order.id_image_url or ""))
-        _safe_unlink(Path(order.luggage_image_url or ""))
+        _safe_r2_delete(order.id_image_url or "")
+        _safe_r2_delete(order.luggage_image_url or "")
 
         audit_deleted += db.delete_where(
             "audit_logs", [("order_id", "=", order.order_id)]

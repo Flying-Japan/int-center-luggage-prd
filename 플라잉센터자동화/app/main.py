@@ -1,7 +1,10 @@
 import base64
 import json
 import io
+import logging
 import re
+import threading
+import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -11,25 +14,25 @@ from urllib.request import Request as URLRequest, urlopen
 
 import qrcode
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import get_current_staff
 from app.config import (
-    ID_UPLOAD_DIR,
     JST,
-    LUGGAGE_UPLOAD_DIR,
     MAX_BAG_QTY,
     MAX_COMPANION_COUNT,
     SECRET_KEY,
     SESSION_HTTPS_ONLY,
     SESSION_MAX_AGE,
     SESSION_SAME_SITE,
+    APP_BASE_URL,
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
 )
+from app.r2 import r2_upload, r2_download
 from app.supabase_client import SupabaseDB
 from app.database import get_db
 from app.i18n import get_translations
@@ -241,7 +244,7 @@ def next_pickup_default_jst(now: datetime) -> datetime:
     return local_now
 
 
-def save_image_file(upload: UploadFile, directory: Path, order_id: str, label: str) -> str:
+def save_image_file(upload: UploadFile, folder: str, order_id: str, label: str) -> str:
     if not upload.content_type or not upload.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail=f"{label} must be an image file.")
 
@@ -250,12 +253,12 @@ def save_image_file(upload: UploadFile, directory: Path, order_id: str, label: s
         extension = ".jpg"
 
     filename = f"{order_id}-{uuid.uuid4().hex}{extension}"
-    destination = directory / filename
+    storage_path = f"{folder}/{filename}"
+    file_bytes = upload.file.read()
 
-    with destination.open("wb") as fp:
-        fp.write(upload.file.read())
+    r2_upload(storage_path, file_bytes, upload.content_type)
 
-    return str(destination.resolve())
+    return storage_path
 
 
 def order_to_response(order) -> OrderSummaryResponse:
@@ -1168,6 +1171,28 @@ def backfill_missing_tag_numbers(db: SupabaseDB) -> None:
 
 
 
+logger = logging.getLogger("flying-center")
+
+
+def _retention_scheduler() -> None:
+    """Background thread: run retention cleanup daily at 03:00 JST."""
+    while True:
+        now = datetime.now(JST)
+        next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
+        if now >= next_run:
+            next_run += timedelta(days=1)
+        time.sleep((next_run - now).total_seconds())
+        try:
+            db = SupabaseDB(url=SUPABASE_URL, service_role_key=SUPABASE_SERVICE_ROLE_KEY)
+            try:
+                result = run_retention_cleanup(db)
+                logger.info("Retention cleanup: %s", result)
+            finally:
+                db.close()
+        except Exception:
+            logger.exception("Retention cleanup failed")
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     db = SupabaseDB(url=SUPABASE_URL, service_role_key=SUPABASE_SERVICE_ROLE_KEY)
@@ -1176,10 +1201,19 @@ def on_startup() -> None:
     finally:
         db.close()
 
+    t = threading.Thread(target=_retention_scheduler, daemon=True)
+    t.start()
+    logger.info("Retention scheduler started (daily 03:00 JST)")
+
 
 @app.get("/", response_class=HTMLResponse)
 def root() -> RedirectResponse:
     return RedirectResponse(url="/customer")
+
+
+@app.get("/admin")
+def admin_landing() -> RedirectResponse:
+    return RedirectResponse(url="/staff/login")
 
 
 @app.get("/health")
@@ -1285,8 +1319,8 @@ def customer_submit(
     discount_rate, prepaid_amount = calculate_prepaid_amount(pricing.price_per_day, expected_storage_days)
 
     order_id = build_order_id(db, now)
-    id_image_path = save_image_file(id_image, ID_UPLOAD_DIR, order_id, "ID image")
-    luggage_image_path = save_image_file(luggage_image, LUGGAGE_UPLOAD_DIR, order_id, "Luggage image")
+    id_image_path = save_image_file(id_image, "id", order_id, "ID image")
+    luggage_image_path = save_image_file(luggage_image, "luggage", order_id, "Luggage image")
 
     order = db.insert("orders", {
         "order_id": order_id,
@@ -1369,9 +1403,80 @@ def api_order(order_id: str, db: SupabaseDB = Depends(get_db)) -> OrderSummaryRe
     return order_to_response(order)
 
 
+@app.get("/auth/google")
+def auth_google(request: Request):
+    import hashlib, secrets as _secrets
+    code_verifier = base64.urlsafe_b64encode(_secrets.token_bytes(32)).rstrip(b"=").decode()
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode()).digest()
+    ).rstrip(b"=").decode()
+    request.session["oauth_code_verifier"] = code_verifier
+    base = APP_BASE_URL or str(request.base_url).rstrip("/")
+    params = urlencode({
+        "provider": "google",
+        "redirect_to": f"{base}/auth/callback",
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
+        "flow_type": "pkce",
+    })
+    return RedirectResponse(url=f"{SUPABASE_URL}/auth/v1/authorize?{params}", status_code=302)
+
+
+@app.get("/auth/callback")
+def auth_callback(
+    request: Request,
+    code: Optional[str] = None,
+    error: Optional[str] = None,
+    db: SupabaseDB = Depends(get_db),
+):
+    _oauth_errors = {
+        "oauth_failed": "Google 로그인에 실패했습니다.",
+        "state_missing": "인증 세션이 만료되었습니다. 다시 시도해 주세요.",
+        "exchange_failed": "Google 인증을 처리할 수 없습니다.",
+        "no_user": "사용자 정보를 가져올 수 없습니다.",
+        "access_denied": "접근 권한이 없습니다.",
+    }
+    if error or not code:
+        return RedirectResponse(url="/staff/login?oauth_error=oauth_failed", status_code=303)
+
+    code_verifier = request.session.pop("oauth_code_verifier", None)
+    if not code_verifier:
+        return RedirectResponse(url="/staff/login?oauth_error=state_missing", status_code=303)
+
+    import httpx as _httpx
+    resp = _httpx.post(
+        f"{SUPABASE_URL}/auth/v1/token",
+        params={"grant_type": "pkce"},
+        json={"auth_code": code, "code_verifier": code_verifier},
+        headers={"apikey": SUPABASE_SERVICE_ROLE_KEY, "Content-Type": "application/json"},
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        return RedirectResponse(url="/staff/login?oauth_error=exchange_failed", status_code=303)
+
+    user_id = (resp.json().get("user") or {}).get("id")
+    if not user_id:
+        return RedirectResponse(url="/staff/login?oauth_error=no_user", status_code=303)
+
+    profile = db.get("user_profiles", "id", str(user_id))
+    if not profile or not profile.is_active:
+        return RedirectResponse(url="/staff/login?oauth_error=access_denied", status_code=303)
+
+    request.session["user_id"] = str(user_id)
+    return RedirectResponse(url="/staff/dashboard", status_code=303)
+
+
 @app.get("/staff/login", response_class=HTMLResponse)
-def staff_login_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("staff_login.html", {"request": request, "error": None})
+def staff_login_page(request: Request, oauth_error: Optional[str] = None) -> HTMLResponse:
+    _oauth_errors = {
+        "oauth_failed": "Google 로그인에 실패했습니다.",
+        "state_missing": "인증 세션이 만료되었습니다. 다시 시도해 주세요.",
+        "exchange_failed": "Google 인증을 처리할 수 없습니다.",
+        "no_user": "사용자 정보를 가져올 수 없습니다.",
+        "access_denied": "접근 권한이 없습니다.",
+    }
+    error_msg = _oauth_errors.get(oauth_error) if oauth_error else None
+    return templates.TemplateResponse("staff_login.html", {"request": request, "error": error_msg})
 
 
 @app.post("/staff/login", response_class=HTMLResponse)
@@ -2797,7 +2902,6 @@ def admin_staff_accounts_page(
     staff = get_current_staff(request, db, require_admin=True)
     staff_rows = (
         db.query("user_profiles")
-        .filter(("role", "IN", ["admin", "editor"]))
         .order_by("role DESC", "is_active DESC", "username ASC")
         .all()
     )
@@ -2806,6 +2910,17 @@ def admin_staff_accounts_page(
         .filter(("role", "=", "admin"), ("is_active", "=", True))
         .count()
     )
+
+    google_user_ids: set[str] = set()
+    try:
+        auth_users = db.client.auth.admin.list_users()
+        for u in auth_users:
+            providers = (u.app_metadata or {}).get("providers", [])
+            if "google" in providers:
+                google_user_ids.add(u.id)
+    except Exception:
+        pass
+
     return templates.TemplateResponse(
         "staff_admin_accounts.html",
         {
@@ -2814,6 +2929,7 @@ def admin_staff_accounts_page(
             "staff_menu_items": build_staff_menu(db, "staff_accounts", staff.is_admin),
             "staff_rows": staff_rows,
             "active_admin_count": active_admin_count,
+            "google_user_ids": google_user_ids,
             "msg": msg.strip(),
             "err": err.strip(),
             "focus_staff_id": focus_staff_id,
@@ -3370,12 +3486,27 @@ def create_manual_order(
     return RedirectResponse(url=f"/staff/orders/{order_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
+def _serve_storage_image(storage_path: str) -> Response:
+    """Download an image from Cloudflare R2 and return as an HTTP response."""
+    data = r2_download(storage_path)
+    ext = Path(storage_path).suffix.lower()
+    content_type = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".webp": "image/webp", ".heic": "image/heic", ".heif": "image/heif",
+    }.get(ext, "image/jpeg")
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Cache-Control": "no-store", "Content-Disposition": "inline"},
+    )
+
+
 @app.get("/staff/orders/{order_id}/id-image")
 def staff_view_id_image(
     request: Request,
     order_id: str,
     db: SupabaseDB = Depends(get_db),
-) -> FileResponse:
+):
     staff = ensure_staff(request, db)
     order = db.get("orders", "order_id", order_id)
     if order is None or not order.id_image_url:
@@ -3389,10 +3520,7 @@ def staff_view_id_image(
         "timestamp": utc_now(),
     })
 
-    return FileResponse(
-        order.id_image_url,
-        headers={"Cache-Control": "no-store", "Content-Disposition": "inline"},
-    )
+    return _serve_storage_image(order.id_image_url)
 
 
 @app.get("/staff/orders/{order_id}/luggage-image")
@@ -3400,7 +3528,7 @@ def staff_view_luggage_image(
     request: Request,
     order_id: str,
     db: SupabaseDB = Depends(get_db),
-) -> FileResponse:
+):
     staff = ensure_staff(request, db)
     order = db.get("orders", "order_id", order_id)
     if order is None or not order.luggage_image_url:
@@ -3414,10 +3542,7 @@ def staff_view_luggage_image(
         "timestamp": utc_now(),
     })
 
-    return FileResponse(
-        order.luggage_image_url,
-        headers={"Cache-Control": "no-store", "Content-Disposition": "inline"},
-    )
+    return _serve_storage_image(order.luggage_image_url)
 
 
 @app.post("/staff/admin/retention/run")
