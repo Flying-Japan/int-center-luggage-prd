@@ -16,9 +16,6 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
-UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")))
-ID_UPLOAD_DIR = UPLOAD_DIR / "id"
-LUGGAGE_UPLOAD_DIR = UPLOAD_DIR / "luggage"
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "").rstrip("/")

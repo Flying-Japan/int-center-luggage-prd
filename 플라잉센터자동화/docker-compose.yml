@@ -5,8 +5,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    volumes:
-      - ./uploads:/app/uploads
 
   tunnel:
     image: cloudflare/cloudflared:2026.2.0
