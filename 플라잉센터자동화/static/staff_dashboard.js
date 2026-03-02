@@ -91,6 +91,8 @@
     return Math.max(0, safeBase - memberDiscountByTier(safeBase, tierValue));
   }
 
+  var lastRenderedOrders = new Map();
+
   let debounceTimer = null;
   let activeController = null;
   let viewportResizeTimer = null;
@@ -630,39 +632,118 @@
     return td;
   }
 
+  function orderFingerprint(order) {
+    return JSON.stringify(order, Object.keys(order).sort());
+  }
+
+  function rowIsActive(row) {
+    var active = document.activeElement;
+    if (active && row.contains(active)) {
+      return true;
+    }
+    if (row.querySelector(".price-config-wrap.is-open")) {
+      return true;
+    }
+    return false;
+  }
+
+  function buildOrderRow(order) {
+    var row = document.createElement("tr");
+    row.dataset.orderId = order.order_id;
+    row.dataset.basePrepaidAmount = String(toNonNegativeInt(order.base_prepaid_amount));
+    row.dataset.autoPrepaidAmount = String(toNonNegativeInt(order.auto_prepaid_amount));
+
+    row.appendChild(buildInputCell(order.name, "name", "text"));
+    row.appendChild(buildInputCell(order.tag_no, "tag_no", "text"));
+    var createdTd = document.createElement("td");
+    createdTd.dataset.colKey = "created_time";
+    createdTd.textContent = order.created_time || "";
+    row.appendChild(createdTd);
+    var priceTd = buildPaymentPriceCell(order); priceTd.dataset.colKey = "price"; row.appendChild(priceTd);
+    var pickupTd = buildPickupTimeCell(order); pickupTd.dataset.colKey = "pickup_time"; row.appendChild(pickupTd);
+    var imgTd = buildImageLinkCell(order.luggage_image_url || "", `${order.name || "고객"} 짐 사진`); imgTd.dataset.colKey = "luggage_image"; row.appendChild(imgTd);
+    var actionTd = buildPickupActionCell(order); actionTd.dataset.colKey = "pickup_action"; row.appendChild(actionTd);
+    row.appendChild(buildInputCell(order.note, "note", "text"));
+    var detailTd = buildDetailCell(order); detailTd.dataset.colKey = "detail"; row.appendChild(detailTd);
+    syncPriceCellMeta(row);
+    return row;
+  }
+
   function renderOrders(orders) {
-    tbodyEl.innerHTML = "";
     if (!orders.length) {
-      const row = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = 9;
-      td.textContent = tbodyEl.dataset.emptyText || "데이터가 없습니다.";
-      row.appendChild(td);
-      tbodyEl.appendChild(row);
+      tbodyEl.innerHTML = "";
+      lastRenderedOrders.clear();
+      var emptyRow = document.createElement("tr");
+      var emptyTd = document.createElement("td");
+      emptyTd.colSpan = 9;
+      emptyTd.textContent = tbodyEl.dataset.emptyText || "데이터가 없습니다.";
+      emptyRow.appendChild(emptyTd);
+      tbodyEl.appendChild(emptyRow);
       return;
     }
 
-    orders.forEach((order) => {
-      const row = document.createElement("tr");
-      row.dataset.orderId = order.order_id;
-      row.dataset.basePrepaidAmount = String(toNonNegativeInt(order.base_prepaid_amount));
-      row.dataset.autoPrepaidAmount = String(toNonNegativeInt(order.auto_prepaid_amount));
-
-      row.appendChild(buildInputCell(order.name, "name", "text"));
-      row.appendChild(buildInputCell(order.tag_no, "tag_no", "text"));
-      var createdTd = document.createElement("td");
-      createdTd.dataset.colKey = "created_time";
-      createdTd.textContent = order.created_time || "";
-      row.appendChild(createdTd);
-      var priceTd = buildPaymentPriceCell(order); priceTd.dataset.colKey = "price"; row.appendChild(priceTd);
-      var pickupTd = buildPickupTimeCell(order); pickupTd.dataset.colKey = "pickup_time"; row.appendChild(pickupTd);
-      var imgTd = buildImageLinkCell(order.luggage_image_url || "", `${order.name || "고객"} 짐 사진`); imgTd.dataset.colKey = "luggage_image"; row.appendChild(imgTd);
-      var actionTd = buildPickupActionCell(order); actionTd.dataset.colKey = "pickup_action"; row.appendChild(actionTd);
-      row.appendChild(buildInputCell(order.note, "note", "text"));
-      var detailTd = buildDetailCell(order); detailTd.dataset.colKey = "detail"; row.appendChild(detailTd);
-      syncPriceCellMeta(row);
-      tbodyEl.appendChild(row);
+    var newOrderIds = new Set(orders.map(function (o) { return o.order_id; }));
+    var existingRowsByOrderId = {};
+    Array.from(tbodyEl.querySelectorAll("tr[data-order-id]")).forEach(function (row) {
+      existingRowsByOrderId[row.dataset.orderId] = row;
     });
+
+    // Remove rows no longer in data
+    Object.keys(existingRowsByOrderId).forEach(function (id) {
+      if (!newOrderIds.has(id)) {
+        existingRowsByOrderId[id].remove();
+        lastRenderedOrders.delete(id);
+        delete existingRowsByOrderId[id];
+      }
+    });
+
+    // Remove non-order rows (e.g. "no data" placeholder)
+    Array.from(tbodyEl.querySelectorAll("tr:not([data-order-id])")).forEach(function (row) {
+      row.remove();
+    });
+
+    var nextRendered = new Map();
+    var previousRow = null;
+
+    orders.forEach(function (order) {
+      var fingerprint = orderFingerprint(order);
+      var existingRow = existingRowsByOrderId[order.order_id];
+      var effectiveFingerprint = fingerprint;
+      var isActive = false;
+
+      if (existingRow) {
+        var unchanged = lastRenderedOrders.get(order.order_id) === fingerprint;
+        isActive = rowIsActive(existingRow);
+        if (!unchanged && !isActive) {
+          var replacement = buildOrderRow(order);
+          existingRow.replaceWith(replacement);
+          existingRow = replacement;
+          existingRowsByOrderId[order.order_id] = replacement;
+        } else if (!unchanged && isActive) {
+          // Preserve old fingerprint so next poll retries the update
+          effectiveFingerprint = lastRenderedOrders.get(order.order_id) || fingerprint;
+        }
+      } else {
+        existingRow = buildOrderRow(order);
+        existingRowsByOrderId[order.order_id] = existingRow;
+      }
+
+      nextRendered.set(order.order_id, effectiveFingerprint);
+
+      // Ensure correct ordering (skip repositioning for active rows)
+      if (!isActive) {
+        if (previousRow) {
+          if (existingRow.previousElementSibling !== previousRow) {
+            previousRow.after(existingRow);
+          }
+        } else if (existingRow !== tbodyEl.firstElementChild) {
+          tbodyEl.prepend(existingRow);
+        }
+      }
+      previousRow = existingRow;
+    });
+
+    lastRenderedOrders = nextRendered;
   }
 
   async function readErrorMessage(response) {
