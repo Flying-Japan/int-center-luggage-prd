@@ -8,7 +8,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
-  <link rel="stylesheet" href="/static/app.css?v=20260302i" />
+  <link rel="stylesheet" href="/static/app.css?v=20260302j" />
 </head>
 {% set is_staff_site = request.url.path.startswith('/staff') %}
 <body class="{{ 'staff-site' if is_staff_site else 'customer-site' }}">
@@ -18,7 +18,7 @@
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="{{ '/staff/dashboard' if is_staff_site else '/customer' }}">
-        <img class="brand-logo" src="/static/logo.png" alt="Flying Japan" width="40" height="40" />
+        <img class="brand-logo" src="/static/logo.png?v=2" alt="Flying Japan" width="40" height="40" />
         <span>{{ 'Flying Japan Staff' if is_staff_site else (t.brand_name if t is defined and t else 'Flying Japan 짐 보관') }}</span>
       </a>
       {% if is_staff_site %}
