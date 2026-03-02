@@ -9,16 +9,20 @@
   const tableEl = document.getElementById("staff-orders-table");
   const tableWrapEl = tableEl ? tableEl.closest(".table-wrap") : null;
   const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP"];
-  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v2";
+  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v9";
+  ["v2","v3","v4","v5","v6","v7","v8"].forEach(function (v) {
+    FJ.safeStorageRemove("flying-japan-staff-col-widths-" + v);
+  });
   const columnSchema = [
-    { key: "name", min: 150, weight: 1.4 },
-    { key: "tag_no", min: 78, weight: 0.65 },
-    { key: "price", min: 228, weight: 1.8 },
-    { key: "pickup_time", min: 140, weight: 1.0 },
-    { key: "luggage_image", min: 94, weight: 0.8 },
-    { key: "pickup_action", min: 182, weight: 1.4 },
-    { key: "note", min: 220, weight: 2.3 },
-    { key: "detail", min: 88, weight: 0.7 },
+    { key: "name", min: 120, weight: 1.5 },
+    { key: "tag_no", min: 62, weight: 0 },
+    { key: "created_time", min: 105, weight: 0 },
+    { key: "price", min: 200, weight: 0 },
+    { key: "pickup_time", min: 100, weight: 0 },
+    { key: "luggage_image", min: 66, weight: 0 },
+    { key: "pickup_action", min: 148, weight: 0 },
+    { key: "note", min: 140, weight: 4.5 },
+    { key: "detail", min: 58, weight: 0 },
   ];
   const FLYING_PASS_TIER_OPTIONS = [
     { value: "NONE", label: "미적용" },
@@ -33,17 +37,13 @@
     return;
   }
 
-  const yenFormatter = new Intl.NumberFormat("ja-JP");
+  var formatYen = FJ.formatYen;
+  var isLatePickupTime = FJ.isLatePickupTime;
   const confirmSaveText = tbodyEl.dataset.confirmSaveText || "입력한 내용으로 수정하시겠습니까?";
   const confirmPickupText = tbodyEl.dataset.confirmPickupText || "수령완료 처리하시겠습니까?";
   const confirmUndoPickupText = tbodyEl.dataset.confirmUndoPickupText || "수령완료를 취소하시겠습니까?";
 
-  function formatYen(value) {
-    const amount = Math.trunc(Number(value || 0));
-    const safeAmount = Number.isFinite(amount) ? amount : 0;
-    const sign = safeAmount < 0 ? "-" : "";
-    return `${sign}¥ ${yenFormatter.format(Math.abs(safeAmount))}`;
-  }
+
 
   function toSafeInt(value, fallback = 0) {
     const amount = Math.trunc(Number(value));
@@ -91,6 +91,8 @@
     return Math.max(0, safeBase - memberDiscountByTier(safeBase, tierValue));
   }
 
+  var lastRenderedOrders = new Map();
+
   let debounceTimer = null;
   let activeController = null;
   let viewportResizeTimer = null;
@@ -98,7 +100,7 @@
 
   function loadSavedColumnWidths() {
     try {
-      const raw = window.localStorage.getItem(COL_WIDTH_STORAGE_KEY);
+      const raw = FJ.safeStorageGet(COL_WIDTH_STORAGE_KEY);
       if (!raw) {
         return {};
       }
@@ -121,7 +123,7 @@
 
   function saveColumnWidths(widths) {
     try {
-      window.localStorage.setItem(COL_WIDTH_STORAGE_KEY, JSON.stringify(widths));
+      FJ.safeStorageSet(COL_WIDTH_STORAGE_KEY, JSON.stringify(widths));
     } catch (_error) {
       // Ignore storage quota/private mode issues.
     }
@@ -293,24 +295,6 @@
     syncSelectAllButtonState();
   }
 
-  function isLatePickupTime(timeValue) {
-    if (!timeValue) {
-      return false;
-    }
-    const parts = String(timeValue).split(":");
-    if (parts.length < 2) {
-      return false;
-    }
-    const hour = Number(parts[0]);
-    const minute = Number(parts[1]);
-    if (Number.isNaN(hour) || Number.isNaN(minute)) {
-      return false;
-    }
-    if (hour < 19 || hour > 21) {
-      return false;
-    }
-    return hour < 21 || minute === 0;
-  }
 
   function applyLatePickupStyle(inputEl) {
     inputEl.classList.toggle("late-pickup", isLatePickupTime(inputEl.value));
@@ -318,6 +302,7 @@
 
   function buildInputCell(value, field, type) {
     const td = document.createElement("td");
+    td.dataset.colKey = field;
     const input = document.createElement("input");
     input.className = "control table-control";
     input.type = type || "text";
@@ -647,35 +632,118 @@
     return td;
   }
 
+  function orderFingerprint(order) {
+    return JSON.stringify(order, Object.keys(order).sort());
+  }
+
+  function rowIsActive(row) {
+    var active = document.activeElement;
+    if (active && row.contains(active)) {
+      return true;
+    }
+    if (row.querySelector(".price-config-wrap.is-open")) {
+      return true;
+    }
+    return false;
+  }
+
+  function buildOrderRow(order) {
+    var row = document.createElement("tr");
+    row.dataset.orderId = order.order_id;
+    row.dataset.basePrepaidAmount = String(toNonNegativeInt(order.base_prepaid_amount));
+    row.dataset.autoPrepaidAmount = String(toNonNegativeInt(order.auto_prepaid_amount));
+
+    row.appendChild(buildInputCell(order.name, "name", "text"));
+    row.appendChild(buildInputCell(order.tag_no, "tag_no", "text"));
+    var createdTd = document.createElement("td");
+    createdTd.dataset.colKey = "created_time";
+    createdTd.textContent = order.created_time || "";
+    row.appendChild(createdTd);
+    var priceTd = buildPaymentPriceCell(order); priceTd.dataset.colKey = "price"; row.appendChild(priceTd);
+    var pickupTd = buildPickupTimeCell(order); pickupTd.dataset.colKey = "pickup_time"; row.appendChild(pickupTd);
+    var imgTd = buildImageLinkCell(order.luggage_image_url || "", `${order.name || "고객"} 짐 사진`); imgTd.dataset.colKey = "luggage_image"; row.appendChild(imgTd);
+    var actionTd = buildPickupActionCell(order); actionTd.dataset.colKey = "pickup_action"; row.appendChild(actionTd);
+    row.appendChild(buildInputCell(order.note, "note", "text"));
+    var detailTd = buildDetailCell(order); detailTd.dataset.colKey = "detail"; row.appendChild(detailTd);
+    syncPriceCellMeta(row);
+    return row;
+  }
+
   function renderOrders(orders) {
-    tbodyEl.innerHTML = "";
     if (!orders.length) {
-      const row = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = 8;
-      td.textContent = tbodyEl.dataset.emptyText || "데이터가 없습니다.";
-      row.appendChild(td);
-      tbodyEl.appendChild(row);
+      tbodyEl.innerHTML = "";
+      lastRenderedOrders.clear();
+      var emptyRow = document.createElement("tr");
+      var emptyTd = document.createElement("td");
+      emptyTd.colSpan = 9;
+      emptyTd.textContent = tbodyEl.dataset.emptyText || "데이터가 없습니다.";
+      emptyRow.appendChild(emptyTd);
+      tbodyEl.appendChild(emptyRow);
       return;
     }
 
-    orders.forEach((order) => {
-      const row = document.createElement("tr");
-      row.dataset.orderId = order.order_id;
-      row.dataset.basePrepaidAmount = String(toNonNegativeInt(order.base_prepaid_amount));
-      row.dataset.autoPrepaidAmount = String(toNonNegativeInt(order.auto_prepaid_amount));
-
-      row.appendChild(buildInputCell(order.name, "name", "text"));
-      row.appendChild(buildInputCell(order.tag_no, "tag_no", "text"));
-      row.appendChild(buildPaymentPriceCell(order));
-      row.appendChild(buildPickupTimeCell(order));
-      row.appendChild(buildImageLinkCell(order.luggage_image_url || "", `${order.name || "고객"} 짐 사진`));
-      row.appendChild(buildPickupActionCell(order));
-      row.appendChild(buildInputCell(order.note, "note", "text"));
-      row.appendChild(buildDetailCell(order));
-      syncPriceCellMeta(row);
-      tbodyEl.appendChild(row);
+    var newOrderIds = new Set(orders.map(function (o) { return o.order_id; }));
+    var existingRowsByOrderId = {};
+    Array.from(tbodyEl.querySelectorAll("tr[data-order-id]")).forEach(function (row) {
+      existingRowsByOrderId[row.dataset.orderId] = row;
     });
+
+    // Remove rows no longer in data
+    Object.keys(existingRowsByOrderId).forEach(function (id) {
+      if (!newOrderIds.has(id)) {
+        existingRowsByOrderId[id].remove();
+        lastRenderedOrders.delete(id);
+        delete existingRowsByOrderId[id];
+      }
+    });
+
+    // Remove non-order rows (e.g. "no data" placeholder)
+    Array.from(tbodyEl.querySelectorAll("tr:not([data-order-id])")).forEach(function (row) {
+      row.remove();
+    });
+
+    var nextRendered = new Map();
+    var previousRow = null;
+
+    orders.forEach(function (order) {
+      var fingerprint = orderFingerprint(order);
+      var existingRow = existingRowsByOrderId[order.order_id];
+      var effectiveFingerprint = fingerprint;
+      var isActive = false;
+
+      if (existingRow) {
+        var unchanged = lastRenderedOrders.get(order.order_id) === fingerprint;
+        isActive = rowIsActive(existingRow);
+        if (!unchanged && !isActive) {
+          var replacement = buildOrderRow(order);
+          existingRow.replaceWith(replacement);
+          existingRow = replacement;
+          existingRowsByOrderId[order.order_id] = replacement;
+        } else if (!unchanged && isActive) {
+          // Preserve old fingerprint so next poll retries the update
+          effectiveFingerprint = lastRenderedOrders.get(order.order_id) || fingerprint;
+        }
+      } else {
+        existingRow = buildOrderRow(order);
+        existingRowsByOrderId[order.order_id] = existingRow;
+      }
+
+      nextRendered.set(order.order_id, effectiveFingerprint);
+
+      // Ensure correct ordering (skip repositioning for active rows)
+      if (!isActive) {
+        if (previousRow) {
+          if (existingRow.previousElementSibling !== previousRow) {
+            previousRow.after(existingRow);
+          }
+        } else if (existingRow !== tbodyEl.firstElementChild) {
+          tbodyEl.prepend(existingRow);
+        }
+      }
+      previousRow = existingRow;
+    });
+
+    lastRenderedOrders = nextRendered;
   }
 
   async function readErrorMessage(response) {

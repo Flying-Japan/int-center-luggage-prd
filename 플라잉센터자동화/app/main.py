@@ -1,6 +1,5 @@
 import base64
 import hashlib
-import json
 import io
 import logging
 import re
@@ -8,11 +7,10 @@ import secrets
 import threading
 import time
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse
-from urllib.request import Request as URLRequest, urlopen
 
 import httpx
 import supabase
@@ -37,23 +35,61 @@ from app.config import (
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
 )
+from app.display import (
+    cash_closing_status_pill_class,
+    display_cash_closing_audit_action,
+    display_cash_closing_status,
+    display_cash_closing_type,
+    display_flying_pass_tier,
+    display_lost_found_status,
+    display_note_category,
+    display_payment_method,
+)
 from app.r2 import r2_upload, r2_download
 from app.supabase_client import SupabaseDB
 from app.database import get_db
 from app.i18n import get_translations
 from app.schemas import OrderSummaryResponse, PricePreviewResponse
+from app.services.cash_closing import (
+    CASH_CLOSING_STATUSES,
+    CASH_CLOSING_TYPES,
+    COIN_BILL_DENOMS,
+    build_cash_closing_fields,
+    create_cash_closing_audit,
+    ensure_unique_cash_closing_type,
+    parse_cash_closing_type,
+    parse_denomination_counts,
+)
+from app.services.completion_messages import (
+    SUCCESS_PRIMARY_MESSAGE_KEYS,
+    SUCCESS_SECONDARY_MESSAGE_KEYS,
+    build_completion_messages_from_ko,
+    load_completion_messages,
+)
+from app.services.flying_pass import (
+    flying_pass_discount_amount,
+    normalize_flying_pass_tier,
+    recalculate_order_prepaid,
+)
 from app.services.order_number import build_order_id, build_tag_no
 from app.services.pricing import calculate_prepaid_amount, calculate_price_per_day
 from app.services.retention import run_retention_cleanup
+from app.services.sales import (
+    build_sales_analytics,
+    summarize_order_pass_discount_for_date,
+    summarize_order_sales_for_date,
+)
 from app.services.storage import calculate_storage_days, validate_pickup_time_window
-
-
-def format_yen(value: object) -> str:
-    try:
-        amount = int(float(value or 0))
-    except (TypeError, ValueError):
-        amount = 0
-    return f"¥ {amount:,}"
+from app.utils import (
+    auto_pickup_note,
+    business_date_range_utc,
+    date_to_ymd,
+    format_yen,
+    next_pickup_default_jst,
+    parse_pickup_datetime,
+    to_jst_datetime,
+    utc_now,
+)
 
 
 app = FastAPI(title="Flying Japan Luggage Storage MVP")
@@ -81,15 +117,6 @@ DISCOUNT_TABLE = [
 CUSTOMER_PAYMENT_METHODS = {"PAY_QR", "CASH"}
 STAFF_PAYMENT_METHODS = {"PAY_QR", "CASH"}
 STAFF_STATUS_FILTERS = ("PAYMENT_PENDING", "PAID", "PICKED_UP")
-FLYING_PASS_TIERS = ("NONE", "BLUE", "SILVER", "GOLD", "PLATINUM", "BLACK")
-FLYING_PASS_FIXED_DISCOUNTS = {
-    "NONE": 0,
-    "BLUE": 100,
-    "SILVER": 200,
-    "GOLD": 300,
-    "PLATINUM": 400,
-    "BLACK": 0,
-}
 OAUTH_ERROR_MESSAGES = {
     "oauth_failed": "Google 로그인에 실패했습니다.",
     "state_missing": "인증 세션이 만료되었습니다. 다시 시도해 주세요.",
@@ -99,11 +126,6 @@ OAUTH_ERROR_MESSAGES = {
 }
 LOST_FOUND_STATUSES = ("STORED", "RETURNED", "DISPOSED")
 NOTE_CATEGORIES = ("NOTICE", "HANDOVER")
-CASH_CLOSING_TYPES = ("MORNING_HANDOVER", "FINAL_CLOSE")
-CASH_CLOSING_STATUSES = ("DRAFT", "SUBMITTED", "LOCKED")
-COIN_BILL_DENOMS = (10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1)
-
-
 def validate_bag_quantities(suitcase_qty: int, backpack_qty: int) -> None:
     if suitcase_qty < 0 or backpack_qty < 0:
         raise HTTPException(status_code=400, detail="Bag quantities cannot be negative.")
@@ -112,97 +134,6 @@ def validate_bag_quantities(suitcase_qty: int, backpack_qty: int) -> None:
     if suitcase_qty == 0 and backpack_qty == 0:
         raise HTTPException(status_code=400, detail="At least one bag is required.")
 RECENT_PICKED_UP_DAYS = 2
-SUCCESS_PRIMARY_MESSAGE_KEYS = {
-    "ko": "customer_success_primary_message_ko",
-    "en": "customer_success_primary_message_en",
-    "ja": "customer_success_primary_message_ja",
-}
-SUCCESS_SECONDARY_MESSAGE_KEYS = {
-    "ko": "customer_success_secondary_message_ko",
-    "en": "customer_success_secondary_message_en",
-    "ja": "customer_success_secondary_message_ja",
-}
-DEFAULT_SUCCESS_PRIMARY_MESSAGES = {
-    "ko": (
-        "짐보관신청서 작성이 완료 되었습니다.\n"
-        "{amount} 금액 준비 해주시면, 순차적으로 성함 불러드리겠습니다."
-    ),
-    "en": (
-        "Your luggage storage form has been completed.\n"
-        "Please prepare {amount}. We will call your name in order."
-    ),
-    "ja": (
-        "手荷物保管申込書の作成が完了しました。\n"
-        "{amount}をご用意ください。順番にお名前をお呼びします。"
-    ),
-}
-DEFAULT_SUCCESS_SECONDARY_MESSAGES = {
-    "ko": (
-        "플라잉재팬만의 혜택\n"
-        "오사카 맛집 제휴할인되는 플라잉 화이트패스 증정!\n"
-        "이건물 드럭스토어 에디온에서 플라잉패스 제시만 해도 최대 17% 할인되고,\n"
-        "뒷면 QR코드로 오사카 제휴 맛집 리스트와 혜택도 확인 가능합니다!"
-    ),
-    "en": (
-        "Flying Japan Exclusive Benefits\n"
-        "Receive the Flying White Pass with partner discounts at Osaka restaurants!\n"
-        "Show the Flying Pass at EDION (drugstore in this building) for up to 17% off,\n"
-        "and scan the QR code on the back to check Osaka partner restaurant lists and benefits!"
-    ),
-    "ja": (
-        "フライングジャパン限定特典\n"
-        "大阪の提携飲食店で割引が受けられるフライングホワイトパスをプレゼント！\n"
-        "この建物内のドラッグストア・エディオンでフライングパスを提示すると最大17%割引、\n"
-        "裏面QRコードで大阪の提携飲食店リストと特典も確認できます！"
-    ),
-}
-HANGUL_RE = re.compile(r"[가-힣]")
-COMPLETION_LINE_TRANSLATIONS = {
-    "짐보관신청서 작성이 완료 되었습니다.": {
-        "en": "Your luggage storage form has been completed.",
-        "ja": "手荷物保管申込書の作成が完了しました。",
-    },
-    "{amount} 금액 준비 해주시면, 순차적으로 성함 불러드리겠습니다.": {
-        "en": "Please prepare {amount}. We will call your name in order.",
-        "ja": "{amount}をご用意ください。順番にお名前をお呼びします。",
-    },
-    "플라잉재팬만의 혜택": {
-        "en": "Flying Japan Exclusive Benefits",
-        "ja": "フライングジャパン限定特典",
-    },
-    "오사카 맛집 제휴할인되는 플라잉 화이트패스 증정!": {
-        "en": "Receive the Flying White Pass with partner discounts at Osaka restaurants!",
-        "ja": "大阪の提携飲食店で割引が受けられるフライングホワイトパスをプレゼント！",
-    },
-    "이건물 드럭스토어 에디온에서 플라잉패스 제시만 해도 최대 17% 할인되고,": {
-        "en": "Show the Flying Pass at EDION (drugstore in this building) for up to 17% off,",
-        "ja": "この建物内のドラッグストア・エディオンでフライングパスを提示すると最大17%割引、",
-    },
-    "뒷면 QR코드로 오사카 제휴 맛집 리스트와 혜택도 확인 가능합니다!": {
-        "en": "and scan the QR code on the back to check Osaka partner restaurant lists and benefits!",
-        "ja": "裏面QRコードで大阪の提携飲食店リストと特典も確認できます！",
-    },
-}
-COMPLETION_LINE_PATTERNS = (
-    (re.compile(r"작성.*완료"), "짐보관신청서 작성이 완료 되었습니다."),
-    (
-        re.compile(r"\{amount\}.*(금액|결제|준비).*(불러|호명|호출|이름)"),
-        "{amount} 금액 준비 해주시면, 순차적으로 성함 불러드리겠습니다.",
-    ),
-    (re.compile(r"플라잉재팬.*혜택"), "플라잉재팬만의 혜택"),
-    (
-        re.compile(r"화이트패스.*증정"),
-        "오사카 맛집 제휴할인되는 플라잉 화이트패스 증정!",
-    ),
-    (
-        re.compile(r"(에디온|edion).*(17%|17 %|최대)", flags=re.IGNORECASE),
-        "이건물 드럭스토어 에디온에서 플라잉패스 제시만 해도 최대 17% 할인되고,",
-    ),
-    (
-        re.compile(r"(qr|QR).*혜택", flags=re.IGNORECASE),
-        "뒷면 QR코드로 오사카 제휴 맛집 리스트와 혜택도 확인 가능합니다!",
-    ),
-)
 STAFF_BASE_MENU_ITEMS = (
     ("dashboard", "접수", "/staff/dashboard"),
     ("lost_found", "분실물", "/staff/lost-found"),
@@ -217,52 +148,6 @@ ADMIN_MENU_ITEMS = (
 )
 SCHEDULE_GOOGLE_EMBED_URL_KEY = "schedule_google_embed_url"
 SCHEDULE_FEATURE_ENABLED_KEY = "schedule_feature_enabled"
-
-
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def ensure_utc_datetime(dt) -> datetime:
-    # Supabase REST API returns TIMESTAMPTZ columns as ISO 8601 strings
-    if isinstance(dt, str):
-        dt = datetime.fromisoformat(dt)
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
-def to_jst_datetime(dt: datetime) -> datetime:
-    return ensure_utc_datetime(dt).astimezone(JST)
-
-
-def parse_pickup_datetime(local_datetime_str: str) -> datetime:
-    try:
-        local_dt = datetime.fromisoformat(local_datetime_str)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid pickup datetime format.") from exc
-
-    if local_dt.tzinfo is not None:
-        return local_dt.astimezone(timezone.utc)
-
-    return local_dt.replace(tzinfo=JST).astimezone(timezone.utc)
-
-
-def next_pickup_default_jst(now: datetime) -> datetime:
-    local_now = to_jst_datetime(now).replace(second=0, microsecond=0)
-    minute = local_now.minute
-    if minute not in (0, 30):
-        if minute < 30:
-            local_now = local_now.replace(minute=30)
-        else:
-            local_now = (local_now + timedelta(hours=1)).replace(minute=0)
-
-    if local_now.hour < 9:
-        return local_now.replace(hour=9, minute=0)
-    if local_now.hour > 21 or (local_now.hour == 21 and local_now.minute > 0):
-        next_day = local_now + timedelta(days=1)
-        return next_day.replace(hour=9, minute=0)
-    return local_now
 
 
 def save_image_file(upload: UploadFile, folder: str, order_id: str, label: str) -> str:
@@ -324,102 +209,6 @@ def build_staff_menu(db: SupabaseDB, active_key: str, is_admin: bool = False) ->
     ]
 
 
-def display_payment_method(payment_method: Optional[str]) -> str:
-    if not payment_method:
-        return "-"
-    mapping = {
-        "PAY_QR": "QR결제",
-        "CASH": "현금",
-    }
-    return mapping.get(payment_method, payment_method)
-
-
-def normalize_flying_pass_tier(raw_value: object, default: str = "NONE") -> str:
-    value = str(raw_value or "").strip().upper()
-    if value in FLYING_PASS_TIERS:
-        return value
-    return default
-
-
-def display_flying_pass_tier(tier: str) -> str:
-    mapping = {
-        "NONE": "미적용",
-        "BLUE": "블루",
-        "SILVER": "실버",
-        "GOLD": "골드",
-        "PLATINUM": "플래티넘",
-        "BLACK": "블랙",
-    }
-    normalized_tier = normalize_flying_pass_tier(tier)
-    return mapping.get(normalized_tier, normalized_tier)
-
-
-def flying_pass_discount_amount(base_prepaid: int, tier: str) -> int:
-    resolved_base = max(int(base_prepaid or 0), 0)
-    normalized_tier = normalize_flying_pass_tier(tier)
-    if normalized_tier == "BLACK":
-        return resolved_base
-    fixed_discount = int(FLYING_PASS_FIXED_DISCOUNTS.get(normalized_tier, 0))
-    return min(resolved_base, max(fixed_discount, 0))
-
-
-def recalculate_order_prepaid(
-    order,
-    *,
-    expected_storage_days: Optional[int] = None,
-    flying_pass_tier: Optional[str] = None,
-    submitted_prepaid_amount: Optional[int] = None,
-) -> dict[str, object]:
-    resolved_days = int(expected_storage_days if expected_storage_days is not None else order.expected_storage_days or 1)
-    if resolved_days < 1:
-        resolved_days = 1
-
-    resolved_tier = normalize_flying_pass_tier(
-        flying_pass_tier if flying_pass_tier is not None else order.flying_pass_tier
-    )
-    discount_rate, base_prepaid = calculate_prepaid_amount(order.price_per_day, resolved_days)
-    member_discount = flying_pass_discount_amount(base_prepaid, resolved_tier)
-    auto_prepaid = max(int(base_prepaid) - member_discount, 0)
-
-    if submitted_prepaid_amount is None:
-        if order.staff_prepaid_override_amount is None:
-            resolved_prepaid = auto_prepaid
-            override_amount = None
-        else:
-            resolved_prepaid = max(int(order.staff_prepaid_override_amount), 0)
-            override_amount = resolved_prepaid if resolved_prepaid != auto_prepaid else None
-    else:
-        resolved_prepaid = max(int(submitted_prepaid_amount), 0)
-        override_amount = resolved_prepaid if resolved_prepaid != auto_prepaid else None
-
-    order.expected_storage_days = resolved_days
-    order.discount_rate = discount_rate
-    order.flying_pass_tier = resolved_tier
-    order.flying_pass_discount_amount = member_discount
-    order.staff_prepaid_override_amount = override_amount
-    order.prepaid_amount = resolved_prepaid
-    order.final_amount = resolved_prepaid + int(order.extra_amount or 0)
-
-    return {
-        "expected_storage_days": resolved_days,
-        "discount_rate": discount_rate,
-        "base_prepaid_amount": int(base_prepaid),
-        "flying_pass_tier": resolved_tier,
-        "flying_pass_discount_amount": member_discount,
-        "auto_prepaid_amount": auto_prepaid,
-        "prepaid_amount": resolved_prepaid,
-        "staff_prepaid_override_amount": override_amount,
-    }
-
-
-def auto_pickup_note(created_at: datetime, expected_pickup_at: datetime) -> str:
-    created_jst = to_jst_datetime(created_at)
-    pickup_jst = to_jst_datetime(expected_pickup_at)
-    if pickup_jst.date() <= created_jst.date():
-        return ""
-    return f"{pickup_jst.strftime('%m/%d')} 수령예정"
-
-
 def resolved_note(order) -> str:
     manual_note = (order.note or "").strip()
     if manual_note:
@@ -443,138 +232,59 @@ def normalize_status_filters(raw_filters: list[str]) -> list[str]:
     return normalized
 
 
-def display_lost_found_status(status_value: str) -> str:
-    mapping = {
-        "STORED": "보관중",
-        "RETURNED": "인계완료",
-        "DISPOSED": "폐기",
-    }
-    return mapping.get(status_value, status_value)
-
-
-def display_note_category(category: str) -> str:
-    mapping = {
-        "NOTICE": "안내사항",
-        "HANDOVER": "인수인계",
-    }
-    return mapping.get(category, category)
-
-
-def display_cash_closing_type(closing_type: str) -> str:
-    mapping = {
-        "MORNING_HANDOVER": "오전 인수인계",
-        "FINAL_CLOSE": "최종 마감",
-    }
-    return mapping.get(closing_type, closing_type)
-
-
-def display_cash_closing_status(status_value: str) -> str:
-    mapping = {
-        "DRAFT": "작성중",
-        "SUBMITTED": "제출됨",
-        "LOCKED": "확인완료(잠금)",
-    }
-    return mapping.get(status_value, status_value)
-
-
-def cash_closing_status_pill_class(status_value: str) -> str:
-    mapping = {
-        "DRAFT": "status-payment_pending",
-        "SUBMITTED": "status-picked_up",
-        "LOCKED": "status-paid",
-    }
-    return mapping.get(status_value, "status-payment_pending")
-
-
-def display_cash_closing_audit_action(action: str) -> str:
-    mapping = {
-        "CREATE": "등록",
-        "UPDATE": "수정",
-        "ADMIN_UNLOCK_UPDATE": "잠금해제수정",
-        "SUBMIT": "제출",
-        "VERIFY_LOCK": "확인잠금",
-    }
-    return mapping.get(action, action)
-
-
-def parse_cash_closing_type(raw_value: str) -> str:
-    value = (raw_value or "").strip().upper()
-    if value not in CASH_CLOSING_TYPES:
-        raise HTTPException(status_code=400, detail="Invalid cash closing type.")
-    return value
-
-
-def ensure_unique_cash_closing_type(
-    db: SupabaseDB,
-    business_date: str,
-    closing_type: str,
+def build_new_order_record(
     *,
-    exclude_closing_id: Optional[int] = None,
-) -> None:
-    q = db.query("cash_closings").filter(
-        ("business_date", "=", business_date),
-        ("closing_type", "=", closing_type),
-    )
-    if exclude_closing_id:
-        q = q.filter(("closing_id", "!=", exclude_closing_id))
-    exists = q.first()
-    if exists:
-        raise HTTPException(
-            status_code=400,
-            detail=f"해당 날짜({business_date})의 {closing_type} 정산이 이미 존재합니다.",
-        )
-
-
-def create_cash_closing_audit(
-    db: SupabaseDB,
-    row,
-    *,
-    action: str,
-    staff_id: int,
-    reason: str = "",
-    payload: dict | None = None,
-) -> None:
-    db.insert("cash_closing_audits", {
-        "closing_id": row.closing_id,
-        "action": action,
-        "reason": reason.strip() or None,
-        "payload": json.dumps(payload, ensure_ascii=False) if payload else None,
+    order_id: str,
+    now: datetime,
+    name: str,
+    phone: str,
+    companion_count: int,
+    suitcase_qty: int,
+    backpack_qty: int,
+    set_qty: int,
+    pickup_at: datetime,
+    expected_storage_days: int,
+    price_per_day: int,
+    discount_rate: float,
+    prepaid_amount: int,
+    payment_method: Optional[str],
+    tag_no: str,
+    id_image_url: str = "",
+    luggage_image_url: str = "",
+    manual_entry: bool = False,
+    staff_id: Optional[str] = None,
+) -> dict:
+    return {
+        "order_id": order_id,
+        "created_at": now,
+        "name": name.strip(),
+        "phone": phone.strip(),
+        "companion_count": companion_count,
+        "suitcase_qty": suitcase_qty,
+        "backpack_qty": backpack_qty,
+        "set_qty": set_qty,
+        "expected_pickup_at": pickup_at,
+        "expected_storage_days": expected_storage_days,
+        "actual_storage_days": None,
+        "extra_days": 0,
+        "price_per_day": price_per_day,
+        "discount_rate": discount_rate,
+        "prepaid_amount": prepaid_amount,
+        "flying_pass_tier": "NONE",
+        "flying_pass_discount_amount": 0,
+        "staff_prepaid_override_amount": None,
+        "extra_amount": 0,
+        "final_amount": prepaid_amount,
+        "payment_method": payment_method,
+        "status": "PAYMENT_PENDING",
+        "tag_no": tag_no,
+        "note": auto_pickup_note(now, pickup_at) or None,
+        "id_image_url": id_image_url,
+        "luggage_image_url": luggage_image_url,
+        "consent_checked": True,
+        "manual_entry": manual_entry,
         "staff_id": staff_id,
-        "created_at": utc_now(),
-    })
-
-
-def calc_cash_total(counts_by_denom: dict[int, int]) -> int:
-    return sum(denom * counts_by_denom.get(denom, 0) for denom in COIN_BILL_DENOMS)
-
-
-def parse_denomination_counts(
-    count_10000: int,
-    count_5000: int,
-    count_2000: int,
-    count_1000: int,
-    count_500: int,
-    count_100: int,
-    count_50: int,
-    count_10: int,
-    count_5: int,
-    count_1: int,
-) -> dict[int, int]:
-    counts = {
-        10000: count_10000,
-        5000: count_5000,
-        2000: count_2000,
-        1000: count_1000,
-        500: count_500,
-        100: count_100,
-        50: count_50,
-        10: count_10,
-        5: count_5,
-        1: count_1,
     }
-    if any(value < 0 for value in counts.values()):
-        raise HTTPException(status_code=400, detail="Bill/Coin counts must be non-negative.")
-    return counts
 
 
 def resolve_staff_names(db: SupabaseDB, staff_ids: set) -> dict[int, str]:
@@ -582,281 +292,6 @@ def resolve_staff_names(db: SupabaseDB, staff_ids: set) -> dict[int, str]:
         return {}
     staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
     return {row.id: row.username for row in staff_rows}
-
-
-def business_date_range_utc(business_date: str) -> tuple[datetime, datetime]:
-    try:
-        start_jst = datetime.strptime(business_date, "%Y-%m-%d").replace(tzinfo=JST)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid business date.") from exc
-    end_jst = start_jst + timedelta(days=1)
-    return start_jst.astimezone(timezone.utc), end_jst.astimezone(timezone.utc)
-
-
-def parse_business_date_value(value: str) -> date:
-    try:
-        return datetime.strptime(value, "%Y-%m-%d").date()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid business date.") from exc
-
-
-def date_to_ymd(value: date) -> str:
-    return value.strftime("%Y-%m-%d")
-
-
-def iter_business_dates(start_date: date, end_date: date) -> list[str]:
-    if end_date < start_date:
-        return []
-    cursor = start_date
-    values: list[str] = []
-    while cursor <= end_date:
-        values.append(date_to_ymd(cursor))
-        cursor += timedelta(days=1)
-    return values
-
-
-def summarize_order_sales_for_date(db: SupabaseDB, business_date: str) -> dict[str, int]:
-    start_utc, end_utc = business_date_range_utc(business_date)
-    orders = (
-        db.query("orders")
-        .filter(
-            ("created_at", ">=", start_utc),
-            ("created_at", "<", end_utc),
-            ("status", "IN", ["PAID", "PICKED_UP"]),
-        )
-        .all()
-    )
-
-    cash_amount = 0
-    qr_amount = 0
-    for order in orders:
-        amount = int(order.prepaid_amount or 0)
-        if order.payment_method == "CASH":
-            cash_amount += amount
-        elif order.payment_method == "PAY_QR":
-            qr_amount += amount
-
-    return {
-        "cash_amount": cash_amount,
-        "qr_amount": qr_amount,
-        "sales_total_amount": cash_amount + qr_amount,
-    }
-
-
-def summarize_order_pass_discount_for_date(db: SupabaseDB, business_date: str) -> int:
-    start_utc, end_utc = business_date_range_utc(business_date)
-    rows = (
-        db.query("orders")
-        .filter(
-            ("created_at", ">=", start_utc),
-            ("created_at", "<", end_utc),
-            ("status", "IN", ["PAID", "PICKED_UP"]),
-        )
-        .all()
-    )
-    return sum(max(int(row.flying_pass_discount_amount or 0), 0) for row in rows)
-
-
-def parse_actual_qr_amount(raw_value: int, auto_qr_amount: int) -> int:
-    if raw_value < 0:
-        return auto_qr_amount
-    return raw_value
-
-
-def summarize_luggage_sales_for_period(
-    db: SupabaseDB,
-    start_date: str,
-    end_date: str,
-) -> dict[str, dict[str, int]]:
-    start_date_value = parse_business_date_value(start_date)
-    end_date_value = parse_business_date_value(end_date)
-    if end_date_value < start_date_value:
-        raise HTTPException(status_code=400, detail="End date must be on or after start date.")
-
-    start_utc, _ = business_date_range_utc(start_date)
-    _, end_exclusive_utc = business_date_range_utc(date_to_ymd(end_date_value))
-
-    orders = (
-        db.query("orders")
-        .filter(
-            ("created_at", ">=", start_utc),
-            ("created_at", "<", end_exclusive_utc),
-            ("status", "IN", ["PAID", "PICKED_UP"]),
-        )
-        .all()
-    )
-
-    by_date: dict[str, dict[str, int]] = {}
-    for order in orders:
-        business_date = to_jst_datetime(order.created_at).strftime("%Y-%m-%d")
-        entry = by_date.setdefault(
-            business_date,
-            {
-                "luggage_revenue": 0,
-                "luggage_customers": 0,
-                "luggage_cash": 0,
-                "luggage_qr": 0,
-                "luggage_orders": 0,
-            },
-        )
-        amount = max(int(order.prepaid_amount or 0), 0)
-        customer_count = max(int(order.companion_count or 1), 1)
-
-        entry["luggage_revenue"] += amount
-        entry["luggage_customers"] += customer_count
-        entry["luggage_orders"] += 1
-        if order.payment_method == "CASH":
-            entry["luggage_cash"] += amount
-        elif order.payment_method == "PAY_QR":
-            entry["luggage_qr"] += amount
-
-    return by_date
-
-
-def build_sales_analytics(
-    db: SupabaseDB,
-    start_date: str,
-    end_date: str,
-) -> dict[str, object]:
-    start_date_value = parse_business_date_value(start_date)
-    end_date_value = parse_business_date_value(end_date)
-    if end_date_value < start_date_value:
-        raise HTTPException(status_code=400, detail="End date must be on or after start date.")
-
-    business_dates = iter_business_dates(start_date_value, end_date_value)
-    luggage_by_date = summarize_luggage_sales_for_period(db, start_date, end_date)
-
-    rental_rows = (
-        db.query("rental_daily_sales")
-        .filter(
-            ("business_date", ">=", start_date),
-            ("business_date", "<=", end_date),
-        )
-        .all()
-    )
-    rental_by_date: dict[str, dict[str, int]] = {}
-    for row in rental_rows:
-        entry = rental_by_date.setdefault(
-            row.business_date,
-            {
-                "rental_revenue": 0,
-                "rental_customers": 0,
-            },
-        )
-        entry["rental_revenue"] += max(int(row.revenue_amount or 0), 0)
-        entry["rental_customers"] += max(int(row.customer_count or 0), 0)
-
-    daily_rows: list[dict[str, object]] = []
-    totals = {
-        "luggage_revenue": 0,
-        "rental_revenue": 0,
-        "combined_revenue": 0,
-        "luggage_customers": 0,
-        "rental_customers": 0,
-        "luggage_cash": 0,
-        "luggage_qr": 0,
-        "luggage_orders": 0,
-    }
-    monthly_map: dict[str, dict[str, int]] = {}
-
-    for business_date in business_dates:
-        luggage = luggage_by_date.get(
-            business_date,
-            {
-                "luggage_revenue": 0,
-                "luggage_customers": 0,
-                "luggage_cash": 0,
-                "luggage_qr": 0,
-                "luggage_orders": 0,
-            },
-        )
-        rental = rental_by_date.get(
-            business_date,
-            {
-                "rental_revenue": 0,
-                "rental_customers": 0,
-            },
-        )
-
-        combined_revenue = luggage["luggage_revenue"] + rental["rental_revenue"]
-        daily_rows.append(
-            {
-                "business_date": business_date,
-                "luggage_revenue": luggage["luggage_revenue"],
-                "rental_revenue": rental["rental_revenue"],
-                "combined_revenue": combined_revenue,
-                "luggage_customers": luggage["luggage_customers"],
-                "rental_customers": rental["rental_customers"],
-                "luggage_cash": luggage["luggage_cash"],
-                "luggage_qr": luggage["luggage_qr"],
-                "luggage_orders": luggage["luggage_orders"],
-            }
-        )
-
-        totals["luggage_revenue"] += luggage["luggage_revenue"]
-        totals["rental_revenue"] += rental["rental_revenue"]
-        totals["combined_revenue"] += combined_revenue
-        totals["luggage_customers"] += luggage["luggage_customers"]
-        totals["rental_customers"] += rental["rental_customers"]
-        totals["luggage_cash"] += luggage["luggage_cash"]
-        totals["luggage_qr"] += luggage["luggage_qr"]
-        totals["luggage_orders"] += luggage["luggage_orders"]
-
-        month_key = business_date[:7]
-        month_entry = monthly_map.setdefault(
-            month_key,
-            {
-                "luggage_revenue": 0,
-                "rental_revenue": 0,
-                "combined_revenue": 0,
-                "luggage_customers": 0,
-                "rental_customers": 0,
-            },
-        )
-        month_entry["luggage_revenue"] += luggage["luggage_revenue"]
-        month_entry["rental_revenue"] += rental["rental_revenue"]
-        month_entry["combined_revenue"] += combined_revenue
-        month_entry["luggage_customers"] += luggage["luggage_customers"]
-        month_entry["rental_customers"] += rental["rental_customers"]
-
-    monthly_rows = [
-        {
-            "month": month,
-            "luggage_revenue": values["luggage_revenue"],
-            "rental_revenue": values["rental_revenue"],
-            "combined_revenue": values["combined_revenue"],
-            "luggage_customers": values["luggage_customers"],
-            "rental_customers": values["rental_customers"],
-        }
-        for month, values in sorted(monthly_map.items())
-    ]
-
-    day_count = len(business_dates)
-    avg_daily_revenue = round(totals["combined_revenue"] / day_count) if day_count else 0
-    avg_luggage_order_revenue = (
-        round(totals["luggage_revenue"] / totals["luggage_orders"]) if totals["luggage_orders"] else 0
-    )
-
-    chart = {
-        "daily_labels": [row["business_date"] for row in daily_rows],
-        "daily_luggage": [row["luggage_revenue"] for row in daily_rows],
-        "daily_rental": [row["rental_revenue"] for row in daily_rows],
-        "daily_combined": [row["combined_revenue"] for row in daily_rows],
-        "monthly_labels": [row["month"] for row in monthly_rows],
-        "monthly_luggage": [row["luggage_revenue"] for row in monthly_rows],
-        "monthly_rental": [row["rental_revenue"] for row in monthly_rows],
-        "monthly_combined": [row["combined_revenue"] for row in monthly_rows],
-    }
-
-    return {
-        "daily_rows": daily_rows,
-        "monthly_rows": monthly_rows,
-        "totals": totals,
-        "chart": chart,
-        "avg_daily_revenue": avg_daily_revenue,
-        "avg_luggage_order_revenue": avg_luggage_order_revenue,
-        "range_days": day_count,
-    }
 
 
 def build_admin_sales_redirect(
@@ -964,145 +399,6 @@ def upsert_app_setting(db: SupabaseDB, setting_key: str, setting_value: str, sta
         row.staff_id = staff_id
         db.update(row)
         return row
-
-
-def normalize_completion_message_text(text: str) -> str:
-    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    normalized = normalized.replace("ㅇㅇㅇㅇ", "{amount}")
-    normalized = normalized.replace("{ amount }", "{amount}")
-    normalized = normalized.replace("{{amount}}", "{amount}")
-    normalized = normalized.replace("{amount}금액", "{amount} 금액")
-    lines = [line.strip() for line in normalized.split("\n") if line.strip()]
-    return "\n".join(lines)
-
-
-def contains_hangul(text: str) -> bool:
-    return bool(HANGUL_RE.search(text or ""))
-
-
-def canonical_completion_line(source_line: str) -> Optional[str]:
-    if source_line in COMPLETION_LINE_TRANSLATIONS:
-        return source_line
-    for pattern, canonical_line in COMPLETION_LINE_PATTERNS:
-        if pattern.search(source_line):
-            return canonical_line
-    return None
-
-
-def translate_completion_line_via_api(source_line: str, lang: str) -> str:
-    if lang not in ("en", "ja") or not source_line.strip():
-        return ""
-
-    placeholder_token = "ZXQAMOUNTTOKENQXZ"
-    query_text = source_line.replace("{amount}", placeholder_token)
-    translate_url = "https://translate.googleapis.com/translate_a/single?" + urlencode(
-        {
-            "client": "gtx",
-            "sl": "ko",
-            "tl": lang,
-            "dt": "t",
-            "q": query_text,
-        }
-    )
-    try:
-        request = URLRequest(translate_url, headers={"User-Agent": "Mozilla/5.0"})
-        with urlopen(request, timeout=3) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except Exception:
-        return ""
-
-    if not isinstance(payload, list) or not payload:
-        return ""
-    segments = payload[0]
-    translated_text = "".join(
-        segment[0]
-        for segment in segments
-        if isinstance(segment, list) and segment and isinstance(segment[0], str)
-    ).strip()
-    if not translated_text:
-        return ""
-
-    translated_text = re.sub(placeholder_token, "{amount}", translated_text, flags=re.IGNORECASE)
-    if "{amount}" in source_line and "{amount}" not in translated_text:
-        return ""
-    return translated_text
-
-
-def auto_translate_completion_text(ko_text: str, lang: str) -> str:
-    if lang == "ko":
-        return ko_text
-
-    translated_lines: list[str] = []
-    for source_line in [line.strip() for line in ko_text.split("\n") if line.strip()]:
-        translated_line = ""
-        canonical_line = canonical_completion_line(source_line)
-        if canonical_line:
-            translated_line = COMPLETION_LINE_TRANSLATIONS.get(canonical_line, {}).get(lang, "")
-
-        if (not translated_line or contains_hangul(translated_line)) and contains_hangul(source_line):
-            translated_from_api = translate_completion_line_via_api(source_line, lang)
-            if translated_from_api:
-                translated_line = translated_from_api
-
-        translated_lines.append(translated_line if translated_line else source_line)
-    return "\n".join(translated_lines)
-
-
-def build_completion_messages_from_ko(
-    ko_primary: str,
-    ko_secondary: str,
-) -> dict[str, dict[str, str]]:
-    normalized_primary = normalize_completion_message_text(ko_primary)
-    normalized_secondary = normalize_completion_message_text(ko_secondary)
-    if not normalized_primary:
-        normalized_primary = DEFAULT_SUCCESS_PRIMARY_MESSAGES["ko"]
-    if not normalized_secondary:
-        normalized_secondary = DEFAULT_SUCCESS_SECONDARY_MESSAGES["ko"]
-
-    return {
-        "primary": {
-            "ko": normalized_primary,
-            "en": auto_translate_completion_text(normalized_primary, "en"),
-            "ja": auto_translate_completion_text(normalized_primary, "ja"),
-        },
-        "secondary": {
-            "ko": normalized_secondary,
-            "en": auto_translate_completion_text(normalized_secondary, "en"),
-            "ja": auto_translate_completion_text(normalized_secondary, "ja"),
-        },
-    }
-
-
-def load_completion_messages(db: SupabaseDB) -> dict[str, dict[str, str]]:
-    ko_primary = get_app_setting(
-        db,
-        SUCCESS_PRIMARY_MESSAGE_KEYS["ko"],
-        DEFAULT_SUCCESS_PRIMARY_MESSAGES["ko"],
-    )
-    ko_secondary = get_app_setting(
-        db,
-        SUCCESS_SECONDARY_MESSAGE_KEYS["ko"],
-        DEFAULT_SUCCESS_SECONDARY_MESSAGES["ko"],
-    )
-    auto_messages = build_completion_messages_from_ko(ko_primary, ko_secondary)
-
-    resolved_primary: dict[str, str] = {}
-    resolved_secondary: dict[str, str] = {}
-    for lang_code in ("ko", "en", "ja"):
-        resolved_primary[lang_code] = get_app_setting(
-            db,
-            SUCCESS_PRIMARY_MESSAGE_KEYS[lang_code],
-            auto_messages["primary"][lang_code],
-        )
-        resolved_secondary[lang_code] = get_app_setting(
-            db,
-            SUCCESS_SECONDARY_MESSAGE_KEYS[lang_code],
-            auto_messages["secondary"][lang_code],
-        )
-    return {
-        "primary": resolved_primary,
-        "secondary": resolved_secondary,
-    }
 
 
 def serialize_staff_order(order) -> dict[str, object]:
@@ -1227,6 +523,222 @@ def backfill_missing_tag_numbers(db: SupabaseDB) -> None:
             db.update(counter)
 
 
+
+
+def build_handover_context(
+    db: SupabaseDB,
+    staff,
+    *,
+    edit_id: Optional[int] = None,
+    search_query: str = "",
+    unread_only: bool = False,
+) -> dict:
+    note_query = db.query("handover_notes")
+    if search_query:
+        search_like = f"%{search_query}%"
+        matched_staff_ids = [
+            row.id for row in db.query("user_profiles").filter(("username", "LIKE", search_like)).all()
+        ]
+        matched_note_ids_from_comments = list({
+            row.note_id
+            for row in db.query("handover_comments").filter(("content", "LIKE", search_like)).all()
+        })
+        filters: list[tuple] = [
+            ("title", "LIKE", search_like),
+            ("content", "LIKE", search_like),
+        ]
+        if matched_staff_ids:
+            filters.append(("staff_id", "IN", matched_staff_ids))
+        if matched_note_ids_from_comments:
+            filters.append(("note_id", "IN", matched_note_ids_from_comments))
+        note_query = note_query.filter_or(filters)
+
+    notes = (
+        note_query.order_by("is_pinned DESC", "created_at DESC", "note_id DESC")
+        .limit(500)
+        .all()
+    )
+    editing_note = db.get("handover_notes", "note_id", edit_id) if edit_id else None
+
+    note_ids = [note.note_id for note in notes]
+    reads: list = []
+    current_staff_read_note_ids: set[int] = set()
+    if note_ids:
+        reads = (
+            db.query("handover_reads")
+            .filter(("note_id", "IN", note_ids))
+            .order_by("note_id ASC", "read_at ASC", "read_id ASC")
+            .all()
+        )
+    current_staff_read_note_ids = {read.note_id for read in reads if read.staff_id == staff.staff_id}
+
+    unread_notes = [note for note in notes if note.note_id not in current_staff_read_note_ids]
+    read_notes = [note for note in notes if note.note_id in current_staff_read_note_ids]
+    notes = unread_notes + read_notes
+    if unread_only:
+        notes = unread_notes
+    notes = notes[:300]
+    note_ids = [note.note_id for note in notes]
+
+    comments: list = []
+    if note_ids:
+        comments = (
+            db.query("handover_comments")
+            .filter(("note_id", "IN", note_ids))
+            .order_by("note_id ASC", "created_at ASC", "comment_id ASC")
+            .all()
+        )
+
+    staff_ids = {note.staff_id for note in notes if note.staff_id}
+    staff_ids.update(read.staff_id for read in reads)
+    staff_ids.update(comment.staff_id for comment in comments if comment.staff_id)
+    staff_name_by_id = resolve_staff_names(db, staff_ids)
+
+    author_name_by_note = {
+        note.note_id: staff_name_by_id.get(note.staff_id or -1, "알 수 없음")
+        for note in notes
+    }
+
+    reader_names_by_note: dict[int, list[str]] = {note.note_id: [] for note in notes}
+    for read in reads:
+        names = reader_names_by_note.setdefault(read.note_id, [])
+        name = staff_name_by_id.get(read.staff_id, f"ID {read.staff_id}")
+        if name not in names:
+            names.append(name)
+
+    comments_by_note: dict[int, list] = {note.note_id: [] for note in notes}
+    comment_author_name_by_id: dict[int, str] = {}
+    note_search_text_by_note: dict[int, str] = {}
+    for comment in comments:
+        comments_by_note.setdefault(comment.note_id, []).append(comment)
+        comment_author_name_by_id[comment.comment_id] = staff_name_by_id.get(comment.staff_id, f"ID {comment.staff_id}")
+
+    for note in notes:
+        author_name = author_name_by_note.get(note.note_id, "")
+        comment_text = " ".join(comment.content for comment in comments_by_note.get(note.note_id, []))
+        search_blob = " ".join(
+            [
+                note.title or "",
+                note.content or "",
+                author_name or "",
+                comment_text or "",
+            ]
+        ).strip()
+        note_search_text_by_note[note.note_id] = search_blob.lower()
+
+    return {
+        "staff": staff,
+        "staff_menu_items": build_staff_menu(db, "handover", staff.is_admin),
+        "notes": notes,
+        "editing_note": editing_note,
+        "author_name_by_note": author_name_by_note,
+        "reader_names_by_note": reader_names_by_note,
+        "current_staff_read_note_ids": current_staff_read_note_ids,
+        "comments_by_note": comments_by_note,
+        "comment_author_name_by_id": comment_author_name_by_id,
+        "note_search_text_by_note": note_search_text_by_note,
+        "NOTE_CATEGORIES": NOTE_CATEGORIES,
+        "display_note_category": display_note_category,
+        "to_jst_datetime": to_jst_datetime,
+        "q": search_query,
+        "unread_only": unread_only,
+    }
+
+
+def build_cash_closing_context(
+    db: SupabaseDB,
+    staff,
+    *,
+    edit_id: Optional[int] = None,
+) -> dict:
+    closings = (
+        db.query("cash_closings")
+        .order_by("business_date DESC", "created_at DESC", "closing_id DESC")
+        .limit(300)
+        .all()
+    )
+    editing_closing = db.get("cash_closings", "closing_id", edit_id) if edit_id else None
+    if edit_id and editing_closing is None:
+        raise HTTPException(status_code=404, detail="Cash closing not found.")
+
+    closing_ids = [row.closing_id for row in closings]
+    create_audits: list = []
+    if closing_ids:
+        create_audits = (
+            db.query("cash_closing_audits")
+            .filter(
+                ("closing_id", "IN", closing_ids),
+                ("action", "=", "CREATE"),
+            )
+            .order_by("closing_id ASC", "created_at ASC", "audit_id ASC")
+            .all()
+        )
+
+    staff_ids = {row.staff_id for row in closings if row.staff_id}
+    staff_ids.update(row.submitted_by_staff_id for row in closings if row.submitted_by_staff_id)
+    staff_ids.update(row.verified_by_staff_id for row in closings if row.verified_by_staff_id)
+    staff_ids.update(audit.staff_id for audit in create_audits if audit.staff_id)
+    if editing_closing:
+        if editing_closing.staff_id:
+            staff_ids.add(editing_closing.staff_id)
+        if editing_closing.submitted_by_staff_id:
+            staff_ids.add(editing_closing.submitted_by_staff_id)
+        if editing_closing.verified_by_staff_id:
+            staff_ids.add(editing_closing.verified_by_staff_id)
+    staff_name_by_id = resolve_staff_names(db, staff_ids)
+    creator_name_by_closing: dict[int, str] = {}
+    for audit in create_audits:
+        if audit.closing_id in creator_name_by_closing:
+            continue
+        if not audit.staff_id:
+            continue
+        creator_name_by_closing[audit.closing_id] = staff_name_by_id.get(audit.staff_id, f"ID {audit.staff_id}")
+
+    today = utc_now().astimezone(JST).strftime("%Y-%m-%d")
+    today_rows = [row for row in closings if row.business_date == today]
+    today_types = {row.closing_type for row in today_rows}
+    if "MORNING_HANDOVER" not in today_types:
+        default_closing_type = "MORNING_HANDOVER"
+    elif "FINAL_CLOSE" not in today_types:
+        default_closing_type = "FINAL_CLOSE"
+    else:
+        default_closing_type = "FINAL_CLOSE"
+    today_sales = summarize_order_sales_for_date(db, today)
+    closing_dates = {row.business_date for row in closings}
+    pass_discount_by_date = {
+        business_date: summarize_order_pass_discount_for_date(db, business_date)
+        for business_date in closing_dates
+    }
+
+    return {
+        "staff": staff,
+        "staff_menu_items": build_staff_menu(db, "cash_closing", staff.is_admin),
+        "closings": closings,
+        "editing_closing": editing_closing,
+        "staff_name_by_id": staff_name_by_id,
+        "creator_name_by_closing": creator_name_by_closing,
+        "today": today,
+        "today_cash_count_sum": sum(row.total_amount for row in today_rows),
+        "today_total_sum": sum(row.total_amount for row in today_rows),
+        "today_check_sum": sum(row.check_auto_amount for row in today_rows),
+        "today_diff_sum": sum(row.difference_amount for row in today_rows),
+        "today_qr_diff_sum": sum(row.qr_difference_amount for row in today_rows),
+        "today_total_diff_sum": sum((row.difference_amount + row.qr_difference_amount) for row in today_rows),
+        "today_paypay_sum": sum(row.paypay_amount for row in today_rows),
+        "today_auto_cash_sales": today_sales["cash_amount"],
+        "today_auto_qr_sales": today_sales["qr_amount"],
+        "today_auto_total_sales": today_sales["sales_total_amount"],
+        "pass_discount_by_date": pass_discount_by_date,
+        "default_closing_type": default_closing_type,
+        "editing_is_locked": bool(editing_closing and editing_closing.workflow_status == "LOCKED"),
+        "COIN_BILL_DENOMS": COIN_BILL_DENOMS,
+        "to_jst_datetime": to_jst_datetime,
+        "CASH_CLOSING_TYPES": CASH_CLOSING_TYPES,
+        "CASH_CLOSING_STATUSES": CASH_CLOSING_STATUSES,
+        "display_cash_closing_type": display_cash_closing_type,
+        "display_cash_closing_status": display_cash_closing_status,
+        "cash_closing_status_pill_class": cash_closing_status_pill_class,
+    }
 
 
 logger = logging.getLogger("flying-center")
@@ -1372,37 +884,27 @@ def customer_submit(
     id_image_path = save_image_file(id_image, "id", order_id, "ID image")
     luggage_image_path = save_image_file(luggage_image, "luggage", order_id, "Luggage image")
 
-    order = db.insert("orders", {
-        "order_id": order_id,
-        "created_at": now,
-        "name": name.strip(),
-        "phone": phone.strip(),
-        "companion_count": companion_count,
-        "suitcase_qty": suitcase_qty,
-        "backpack_qty": backpack_qty,
-        "set_qty": pricing.set_qty,
-        "expected_pickup_at": pickup_at,
-        "expected_storage_days": expected_storage_days,
-        "actual_storage_days": None,
-        "extra_days": 0,
-        "price_per_day": pricing.price_per_day,
-        "discount_rate": discount_rate,
-        "prepaid_amount": prepaid_amount,
-        "flying_pass_tier": "NONE",
-        "flying_pass_discount_amount": 0,
-        "staff_prepaid_override_amount": None,
-        "extra_amount": 0,
-        "final_amount": prepaid_amount,
-        "payment_method": payment_method,
-        "status": "PAYMENT_PENDING",
-        "tag_no": build_tag_no(db, now),
-        "note": auto_pickup_note(now, pickup_at) or None,
-        "id_image_url": id_image_path,
-        "luggage_image_url": luggage_image_path,
-        "consent_checked": True,
-        "manual_entry": False,
-        "staff_id": None,
-    })
+    order = db.insert("orders", build_new_order_record(
+        order_id=order_id,
+        now=now,
+        name=name,
+        phone=phone,
+        companion_count=companion_count,
+        suitcase_qty=suitcase_qty,
+        backpack_qty=backpack_qty,
+        set_qty=pricing.set_qty,
+        pickup_at=pickup_at,
+        expected_storage_days=expected_storage_days,
+        price_per_day=pricing.price_per_day,
+        discount_rate=discount_rate,
+        prepaid_amount=prepaid_amount,
+        payment_method=payment_method,
+        tag_no=build_tag_no(db, now),
+        id_image_url=id_image_path,
+        luggage_image_url=luggage_image_path,
+        manual_entry=False,
+        staff_id=None,
+    ))
 
     return RedirectResponse(
         url=f"/customer/orders/{order_id}?lang={lang}",
@@ -1756,120 +1258,12 @@ def staff_handover_page(
     db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
     staff = ensure_staff(request, db)
-    search_query = q.strip()
-    note_query = db.query("handover_notes")
-    if search_query:
-        search_like = f"%{search_query}%"
-        matched_staff_ids = [
-            row.id for row in db.query("user_profiles").filter(("username", "LIKE", search_like)).all()
-        ]
-        matched_note_ids_from_comments = list({
-            row.note_id
-            for row in db.query("handover_comments").filter(("content", "LIKE", search_like)).all()
-        })
-        filters: list[tuple] = [
-            ("title", "LIKE", search_like),
-            ("content", "LIKE", search_like),
-        ]
-        if matched_staff_ids:
-            filters.append(("staff_id", "IN", matched_staff_ids))
-        if matched_note_ids_from_comments:
-            filters.append(("note_id", "IN", matched_note_ids_from_comments))
-        note_query = note_query.filter_or(filters)
-
-    notes = (
-        note_query.order_by("is_pinned DESC", "created_at DESC", "note_id DESC")
-        .limit(500)
-        .all()
+    ctx = build_handover_context(
+        db, staff, edit_id=edit_id, search_query=q.strip(), unread_only=unread_only,
     )
-    editing_note = db.get("handover_notes", "note_id", edit_id) if edit_id else None
-
-    note_ids = [note.note_id for note in notes]
-    reads: list = []
-    current_staff_read_note_ids: set[int] = set()
-    if note_ids:
-        reads = (
-            db.query("handover_reads")
-            .filter(("note_id", "IN", note_ids))
-            .order_by("note_id ASC", "read_at ASC", "read_id ASC")
-            .all()
-        )
-    current_staff_read_note_ids = {read.note_id for read in reads if read.staff_id == staff.staff_id}
-
-    unread_notes = [note for note in notes if note.note_id not in current_staff_read_note_ids]
-    read_notes = [note for note in notes if note.note_id in current_staff_read_note_ids]
-    notes = unread_notes + read_notes
-    if unread_only:
-        notes = unread_notes
-    notes = notes[:300]
-    note_ids = [note.note_id for note in notes]
-
-    comments: list = []
-    if note_ids:
-        comments = (
-            db.query("handover_comments")
-            .filter(("note_id", "IN", note_ids))
-            .order_by("note_id ASC", "created_at ASC", "comment_id ASC")
-            .all()
-        )
-
-    staff_ids = {note.staff_id for note in notes if note.staff_id}
-    staff_ids.update(read.staff_id for read in reads)
-    staff_ids.update(comment.staff_id for comment in comments if comment.staff_id)
-    staff_name_by_id = resolve_staff_names(db, staff_ids)
-
-    author_name_by_note = {
-        note.note_id: staff_name_by_id.get(note.staff_id or -1, "알 수 없음")
-        for note in notes
-    }
-
-    reader_names_by_note: dict[int, list[str]] = {note.note_id: [] for note in notes}
-    for read in reads:
-        names = reader_names_by_note.setdefault(read.note_id, [])
-        name = staff_name_by_id.get(read.staff_id, f"ID {read.staff_id}")
-        if name not in names:
-            names.append(name)
-
-    comments_by_note: dict[int, list] = {note.note_id: [] for note in notes}
-    comment_author_name_by_id: dict[int, str] = {}
-    note_search_text_by_note: dict[int, str] = {}
-    for comment in comments:
-        comments_by_note.setdefault(comment.note_id, []).append(comment)
-        comment_author_name_by_id[comment.comment_id] = staff_name_by_id.get(comment.staff_id, f"ID {comment.staff_id}")
-
-    for note in notes:
-        author_name = author_name_by_note.get(note.note_id, "")
-        comment_text = " ".join(comment.content for comment in comments_by_note.get(note.note_id, []))
-        search_blob = " ".join(
-            [
-                note.title or "",
-                note.content or "",
-                author_name or "",
-                comment_text or "",
-            ]
-        ).strip()
-        note_search_text_by_note[note.note_id] = search_blob.lower()
-
     return templates.TemplateResponse(
         "staff_handover.html",
-        {
-            "request": request,
-            "staff": staff,
-            "staff_menu_items": build_staff_menu(db, "handover", staff.is_admin),
-            "notes": notes,
-            "editing_note": editing_note,
-            "author_name_by_note": author_name_by_note,
-            "reader_names_by_note": reader_names_by_note,
-            "current_staff_read_note_ids": current_staff_read_note_ids,
-            "comments_by_note": comments_by_note,
-            "comment_author_name_by_id": comment_author_name_by_id,
-            "note_search_text_by_note": note_search_text_by_note,
-            "NOTE_CATEGORIES": NOTE_CATEGORIES,
-            "display_note_category": display_note_category,
-            "to_jst_datetime": to_jst_datetime,
-            "q": search_query,
-            "unread_only": unread_only,
-        },
+        {"request": request, **ctx},
     )
 
 
@@ -2090,96 +1484,10 @@ def staff_cash_closing_page(
     db: SupabaseDB = Depends(get_db),
 ) -> HTMLResponse:
     staff = ensure_staff(request, db)
-    closings = (
-        db.query("cash_closings")
-        .order_by("business_date DESC", "created_at DESC", "closing_id DESC")
-        .limit(300)
-        .all()
-    )
-    editing_closing = db.get("cash_closings", "closing_id", edit_id) if edit_id else None
-    if edit_id and editing_closing is None:
-        raise HTTPException(status_code=404, detail="Cash closing not found.")
-
-    closing_ids = [row.closing_id for row in closings]
-    create_audits: list = []
-    if closing_ids:
-        create_audits = (
-            db.query("cash_closing_audits")
-            .filter(
-                ("closing_id", "IN", closing_ids),
-                ("action", "=", "CREATE"),
-            )
-            .order_by("closing_id ASC", "created_at ASC", "audit_id ASC")
-            .all()
-        )
-
-    staff_ids = {row.staff_id for row in closings if row.staff_id}
-    staff_ids.update(row.submitted_by_staff_id for row in closings if row.submitted_by_staff_id)
-    staff_ids.update(row.verified_by_staff_id for row in closings if row.verified_by_staff_id)
-    staff_ids.update(audit.staff_id for audit in create_audits if audit.staff_id)
-    if editing_closing:
-        if editing_closing.staff_id:
-            staff_ids.add(editing_closing.staff_id)
-        if editing_closing.submitted_by_staff_id:
-            staff_ids.add(editing_closing.submitted_by_staff_id)
-        if editing_closing.verified_by_staff_id:
-            staff_ids.add(editing_closing.verified_by_staff_id)
-    staff_name_by_id = resolve_staff_names(db, staff_ids)
-    creator_name_by_closing: dict[int, str] = {}
-    for audit in create_audits:
-        if audit.closing_id in creator_name_by_closing:
-            continue
-        if not audit.staff_id:
-            continue
-        creator_name_by_closing[audit.closing_id] = staff_name_by_id.get(audit.staff_id, f"ID {audit.staff_id}")
-
-    today = utc_now().astimezone(JST).strftime("%Y-%m-%d")
-    today_rows = [row for row in closings if row.business_date == today]
-    today_types = {row.closing_type for row in today_rows}
-    if "MORNING_HANDOVER" not in today_types:
-        default_closing_type = "MORNING_HANDOVER"
-    elif "FINAL_CLOSE" not in today_types:
-        default_closing_type = "FINAL_CLOSE"
-    else:
-        default_closing_type = "FINAL_CLOSE"
-    today_sales = summarize_order_sales_for_date(db, today)
-    closing_dates = {row.business_date for row in closings}
-    pass_discount_by_date = {
-        business_date: summarize_order_pass_discount_for_date(db, business_date)
-        for business_date in closing_dates
-    }
+    ctx = build_cash_closing_context(db, staff, edit_id=edit_id)
     return templates.TemplateResponse(
         "staff_cash_closing.html",
-        {
-            "request": request,
-            "staff": staff,
-            "staff_menu_items": build_staff_menu(db, "cash_closing", staff.is_admin),
-            "closings": closings,
-            "editing_closing": editing_closing,
-            "staff_name_by_id": staff_name_by_id,
-            "creator_name_by_closing": creator_name_by_closing,
-            "today": today,
-            "today_cash_count_sum": sum(row.total_amount for row in today_rows),
-            "today_total_sum": sum(row.total_amount for row in today_rows),
-            "today_check_sum": sum(row.check_auto_amount for row in today_rows),
-            "today_diff_sum": sum(row.difference_amount for row in today_rows),
-            "today_qr_diff_sum": sum(row.qr_difference_amount for row in today_rows),
-            "today_total_diff_sum": sum((row.difference_amount + row.qr_difference_amount) for row in today_rows),
-            "today_paypay_sum": sum(row.paypay_amount for row in today_rows),
-            "today_auto_cash_sales": today_sales["cash_amount"],
-            "today_auto_qr_sales": today_sales["qr_amount"],
-            "today_auto_total_sales": today_sales["sales_total_amount"],
-            "pass_discount_by_date": pass_discount_by_date,
-            "default_closing_type": default_closing_type,
-            "editing_is_locked": bool(editing_closing and editing_closing.workflow_status == "LOCKED"),
-            "COIN_BILL_DENOMS": COIN_BILL_DENOMS,
-            "to_jst_datetime": to_jst_datetime,
-            "CASH_CLOSING_TYPES": CASH_CLOSING_TYPES,
-            "CASH_CLOSING_STATUSES": CASH_CLOSING_STATUSES,
-            "display_cash_closing_type": display_cash_closing_type,
-            "display_cash_closing_status": display_cash_closing_status,
-            "cash_closing_status_pill_class": cash_closing_status_pill_class,
-        },
+        {"request": request, **ctx},
     )
 
 
@@ -2221,30 +1529,11 @@ def staff_cash_closing_create(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    counts = {
-        10000: count_10000,
-        5000: count_5000,
-        2000: count_2000,
-        1000: count_1000,
-        500: count_500,
-        100: count_100,
-        50: count_50,
-        10: count_10,
-        5: count_5,
-        1: count_1,
-    }
-    if any(value < 0 for value in counts.values()):
-        raise HTTPException(status_code=400, detail="Bill/Coin counts must be non-negative.")
-
-    total_amount = calc_cash_total(counts)
-    sales = summarize_order_sales_for_date(db, business_date)
-    paypay_amount = sales["qr_amount"]
-    resolved_actual_qr_amount = parse_actual_qr_amount(actual_qr_amount, paypay_amount)
-    if resolved_actual_qr_amount < 0:
-        raise HTTPException(status_code=400, detail="QR actual amount must be non-negative.")
-    qr_difference_amount = resolved_actual_qr_amount - paypay_amount
-    check_auto_amount = sales["cash_amount"]
-    difference_amount = total_amount - check_auto_amount
+    counts = parse_denomination_counts(
+        count_10000, count_5000, count_2000, count_1000, count_500,
+        count_100, count_50, count_10, count_5, count_1,
+    )
+    computed = build_cash_closing_fields(counts, actual_qr_amount, actual_qr_amount, db, business_date)
 
     row = db.insert("cash_closings", {
         "business_date": business_date,
@@ -2260,14 +1549,7 @@ def staff_cash_closing_create(
         "count_10": count_10,
         "count_5": count_5,
         "count_1": count_1,
-        "total_amount": total_amount,
-        "paypay_amount": paypay_amount,
-        "actual_qr_amount": resolved_actual_qr_amount,
-        "qr_difference_amount": qr_difference_amount,
-        "check_auto_amount": check_auto_amount,
-        "expected_amount": check_auto_amount,
-        "actual_amount": total_amount,
-        "difference_amount": difference_amount,
+        **computed,
         "submitted_by_staff_id": None,
         "submitted_at": None,
         "verified_by_staff_id": None,
@@ -2347,30 +1629,11 @@ def staff_cash_closing_update(
     ):
         raise HTTPException(status_code=403, detail="제출된 정산은 제출자 또는 관리자만 수정할 수 있습니다.")
 
-    counts = {
-        10000: count_10000,
-        5000: count_5000,
-        2000: count_2000,
-        1000: count_1000,
-        500: count_500,
-        100: count_100,
-        50: count_50,
-        10: count_10,
-        5: count_5,
-        1: count_1,
-    }
-    if any(value < 0 for value in counts.values()):
-        raise HTTPException(status_code=400, detail="Bill/Coin counts must be non-negative.")
-
-    total_amount = calc_cash_total(counts)
-    sales = summarize_order_sales_for_date(db, business_date)
-    paypay_amount = sales["qr_amount"]
-    resolved_actual_qr_amount = parse_actual_qr_amount(actual_qr_amount, paypay_amount)
-    if resolved_actual_qr_amount < 0:
-        raise HTTPException(status_code=400, detail="QR actual amount must be non-negative.")
-    qr_difference_amount = resolved_actual_qr_amount - paypay_amount
-    check_auto_amount = sales["cash_amount"]
-    difference_amount = total_amount - check_auto_amount
+    counts = parse_denomination_counts(
+        count_10000, count_5000, count_2000, count_1000, count_500,
+        count_100, count_50, count_10, count_5, count_1,
+    )
+    computed = build_cash_closing_fields(counts, actual_qr_amount, actual_qr_amount, db, business_date)
 
     row.business_date = business_date
     row.closing_type = normalized_closing_type
@@ -2384,14 +1647,8 @@ def staff_cash_closing_update(
     row.count_10 = count_10
     row.count_5 = count_5
     row.count_1 = count_1
-    row.total_amount = total_amount
-    row.paypay_amount = paypay_amount
-    row.actual_qr_amount = resolved_actual_qr_amount
-    row.qr_difference_amount = qr_difference_amount
-    row.check_auto_amount = check_auto_amount
-    row.expected_amount = check_auto_amount
-    row.actual_amount = total_amount
-    row.difference_amount = difference_amount
+    for field_name, field_value in computed.items():
+        setattr(row, field_name, field_value)
     row.workflow_status = "DRAFT"
     row.submitted_by_staff_id = None
     row.submitted_at = None
@@ -3461,37 +2718,25 @@ def create_manual_order(
     discount_rate, prepaid_amount = calculate_prepaid_amount(pricing.price_per_day, expected_storage_days)
 
     order_id = f"M-{build_order_id(db, now)}"
-    order = db.insert("orders", {
-        "order_id": order_id,
-        "created_at": now,
-        "name": name.strip(),
-        "phone": phone.strip(),
-        "companion_count": 1,
-        "suitcase_qty": suitcase_qty,
-        "backpack_qty": backpack_qty,
-        "set_qty": pricing.set_qty,
-        "expected_pickup_at": pickup_at,
-        "expected_storage_days": expected_storage_days,
-        "actual_storage_days": None,
-        "extra_days": 0,
-        "price_per_day": pricing.price_per_day,
-        "discount_rate": discount_rate,
-        "prepaid_amount": prepaid_amount,
-        "flying_pass_tier": "NONE",
-        "flying_pass_discount_amount": 0,
-        "staff_prepaid_override_amount": None,
-        "extra_amount": 0,
-        "final_amount": prepaid_amount,
-        "payment_method": None,
-        "status": "PAYMENT_PENDING",
-        "tag_no": build_tag_no(db, now),
-        "note": auto_pickup_note(now, pickup_at) or None,
-        "id_image_url": "",
-        "luggage_image_url": "",
-        "consent_checked": True,
-        "manual_entry": True,
-        "staff_id": staff.staff_id,
-    })
+    order = db.insert("orders", build_new_order_record(
+        order_id=order_id,
+        now=now,
+        name=name,
+        phone=phone,
+        companion_count=1,
+        suitcase_qty=suitcase_qty,
+        backpack_qty=backpack_qty,
+        set_qty=pricing.set_qty,
+        pickup_at=pickup_at,
+        expected_storage_days=expected_storage_days,
+        price_per_day=pricing.price_per_day,
+        discount_rate=discount_rate,
+        prepaid_amount=prepaid_amount,
+        payment_method=None,
+        tag_no=build_tag_no(db, now),
+        manual_entry=True,
+        staff_id=staff.staff_id,
+    ))
     return RedirectResponse(url=f"/staff/orders/{order_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -3510,26 +2755,38 @@ def _serve_storage_image(storage_path: str) -> Response:
     )
 
 
-@app.get("/staff/orders/{order_id}/id-image")
-def staff_view_id_image(
+def _serve_order_image(
     request: Request,
     order_id: str,
-    db: SupabaseDB = Depends(get_db),
-):
+    image_field: str,
+    audit_action: str,
+    db: SupabaseDB,
+) -> Response:
+    """Shared helper for serving order images (ID or luggage) with audit logging."""
     staff = ensure_staff(request, db)
     order = db.get("orders", "order_id", order_id)
-    if order is None or not order.id_image_url:
+    image_url = getattr(order, image_field, None) if order else None
+    if order is None or not image_url:
         raise HTTPException(status_code=404, detail="Image not found")
 
     db.insert("audit_logs", {
         "order_id": order.order_id,
         "staff_id": staff.staff_id,
         "device_id": request.headers.get("x-device-id", request.client.host if request.client else "unknown"),
-        "action": "VIEW_ID",
+        "action": audit_action,
         "timestamp": utc_now(),
     })
 
-    return _serve_storage_image(order.id_image_url)
+    return _serve_storage_image(image_url)
+
+
+@app.get("/staff/orders/{order_id}/id-image")
+def staff_view_id_image(
+    request: Request,
+    order_id: str,
+    db: SupabaseDB = Depends(get_db),
+):
+    return _serve_order_image(request, order_id, "id_image_url", "VIEW_ID", db)
 
 
 @app.get("/staff/orders/{order_id}/luggage-image")
@@ -3538,20 +2795,7 @@ def staff_view_luggage_image(
     order_id: str,
     db: SupabaseDB = Depends(get_db),
 ):
-    staff = ensure_staff(request, db)
-    order = db.get("orders", "order_id", order_id)
-    if order is None or not order.luggage_image_url:
-        raise HTTPException(status_code=404, detail="Image not found")
-
-    db.insert("audit_logs", {
-        "order_id": order.order_id,
-        "staff_id": staff.staff_id,
-        "device_id": request.headers.get("x-device-id", request.client.host if request.client else "unknown"),
-        "action": "VIEW_LUGGAGE",
-        "timestamp": utc_now(),
-    })
-
-    return _serve_storage_image(order.luggage_image_url)
+    return _serve_order_image(request, order_id, "luggage_image_url", "VIEW_LUGGAGE", db)
 
 
 @app.post("/staff/admin/retention/run")

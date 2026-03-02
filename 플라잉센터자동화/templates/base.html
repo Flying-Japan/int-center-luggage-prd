@@ -3,12 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{{ title if title else 'Flying Japan 짐 보관' }}</title>
+  <title>{{ title if title else (t.brand_name if t is defined and t else 'Flying Japan 짐 보관') }}</title>
   <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
-  <link rel="stylesheet" href="/static/app.css?v=20260225g" />
+  <link rel="stylesheet" href="/static/app.css?v=20260302k" />
+  <script src="/static/utils.js?v=20260302a"></script>
 </head>
 {% set is_staff_site = request.url.path.startswith('/staff') %}
 <body class="{{ 'staff-site' if is_staff_site else 'customer-site' }}">
@@ -18,8 +19,8 @@
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="{{ '/staff/dashboard' if is_staff_site else '/customer' }}">
-        <img class="brand-logo" src="/static/logo.png" alt="Flying Japan" width="40" height="40" />
-        <span>{{ 'Flying Japan Staff' if is_staff_site else 'Flying Japan 짐 보관' }}</span>
+        <img class="brand-logo" src="/static/logo.png?v=2" alt="Flying Japan" width="40" height="40" />
+        <span>{{ 'Flying Japan Staff' if is_staff_site else (t.brand_name if t is defined and t else 'Flying Japan 짐 보관') }}</span>
       </a>
       {% if is_staff_site %}
       <nav class="pill-nav">
@@ -37,9 +38,9 @@
       {% else %}
       <div class="topbar-actions">
         <div class="lang-switcher" role="group" aria-label="Language">
-          <a href="/customer?lang=ko" class="lang-btn {% if lang == 'ko' or not lang %}lang-btn-active{% endif %}">KO</a>
-          <a href="/customer?lang=en" class="lang-btn {% if lang == 'en' %}lang-btn-active{% endif %}">EN</a>
-          <a href="/customer?lang=ja" class="lang-btn {% if lang == 'ja' %}lang-btn-active{% endif %}">JA</a>
+          <a href="{{ request.url.path }}?lang=ko" class="lang-btn {% if lang == 'ko' or not lang %}lang-btn-active{% endif %}">KO</a>
+          <a href="{{ request.url.path }}?lang=en" class="lang-btn {% if lang == 'en' %}lang-btn-active{% endif %}">EN</a>
+          <a href="{{ request.url.path }}?lang=ja" class="lang-btn {% if lang == 'ja' %}lang-btn-active{% endif %}">JA</a>
         </div>
         <a class="receipt-link" href="https://script.google.com/macros/s/AKfycbztXz0FhN90_Zs04h-f2AedkqHD4Koi-jtAnT0OE-HbzhMnShmMeWoYL-J8l9_07qlI/exec" target="_blank" rel="noopener">{{ t.receipt_link }}</a>
       </div>

@@ -58,6 +58,7 @@
       <colgroup>
         <col data-col-key="name" />
         <col data-col-key="tag_no" />
+        <col data-col-key="created_time" />
         <col data-col-key="price" />
         <col data-col-key="pickup_time" />
         <col data-col-key="luggage_image" />
@@ -69,6 +70,7 @@
         <tr>
           <th data-col-key="name">이름</th>
           <th data-col-key="tag_no">짐번호</th>
+          <th data-col-key="created_time">접수 시각</th>
           <th data-col-key="price">짐보관가격/할인</th>
           <th data-col-key="pickup_time">짐 찾는 시각</th>
           <th data-col-key="luggage_image">짐 사진</th>
@@ -86,13 +88,14 @@
       >
         {% for order in orders %}
         <tr data-order-id="{{ order.order_id }}">
-          <td><input class="control table-control" type="text" value="{{ order.name }}" /></td>
-          <td><input class="control table-control" type="text" value="{{ order.tag_no if order.tag_no else '' }}" /></td>
-          <td>
+          <td data-col-key="name"><input class="control table-control" type="text" value="{{ order.name }}" /></td>
+          <td data-col-key="tag_no"><input class="control table-control" type="text" value="{{ order.tag_no if order.tag_no else '' }}" /></td>
+          <td data-col-key="created_time">{{ to_jst_datetime(order.created_at).strftime('%m/%d %H:%M') }}</td>
+          <td data-col-key="price">
             <div>{{ order.prepaid_amount | yen }}</div>
           </td>
-          <td><input class="control table-control" type="time" value="{{ to_jst_datetime(order.expected_pickup_at).strftime('%H:%M') }}" /></td>
-          <td class="luggage-cell">
+          <td data-col-key="pickup_time"><input class="control table-control" type="time" value="{{ to_jst_datetime(order.expected_pickup_at).strftime('%H:%M') }}" /></td>
+          <td data-col-key="luggage_image" class="luggage-cell">
             {% if order.luggage_image_url %}
             <div class="luggage-hover-wrap">
               <button class="btn btn-secondary btn-sm" type="button">보기</button>
@@ -104,7 +107,7 @@
             -
             {% endif %}
           </td>
-          <td>
+          <td data-col-key="pickup_action">
             <div class="inline-actions">
               <button class="btn btn-secondary btn-sm" type="button">{{ "결제완료" if order.status != "PAYMENT_PENDING" else "결제대기" }}</button>
               {% if order.status != "PICKED_UP" %}
@@ -114,11 +117,11 @@
               {% endif %}
             </div>
           </td>
-          <td><input class="control table-control" type="text" value="{{ order.note if order.note else '' }}" /></td>
-          <td><a class="btn btn-secondary btn-sm" href="/staff/orders/{{ order.order_id }}">상세</a></td>
+          <td data-col-key="note"><input class="control table-control" type="text" value="{{ order.note if order.note else '' }}" /></td>
+          <td data-col-key="detail"><a class="btn btn-secondary btn-sm" href="/staff/orders/{{ order.order_id }}">상세</a></td>
         </tr>
         {% else %}
-        <tr><td colspan="8">데이터가 없습니다.</td></tr>
+        <tr><td colspan="9">데이터가 없습니다.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -196,7 +199,7 @@
   </details>
 </section>
 
-<script src="/static/staff_dashboard.js?v=20260220c"></script>
+<script src="/static/staff_dashboard.js?v=20260302n"></script>
 <script>
 (function () {
   const formEl = document.getElementById("manual-order-form");
@@ -221,24 +224,8 @@
     hiddenEl.value = dateEl.value && timeEl.value ? `${dateEl.value}T${timeEl.value}` : "";
   };
 
-  const isLate = (timeValue) => {
-    if (!timeValue) {
-      return false;
-    }
-    const parts = String(timeValue).split(":");
-    if (parts.length < 2) {
-      return false;
-    }
-    const hour = Number(parts[0]);
-    const minute = Number(parts[1]);
-    if (Number.isNaN(hour) || Number.isNaN(minute)) {
-      return false;
-    }
-    return hour >= 19 && (hour < 21 || minute === 0);
-  };
-
   const applyLateStyle = () => {
-    const late = isLate(timeEl.value);
+    const late = FJ.isLatePickupTime(timeEl.value);
     timeEl.classList.toggle("late-pickup", late);
     warningEl.classList.toggle("is-hidden", !late);
   };

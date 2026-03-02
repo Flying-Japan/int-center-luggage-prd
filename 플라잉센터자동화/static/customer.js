@@ -38,7 +38,13 @@
     return;
   }
 
-  const jpy = new Intl.NumberFormat("ja-JP");
+  var formatYen = FJ.formatYen;
+  var normalizeAmount = FJ.normalizeAmount;
+  var isLatePickupTime = FJ.isLatePickupTime;
+  var safeStorageSet = FJ.safeStorageSet;
+  var safeStorageGet = FJ.safeStorageGet;
+  var safeStorageRemove = FJ.safeStorageRemove;
+  var jpy = FJ.yenFormatter;
   const messages = {
     metaEmpty: formEl.dataset.previewMetaEmpty || "",
     invalidTitle: formEl.dataset.previewInvalidTitle || "Check input",
@@ -73,19 +79,7 @@
     hour12: false,
   });
 
-  function normalizeAmount(value) {
-    const num = Number(value || 0);
-    if (Number.isNaN(num)) {
-      return 0;
-    }
-    return Math.trunc(num);
-  }
 
-  function formatYen(value) {
-    const amount = normalizeAmount(value);
-    const sign = amount < 0 ? "-" : "";
-    return `${sign}¥ ${jpy.format(Math.abs(amount))}`;
-  }
 
   function setUploadStatus(message, kind) {
     if (!uploadStatusEl) {
@@ -121,29 +115,7 @@
     return "PAY_QR";
   }
 
-  function safeStorageSet(key, value) {
-    try {
-      window.localStorage.setItem(key, value);
-    } catch (_error) {
-      // Ignore storage quota/private mode errors.
-    }
-  }
 
-  function safeStorageGet(key) {
-    try {
-      return window.localStorage.getItem(key);
-    } catch (_error) {
-      return null;
-    }
-  }
-
-  function safeStorageRemove(key) {
-    try {
-      window.localStorage.removeItem(key);
-    } catch (_error) {
-      // Ignore storage errors.
-    }
-  }
 
   function saveDraft() {
     const payload = {
@@ -422,24 +394,6 @@
     pickupHiddenEl.value = `${pickupDateEl.value}T${pickupTimeEl.value}`;
   }
 
-  function isLatePickupTime(timeValue) {
-    if (!timeValue) {
-      return false;
-    }
-    const parts = timeValue.split(":");
-    if (parts.length < 2) {
-      return false;
-    }
-    const hour = Number(parts[0]);
-    const minute = Number(parts[1]);
-    if (Number.isNaN(hour) || Number.isNaN(minute)) {
-      return false;
-    }
-    if (hour < 19 || hour > 21) {
-      return false;
-    }
-    return hour < 21 || minute === 0;
-  }
 
   function maybeWarnLatePickup(force) {
     const shouldWarn = isLatePickupTime(pickupTimeEl.value);
@@ -717,19 +671,6 @@
     }
   }
 
-  function buildSubmissionFormData() {
-    const formData = new FormData(formEl);
-    const idImage = optimizedFilesByField.get("id_image");
-    const luggageImage = optimizedFilesByField.get("luggage_image");
-    if (idImage) {
-      formData.set("id_image", idImage, idImage.name);
-    }
-    if (luggageImage) {
-      formData.set("luggage_image", luggageImage, luggageImage.name);
-    }
-    return formData;
-  }
-
   function initFilePickers() {
     const triggers = Array.from(document.querySelectorAll("[data-file-trigger]"));
     triggers.forEach((trigger) => {
@@ -862,41 +803,33 @@
     isSubmitting = true;
     setSubmitBusy(true);
     window.addEventListener("beforeunload", beforeUnloadWhileSubmitting);
-    let movedToNextPage = false;
-
     try {
       await prepareUploadFiles(true);
       setUploadStatus(messages.uploadSubmitting, "busy");
 
-      const response = await fetch(formEl.action, {
-        method: "POST",
-        body: buildSubmissionFormData(),
-        redirect: "follow",
-      });
-
-      if (response.redirected && response.url) {
-        clearDraft();
-        movedToNextPage = true;
-        window.location.assign(response.url);
-        return;
+      var idImage = optimizedFilesByField.get("id_image");
+      var luggageImage = optimizedFilesByField.get("luggage_image");
+      var hasDataTransfer = typeof DataTransfer === "function";
+      if (idImage && idImageInputEl && hasDataTransfer) {
+        var dt1 = new DataTransfer();
+        dt1.items.add(idImage);
+        idImageInputEl.files = dt1.files;
       }
-
-      if (!response.ok) {
-        throw new Error("Submit failed");
+      if (luggageImage && luggageImageInputEl && hasDataTransfer) {
+        var dt2 = new DataTransfer();
+        dt2.items.add(luggageImage);
+        luggageImageInputEl.files = dt2.files;
       }
 
       clearDraft();
-      movedToNextPage = true;
-      window.location.assign("/customer");
+      window.removeEventListener("beforeunload", beforeUnloadWhileSubmitting);
+      formEl.submit();
     } catch (_error) {
       setUploadStatus(messages.uploadError, "error");
       window.alert(messages.uploadError);
-    } finally {
-      if (!movedToNextPage) {
-        isSubmitting = false;
-        setSubmitBusy(false);
-        window.removeEventListener("beforeunload", beforeUnloadWhileSubmitting);
-      }
+      isSubmitting = false;
+      setSubmitBusy(false);
+      window.removeEventListener("beforeunload", beforeUnloadWhileSubmitting);
     }
   });
 
