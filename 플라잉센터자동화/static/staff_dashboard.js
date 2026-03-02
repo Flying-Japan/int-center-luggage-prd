@@ -9,14 +9,14 @@
   const tableEl = document.getElementById("staff-orders-table");
   const tableWrapEl = tableEl ? tableEl.closest(".table-wrap") : null;
   const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP"];
-  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v8";
+  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v9";
   const columnSchema = [
     { key: "name", min: 120, weight: 1.5 },
-    { key: "tag_no", min: 50, weight: 0 },
+    { key: "tag_no", min: 62, weight: 0 },
     { key: "created_time", min: 105, weight: 0 },
     { key: "price", min: 200, weight: 0 },
     { key: "pickup_time", min: 100, weight: 0 },
-    { key: "luggage_image", min: 52, weight: 0 },
+    { key: "luggage_image", min: 66, weight: 0 },
     { key: "pickup_action", min: 148, weight: 0 },
     { key: "note", min: 140, weight: 4.5 },
     { key: "detail", min: 48, weight: 0 },
