@@ -6,6 +6,7 @@ import re
 import secrets
 import threading
 import time
+import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -107,11 +108,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 templates.env.filters["yen"] = format_yen
 
-import traceback as _tb
-
 @app.exception_handler(Exception)
 async def _global_exception_handler(request: Request, exc: Exception):
-    logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, _tb.format_exc())
+    logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, traceback.format_exc())
     return JSONResponse(status_code=500, content={"detail": str(exc), "type": type(exc).__name__})
 
 
@@ -777,57 +776,6 @@ def admin_landing() -> RedirectResponse:
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
-
-@app.get("/debug/dashboard-test")
-def debug_dashboard_test(request: Request, db: SupabaseDB = Depends(get_db)):
-    """Temporary debug endpoint — remove after diagnosis."""
-    errors = []
-    try:
-        tiers = build_flying_pass_tiers_json()
-    except Exception as e:
-        errors.append(f"build_flying_pass_tiers_json: {e}")
-        tiers = []
-    try:
-        import json as _json
-        _json.dumps(tiers)
-    except Exception as e:
-        errors.append(f"json.dumps(tiers): {e}")
-    try:
-        orders = query_staff_orders(db, [], "", limit=1)
-        order_count = len(orders)
-    except Exception as e:
-        errors.append(f"query_staff_orders: {e}")
-        order_count = -1
-        orders = []
-    try:
-        menu = build_staff_menu(db, "dashboard", False)
-    except Exception as e:
-        errors.append(f"build_staff_menu: {e}")
-    # Try rendering template with minimal context
-    try:
-        templates.TemplateResponse("staff_dashboard.html", {
-            "request": request,
-            "orders": orders[:1] if orders else [],
-            "selected_status_filters": [],
-            "q": "",
-            "show_all_picked_up": False,
-            "staff": type("S", (), {"name": "test", "is_admin": False})(),
-            "staff_menu_items": [],
-            "now_jst": utc_now().astimezone(JST),
-            "manual_default_pickup_date": "2026-01-01",
-            "manual_default_pickup_time": "12:00",
-            "JST": JST,
-            "max_bag_qty": MAX_BAG_QTY,
-            "display_payment_method": display_payment_method,
-            "display_flying_pass_tier": display_flying_pass_tier,
-            "to_jst_datetime": to_jst_datetime,
-            "flying_pass_tiers_json": tiers,
-            "retention_msg": "",
-            "retention_err": "",
-        })
-    except Exception as e:
-        errors.append(f"template render: {type(e).__name__}: {e}")
-    return {"errors": errors, "order_count": order_count, "tiers_count": len(tiers)}
 
 
 @app.get("/customer", response_class=HTMLResponse)
