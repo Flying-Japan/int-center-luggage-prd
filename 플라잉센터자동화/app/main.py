@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import io
+import json
 import logging
 import re
 import secrets
@@ -170,7 +171,7 @@ def debug_dashboard_diag(db: SupabaseDB = Depends(get_db)):
             "display_payment_method": display_payment_method,
             "display_flying_pass_tier": display_flying_pass_tier,
             "to_jst_datetime": to_jst_datetime,
-            "flying_pass_tiers_json": tiers if 'tiers' in dir() else [],
+            "flying_pass_tiers_json": json.dumps(tiers) if 'tiers' in dir() else "[]",
             "retention_msg": "",
             "retention_err": "",
         }
@@ -1149,7 +1150,7 @@ def staff_dashboard(
             "display_payment_method": display_payment_method,
             "display_flying_pass_tier": display_flying_pass_tier,
             "to_jst_datetime": to_jst_datetime,
-            "flying_pass_tiers_json": build_flying_pass_tiers_json(),
+            "flying_pass_tiers_json": json.dumps(build_flying_pass_tiers_json()),
             "retention_msg": retention_msg.strip(),
             "retention_err": retention_err.strip(),
         },
