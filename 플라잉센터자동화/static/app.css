@@ -1041,7 +1041,7 @@ td .btn-sm + .btn-sm {
 }
 
 #staff-orders-table .price-summary-row {
-  display: flex;
+  display: inline-flex;
   max-width: none;
   gap: 4px;
   align-items: center;

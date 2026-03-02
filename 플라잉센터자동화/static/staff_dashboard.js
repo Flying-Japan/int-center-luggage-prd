@@ -14,7 +14,7 @@
     { key: "name", min: 120, weight: 1.2 },
     { key: "tag_no", min: 46, weight: 0 },
     { key: "created_time", min: 100, weight: 0 },
-    { key: "price", min: 170, weight: 0 },
+    { key: "price", min: 205, weight: 0 },
     { key: "pickup_time", min: 96, weight: 0 },
     { key: "luggage_image", min: 50, weight: 0 },
     { key: "pickup_action", min: 138, weight: 0 },
