@@ -1425,7 +1425,12 @@ td {
 
 /* action buttons: compact inline */
 #staff-orders-table .inline-actions {
+  flex-wrap: nowrap;
   gap: 4px;
+}
+
+#staff-orders-table .inline-actions .btn-sm + .btn-sm {
+  margin-left: 0;
 }
 
 #staff-orders-table .btn-sm {
