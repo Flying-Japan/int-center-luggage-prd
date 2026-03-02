@@ -9,16 +9,17 @@
   const tableEl = document.getElementById("staff-orders-table");
   const tableWrapEl = tableEl ? tableEl.closest(".table-wrap") : null;
   const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP"];
-  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v2";
+  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v7";
   const columnSchema = [
-    { key: "name", min: 150, weight: 1.4 },
-    { key: "tag_no", min: 78, weight: 0.65 },
-    { key: "price", min: 228, weight: 1.8 },
-    { key: "pickup_time", min: 140, weight: 1.0 },
-    { key: "luggage_image", min: 94, weight: 0.8 },
-    { key: "pickup_action", min: 182, weight: 1.4 },
-    { key: "note", min: 220, weight: 2.3 },
-    { key: "detail", min: 88, weight: 0.7 },
+    { key: "name", min: 120, weight: 1.2 },
+    { key: "tag_no", min: 46, weight: 0 },
+    { key: "created_time", min: 100, weight: 0 },
+    { key: "price", min: 170, weight: 0 },
+    { key: "pickup_time", min: 96, weight: 0 },
+    { key: "luggage_image", min: 50, weight: 0 },
+    { key: "pickup_action", min: 138, weight: 0 },
+    { key: "note", min: 150, weight: 5 },
+    { key: "detail", min: 46, weight: 0 },
   ];
   const FLYING_PASS_TIER_OPTIONS = [
     { value: "NONE", label: "미적용" },
@@ -652,7 +653,7 @@
     if (!orders.length) {
       const row = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 8;
+      td.colSpan = 9;
       td.textContent = tbodyEl.dataset.emptyText || "데이터가 없습니다.";
       row.appendChild(td);
       tbodyEl.appendChild(row);
@@ -667,6 +668,9 @@
 
       row.appendChild(buildInputCell(order.name, "name", "text"));
       row.appendChild(buildInputCell(order.tag_no, "tag_no", "text"));
+      var createdTd = document.createElement("td");
+      createdTd.textContent = order.created_time || "";
+      row.appendChild(createdTd);
       row.appendChild(buildPaymentPriceCell(order));
       row.appendChild(buildPickupTimeCell(order));
       row.appendChild(buildImageLinkCell(order.luggage_image_url || "", `${order.name || "고객"} 짐 사진`));

@@ -58,6 +58,7 @@
       <colgroup>
         <col data-col-key="name" />
         <col data-col-key="tag_no" />
+        <col data-col-key="created_time" />
         <col data-col-key="price" />
         <col data-col-key="pickup_time" />
         <col data-col-key="luggage_image" />
@@ -69,6 +70,7 @@
         <tr>
           <th data-col-key="name">이름</th>
           <th data-col-key="tag_no">짐번호</th>
+          <th data-col-key="created_time">접수 시각</th>
           <th data-col-key="price">짐보관가격/할인</th>
           <th data-col-key="pickup_time">짐 찾는 시각</th>
           <th data-col-key="luggage_image">짐 사진</th>
@@ -88,6 +90,7 @@
         <tr data-order-id="{{ order.order_id }}">
           <td><input class="control table-control" type="text" value="{{ order.name }}" /></td>
           <td><input class="control table-control" type="text" value="{{ order.tag_no if order.tag_no else '' }}" /></td>
+          <td>{{ to_jst_datetime(order.created_at).strftime('%m/%d %H:%M') }}</td>
           <td>
             <div>{{ order.prepaid_amount | yen }}</div>
           </td>
@@ -118,7 +121,7 @@
           <td><a class="btn btn-secondary btn-sm" href="/staff/orders/{{ order.order_id }}">상세</a></td>
         </tr>
         {% else %}
-        <tr><td colspan="8">데이터가 없습니다.</td></tr>
+        <tr><td colspan="9">데이터가 없습니다.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -196,7 +199,7 @@
   </details>
 </section>
 
-<script src="/static/staff_dashboard.js?v=20260220c"></script>
+<script src="/static/staff_dashboard.js?v=20260302g"></script>
 <script>
 (function () {
   const formEl = document.getElementById("manual-order-form");
