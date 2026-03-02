@@ -19,7 +19,7 @@
     { key: "luggage_image", min: 66, weight: 0 },
     { key: "pickup_action", min: 148, weight: 0 },
     { key: "note", min: 140, weight: 4.5 },
-    { key: "detail", min: 48, weight: 0 },
+    { key: "detail", min: 58, weight: 0 },
   ];
   const FLYING_PASS_TIER_OPTIONS = [
     { value: "NONE", label: "미적용" },
