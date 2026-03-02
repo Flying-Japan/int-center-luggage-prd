@@ -1,17 +1,34 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="hero">
-  <p class="hero-kicker">Reception Complete</p>
+  <p class="hero-kicker">{{ t.reception_complete_kicker }}</p>
   <h2 class="hero-title">{{ t.customer_title }}</h2>
   <p class="hero-desc">{{ t.counter_notice }}</p>
 </section>
 
 <section class="card center card-primary success-toss-card">
-  <div class="success-check-badge">접수 완료</div>
-  <p class="success-primary-message">{{ success_primary_message }}</p>
+  <div class="success-check-badge">{{ t.reception_complete_badge }}</div>
+
+  <div class="success-primary-message">
+    {% set primary_lines = success_primary_message.split('\n') %}
+    {% for line in primary_lines %}
+      {% if loop.first and line.strip() %}
+        <p class="success-primary-title">{{ line }}</p>
+      {% elif line.strip() %}
+        <p class="success-primary-body">{{ line }}</p>
+      {% endif %}
+    {% endfor %}
+  </div>
 
   <div class="success-benefit-card">
-    <p class="success-secondary-message">{{ success_secondary_message }}</p>
+    {% set secondary_lines = success_secondary_message.split('\n') %}
+    {% for line in secondary_lines %}
+      {% if loop.first and line.strip() %}
+        <p class="success-benefit-title">{{ line }}</p>
+      {% elif line.strip() %}
+        <p class="success-benefit-body">{{ line }}</p>
+      {% endif %}
+    {% endfor %}
   </div>
 </section>
 {% endblock %}

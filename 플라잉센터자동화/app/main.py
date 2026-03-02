@@ -90,6 +90,15 @@ NOTE_CATEGORIES = ("NOTICE", "HANDOVER")
 CASH_CLOSING_TYPES = ("MORNING_HANDOVER", "FINAL_CLOSE")
 CASH_CLOSING_STATUSES = ("DRAFT", "SUBMITTED", "LOCKED")
 COIN_BILL_DENOMS = (10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1)
+
+
+def validate_bag_quantities(suitcase_qty: int, backpack_qty: int) -> None:
+    if suitcase_qty < 0 or backpack_qty < 0:
+        raise HTTPException(status_code=400, detail="Bag quantities cannot be negative.")
+    if suitcase_qty > MAX_BAG_QTY or backpack_qty > MAX_BAG_QTY:
+        raise HTTPException(status_code=400, detail=f"Max quantity per type is {MAX_BAG_QTY}.")
+    if suitcase_qty == 0 and backpack_qty == 0:
+        raise HTTPException(status_code=400, detail="At least one bag is required.")
 RECENT_PICKED_UP_DAYS = 2
 SUCCESS_PRIMARY_MESSAGE_KEYS = {
     "ko": "customer_success_primary_message_ko",
@@ -1058,6 +1067,7 @@ def serialize_staff_order(order) -> dict[str, object]:
         "order_id": order.order_id,
         "name": order.name,
         "tag_no": order.tag_no or "",
+        "created_time": to_jst_datetime(order.created_at).strftime("%m/%d %H:%M"),
         "suitcase_qty": order.suitcase_qty,
         "backpack_qty": order.backpack_qty,
         "set_qty": order.set_qty,
@@ -1243,10 +1253,7 @@ def price_preview(
     backpack_qty: int,
     expected_pickup_at: str,
 ) -> PricePreviewResponse:
-    if suitcase_qty > MAX_BAG_QTY or backpack_qty > MAX_BAG_QTY:
-        raise HTTPException(status_code=400, detail=f"Max quantity per type is {MAX_BAG_QTY}.")
-    if suitcase_qty == 0 and backpack_qty == 0:
-        raise HTTPException(status_code=400, detail="At least one bag is required.")
+    validate_bag_quantities(suitcase_qty, backpack_qty)
 
     pickup_at = parse_pickup_datetime(expected_pickup_at)
     now = utc_now()
@@ -1294,12 +1301,7 @@ def customer_submit(
     if payment_method not in CUSTOMER_PAYMENT_METHODS:
         raise HTTPException(status_code=400, detail="Invalid payment method.")
 
-    if suitcase_qty < 0 or backpack_qty < 0:
-        raise HTTPException(status_code=400, detail="Bag quantities cannot be negative.")
-    if suitcase_qty > MAX_BAG_QTY or backpack_qty > MAX_BAG_QTY:
-        raise HTTPException(status_code=400, detail=f"Max quantity per type is {MAX_BAG_QTY}.")
-    if suitcase_qty == 0 and backpack_qty == 0:
-        raise HTTPException(status_code=400, detail="At least one bag is required.")
+    validate_bag_quantities(suitcase_qty, backpack_qty)
 
     if consent_checked != "on":
         raise HTTPException(status_code=400, detail="Consent is required.")
@@ -3424,12 +3426,7 @@ def create_manual_order(
 ) -> RedirectResponse:
     staff = ensure_staff(request, db)
 
-    if suitcase_qty < 0 or backpack_qty < 0:
-        raise HTTPException(status_code=400, detail="Bag quantities cannot be negative.")
-    if suitcase_qty > MAX_BAG_QTY or backpack_qty > MAX_BAG_QTY:
-        raise HTTPException(status_code=400, detail=f"Max quantity per type is {MAX_BAG_QTY}.")
-    if suitcase_qty == 0 and backpack_qty == 0:
-        raise HTTPException(status_code=400, detail="At least one bag is required.")
+    validate_bag_quantities(suitcase_qty, backpack_qty)
 
     expected_pickup_raw = expected_pickup_at.strip()
     if not expected_pickup_raw and expected_pickup_date.strip() and expected_pickup_time.strip():

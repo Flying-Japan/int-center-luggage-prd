@@ -10,6 +10,9 @@
   const tableWrapEl = tableEl ? tableEl.closest(".table-wrap") : null;
   const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP"];
   const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v9";
+  ["v2","v3","v4","v5","v6","v7","v8"].forEach(function (v) {
+    FJ.safeStorageRemove("flying-japan-staff-col-widths-" + v);
+  });
   const columnSchema = [
     { key: "name", min: 120, weight: 1.5 },
     { key: "tag_no", min: 62, weight: 0 },
@@ -34,17 +37,13 @@
     return;
   }
 
-  const yenFormatter = new Intl.NumberFormat("ja-JP");
+  var formatYen = FJ.formatYen;
+  var isLatePickupTime = FJ.isLatePickupTime;
   const confirmSaveText = tbodyEl.dataset.confirmSaveText || "입력한 내용으로 수정하시겠습니까?";
   const confirmPickupText = tbodyEl.dataset.confirmPickupText || "수령완료 처리하시겠습니까?";
   const confirmUndoPickupText = tbodyEl.dataset.confirmUndoPickupText || "수령완료를 취소하시겠습니까?";
 
-  function formatYen(value) {
-    const amount = Math.trunc(Number(value || 0));
-    const safeAmount = Number.isFinite(amount) ? amount : 0;
-    const sign = safeAmount < 0 ? "-" : "";
-    return `${sign}¥ ${yenFormatter.format(Math.abs(safeAmount))}`;
-  }
+
 
   function toSafeInt(value, fallback = 0) {
     const amount = Math.trunc(Number(value));
@@ -99,7 +98,7 @@
 
   function loadSavedColumnWidths() {
     try {
-      const raw = window.localStorage.getItem(COL_WIDTH_STORAGE_KEY);
+      const raw = FJ.safeStorageGet(COL_WIDTH_STORAGE_KEY);
       if (!raw) {
         return {};
       }
@@ -122,7 +121,7 @@
 
   function saveColumnWidths(widths) {
     try {
-      window.localStorage.setItem(COL_WIDTH_STORAGE_KEY, JSON.stringify(widths));
+      FJ.safeStorageSet(COL_WIDTH_STORAGE_KEY, JSON.stringify(widths));
     } catch (_error) {
       // Ignore storage quota/private mode issues.
     }
@@ -294,24 +293,6 @@
     syncSelectAllButtonState();
   }
 
-  function isLatePickupTime(timeValue) {
-    if (!timeValue) {
-      return false;
-    }
-    const parts = String(timeValue).split(":");
-    if (parts.length < 2) {
-      return false;
-    }
-    const hour = Number(parts[0]);
-    const minute = Number(parts[1]);
-    if (Number.isNaN(hour) || Number.isNaN(minute)) {
-      return false;
-    }
-    if (hour < 19 || hour > 21) {
-      return false;
-    }
-    return hour < 21 || minute === 0;
-  }
 
   function applyLatePickupStyle(inputEl) {
     inputEl.classList.toggle("late-pickup", isLatePickupTime(inputEl.value));
@@ -319,6 +300,7 @@
 
   function buildInputCell(value, field, type) {
     const td = document.createElement("td");
+    td.dataset.colKey = field;
     const input = document.createElement("input");
     input.className = "control table-control";
     input.type = type || "text";
@@ -669,14 +651,15 @@
       row.appendChild(buildInputCell(order.name, "name", "text"));
       row.appendChild(buildInputCell(order.tag_no, "tag_no", "text"));
       var createdTd = document.createElement("td");
+      createdTd.dataset.colKey = "created_time";
       createdTd.textContent = order.created_time || "";
       row.appendChild(createdTd);
-      row.appendChild(buildPaymentPriceCell(order));
-      row.appendChild(buildPickupTimeCell(order));
-      row.appendChild(buildImageLinkCell(order.luggage_image_url || "", `${order.name || "고객"} 짐 사진`));
-      row.appendChild(buildPickupActionCell(order));
+      var priceTd = buildPaymentPriceCell(order); priceTd.dataset.colKey = "price"; row.appendChild(priceTd);
+      var pickupTd = buildPickupTimeCell(order); pickupTd.dataset.colKey = "pickup_time"; row.appendChild(pickupTd);
+      var imgTd = buildImageLinkCell(order.luggage_image_url || "", `${order.name || "고객"} 짐 사진`); imgTd.dataset.colKey = "luggage_image"; row.appendChild(imgTd);
+      var actionTd = buildPickupActionCell(order); actionTd.dataset.colKey = "pickup_action"; row.appendChild(actionTd);
       row.appendChild(buildInputCell(order.note, "note", "text"));
-      row.appendChild(buildDetailCell(order));
+      var detailTd = buildDetailCell(order); detailTd.dataset.colKey = "detail"; row.appendChild(detailTd);
       syncPriceCellMeta(row);
       tbodyEl.appendChild(row);
     });
