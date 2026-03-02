@@ -17,6 +17,28 @@ FLYING_PASS_FIXED_DISCOUNTS = {
 }
 
 
+FLYING_PASS_TIER_LABELS = {
+    "NONE": "미적용",
+    "BLUE": "블루",
+    "SILVER": "실버",
+    "GOLD": "골드",
+    "PLATINUM": "플래티넘",
+    "BLACK": "블랙",
+}
+
+
+def build_flying_pass_tiers_json() -> list[dict[str, object]]:
+    """Build tier data list for frontend consumption (single source of truth)."""
+    return [
+        {
+            "value": tier,
+            "label": FLYING_PASS_TIER_LABELS.get(tier, tier),
+            "discount": FLYING_PASS_FIXED_DISCOUNTS.get(tier, 0),
+        }
+        for tier in FLYING_PASS_TIERS
+    ]
+
+
 def normalize_flying_pass_tier(raw_value: object, default: str = "NONE") -> str:
     value = str(raw_value or "").strip().upper()
     if value in FLYING_PASS_TIERS:

@@ -85,6 +85,7 @@
         data-confirm-save-text="입력한 내용으로 수정하시겠습니까?"
         data-confirm-pickup-text="수령완료 처리하시겠습니까?"
         data-confirm-undo-pickup-text="수령완료를 취소하시겠습니까?"
+        data-flying-pass-tiers='{{ flying_pass_tiers_json | tojson }}'
       >
         {% for order in orders %}
         <tr data-order-id="{{ order.order_id }}">
@@ -199,7 +200,7 @@
   </details>
 </section>
 
-<script src="/static/staff_dashboard.js?v=20260302n"></script>
+<script src="/static/staff_dashboard.js?v=20260302p"></script>
 <script>
 (function () {
   const formEl = document.getElementById("manual-order-form");

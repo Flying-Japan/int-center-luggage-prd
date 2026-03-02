@@ -15,18 +15,10 @@ def display_payment_method(payment_method: Optional[str]) -> str:
 
 
 def display_flying_pass_tier(tier: str) -> str:
-    from app.services.flying_pass import normalize_flying_pass_tier
+    from app.services.flying_pass import FLYING_PASS_TIER_LABELS, normalize_flying_pass_tier
 
-    mapping = {
-        "NONE": "미적용",
-        "BLUE": "블루",
-        "SILVER": "실버",
-        "GOLD": "골드",
-        "PLATINUM": "플래티넘",
-        "BLACK": "블랙",
-    }
     normalized_tier = normalize_flying_pass_tier(tier)
-    return mapping.get(normalized_tier, normalized_tier)
+    return FLYING_PASS_TIER_LABELS.get(normalized_tier, normalized_tier)
 
 
 def display_lost_found_status(status_value: str) -> str:

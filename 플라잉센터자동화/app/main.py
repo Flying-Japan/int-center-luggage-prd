@@ -67,6 +67,7 @@ from app.services.completion_messages import (
     load_completion_messages,
 )
 from app.services.flying_pass import (
+    build_flying_pass_tiers_json,
     flying_pass_discount_amount,
     normalize_flying_pass_tier,
     recalculate_order_prepaid,
@@ -1093,6 +1094,7 @@ def staff_dashboard(
             "display_payment_method": display_payment_method,
             "display_flying_pass_tier": display_flying_pass_tier,
             "to_jst_datetime": to_jst_datetime,
+            "flying_pass_tiers_json": build_flying_pass_tiers_json(),
             "retention_msg": retention_msg.strip(),
             "retention_err": retention_err.strip(),
         },

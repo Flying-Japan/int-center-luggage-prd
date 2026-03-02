@@ -24,14 +24,21 @@
     { key: "note", min: 140, weight: 4.5 },
     { key: "detail", min: 58, weight: 0 },
   ];
-  const FLYING_PASS_TIER_OPTIONS = [
-    { value: "NONE", label: "미적용" },
-    { value: "BLUE", label: "블루 (-¥ 100)" },
-    { value: "SILVER", label: "실버 (-¥ 200)" },
-    { value: "GOLD", label: "골드 (-¥ 300)" },
-    { value: "PLATINUM", label: "플래티넘 (-¥ 400)" },
-    { value: "BLACK", label: "블랙 (무료)" },
+  var _rawTiers = [];
+  try { _rawTiers = JSON.parse(tbodyEl.dataset.flyingPassTiers || "[]"); } catch (_) {}
+  var FLYING_PASS_TIERS = _rawTiers.length ? _rawTiers : [
+    { value: "NONE", label: "미적용", discount: 0 },
+    { value: "BLUE", label: "블루", discount: 100 },
+    { value: "SILVER", label: "실버", discount: 200 },
+    { value: "GOLD", label: "골드", discount: 300 },
+    { value: "PLATINUM", label: "플래티넘", discount: 400 },
+    { value: "BLACK", label: "블랙", discount: 0 },
   ];
+  var FLYING_PASS_TIER_OPTIONS = FLYING_PASS_TIERS.map(function (t) {
+    if (t.value === "BLACK") return { value: t.value, label: t.label + " (무료)" };
+    if (t.discount > 0) return { value: t.value, label: t.label + " (-¥ " + t.discount.toLocaleString() + ")" };
+    return { value: t.value, label: t.label };
+  });
 
   if (!formEl || !qEl || !statusButtonsEl || !tbodyEl || !tableEl || !statusInputEls.length) {
     return;
@@ -57,33 +64,24 @@
     return Math.max(0, toSafeInt(value, 0));
   }
 
+  var _tierLabelMap = {};
+  FLYING_PASS_TIERS.forEach(function (t) { _tierLabelMap[t.value] = t.label; });
+
   function tierLabel(tierValue) {
-    const normalizedTier = String(tierValue || "").toUpperCase();
-    const nameMap = {
-      NONE: "미적용",
-      BLUE: "블루",
-      SILVER: "실버",
-      GOLD: "골드",
-      PLATINUM: "플래티넘",
-      BLACK: "블랙",
-    };
-    return nameMap[normalizedTier] || "미적용";
+    var normalizedTier = String(tierValue || "").toUpperCase();
+    return _tierLabelMap[normalizedTier] || _tierLabelMap["NONE"] || "미적용";
   }
 
+  var _tierDiscountMap = {};
+  FLYING_PASS_TIERS.forEach(function (t) { _tierDiscountMap[t.value] = t.discount; });
+
   function memberDiscountByTier(basePrepaid, tierValue) {
-    const normalizedTier = String(tierValue || "").toUpperCase();
-    const safeBase = toNonNegativeInt(basePrepaid);
+    var normalizedTier = String(tierValue || "").toUpperCase();
+    var safeBase = toNonNegativeInt(basePrepaid);
     if (normalizedTier === "BLACK") {
       return safeBase;
     }
-    const fixedMap = {
-      NONE: 0,
-      BLUE: 100,
-      SILVER: 200,
-      GOLD: 300,
-      PLATINUM: 400,
-    };
-    return Math.min(safeBase, toNonNegativeInt(fixedMap[normalizedTier] || 0));
+    return Math.min(safeBase, toNonNegativeInt(_tierDiscountMap[normalizedTier] || 0));
   }
 
   function autoPrepaidByTier(basePrepaid, tierValue) {
