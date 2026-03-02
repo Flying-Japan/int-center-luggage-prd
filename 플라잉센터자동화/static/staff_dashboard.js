@@ -9,17 +9,17 @@
   const tableEl = document.getElementById("staff-orders-table");
   const tableWrapEl = tableEl ? tableEl.closest(".table-wrap") : null;
   const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP"];
-  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v7";
+  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v8";
   const columnSchema = [
-    { key: "name", min: 120, weight: 1.2 },
-    { key: "tag_no", min: 46, weight: 0 },
-    { key: "created_time", min: 100, weight: 0 },
-    { key: "price", min: 205, weight: 0 },
-    { key: "pickup_time", min: 96, weight: 0 },
-    { key: "luggage_image", min: 50, weight: 0 },
-    { key: "pickup_action", min: 138, weight: 0 },
-    { key: "note", min: 150, weight: 5 },
-    { key: "detail", min: 46, weight: 0 },
+    { key: "name", min: 120, weight: 1.5 },
+    { key: "tag_no", min: 50, weight: 0 },
+    { key: "created_time", min: 105, weight: 0 },
+    { key: "price", min: 200, weight: 0 },
+    { key: "pickup_time", min: 100, weight: 0 },
+    { key: "luggage_image", min: 52, weight: 0 },
+    { key: "pickup_action", min: 148, weight: 0 },
+    { key: "note", min: 140, weight: 4.5 },
+    { key: "detail", min: 48, weight: 0 },
   ];
   const FLYING_PASS_TIER_OPTIONS = [
     { value: "NONE", label: "미적용" },
