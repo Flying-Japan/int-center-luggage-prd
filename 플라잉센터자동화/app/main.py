@@ -110,8 +110,77 @@ templates.env.filters["yen"] = format_yen
 
 @app.exception_handler(Exception)
 async def _global_exception_handler(request: Request, exc: Exception):
-    logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, traceback.format_exc())
-    return JSONResponse(status_code=500, content={"detail": str(exc), "type": type(exc).__name__})
+    try:
+        tb = traceback.format_exc()
+        detail = str(exc)
+        exc_type = type(exc).__name__
+        logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, tb)
+        return JSONResponse(status_code=500, content={"detail": detail, "type": exc_type, "traceback": tb})
+    except Exception:
+        return JSONResponse(status_code=500, content={"detail": "exception handler itself failed"})
+
+
+@app.get("/debug/dashboard-diag")
+def debug_dashboard_diag(db: SupabaseDB = Depends(get_db)):
+    """No-auth diagnostic that exercises the dashboard code path."""
+    steps: list[dict] = []
+    try:
+        staff = db.query("user_profiles").filter(("is_active", "=", True)).first()
+        steps.append({"step": "get_staff", "ok": staff is not None, "name": getattr(staff, "name", None)})
+    except Exception as e:
+        steps.append({"step": "get_staff", "ok": False, "error": f"{type(e).__name__}: {e}"})
+        return JSONResponse(content={"steps": steps})
+
+    try:
+        menu = build_staff_menu(db, "dashboard", staff.is_admin)
+        steps.append({"step": "build_menu", "ok": True, "count": len(menu)})
+    except Exception as e:
+        steps.append({"step": "build_menu", "ok": False, "error": f"{type(e).__name__}: {e}"})
+
+    try:
+        orders = query_staff_orders(db, list(STAFF_STATUS_FILTERS), "", limit=10, show_all_picked_up=False)
+        steps.append({"step": "query_orders", "ok": True, "count": len(orders)})
+    except Exception as e:
+        steps.append({"step": "query_orders", "ok": False, "error": f"{type(e).__name__}: {e}"})
+
+    try:
+        from app.services.flying_pass import build_flying_pass_tiers_json
+        tiers = build_flying_pass_tiers_json()
+        steps.append({"step": "flying_pass_tiers", "ok": True, "count": len(tiers)})
+    except Exception as e:
+        steps.append({"step": "flying_pass_tiers", "ok": False, "error": f"{type(e).__name__}: {e}"})
+
+    try:
+        now_utc = utc_now()
+        now_jst = now_utc.astimezone(JST)
+        manual_default_pickup = next_pickup_default_jst(now_utc)
+        ctx = {
+            "request": None,
+            "orders": orders if 'orders' in dir() else [],
+            "selected_status_filters": list(STAFF_STATUS_FILTERS),
+            "q": "",
+            "show_all_picked_up": False,
+            "staff": staff,
+            "staff_menu_items": menu if 'menu' in dir() else [],
+            "now_jst": now_jst,
+            "manual_default_pickup_date": manual_default_pickup.strftime("%Y-%m-%d"),
+            "manual_default_pickup_time": manual_default_pickup.strftime("%H:%M"),
+            "JST": JST,
+            "max_bag_qty": MAX_BAG_QTY,
+            "display_payment_method": display_payment_method,
+            "display_flying_pass_tier": display_flying_pass_tier,
+            "to_jst_datetime": to_jst_datetime,
+            "flying_pass_tiers_json": tiers if 'tiers' in dir() else [],
+            "retention_msg": "",
+            "retention_err": "",
+        }
+        template = templates.get_template("staff_dashboard.html")
+        html = template.render(ctx)
+        steps.append({"step": "render_template", "ok": True, "bytes": len(html)})
+    except Exception as e:
+        steps.append({"step": "render_template", "ok": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()})
+
+    return JSONResponse(content={"steps": steps})
 
 
 DISCOUNT_TABLE = [
