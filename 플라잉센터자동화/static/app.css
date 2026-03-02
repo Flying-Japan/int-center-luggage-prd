@@ -1040,6 +1040,23 @@ td .btn-sm + .btn-sm {
   min-width: 0;
 }
 
+#staff-orders-table .price-summary-row {
+  display: flex;
+  max-width: none;
+  gap: 4px;
+  align-items: center;
+}
+
+#staff-orders-table .price-amount {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+#staff-orders-table .price-config-wrap {
+  flex-shrink: 0;
+}
+
 .price-amount {
   font-size: 14px;
   font-weight: 800;
