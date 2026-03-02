@@ -1,8 +1,10 @@
 import base64
+import hashlib
 import json
 import io
 import logging
 import re
+import secrets
 import threading
 import time
 import uuid
@@ -11,6 +13,9 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request as URLRequest, urlopen
+
+import httpx
+import supabase
 
 import qrcode
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
@@ -84,6 +89,13 @@ FLYING_PASS_FIXED_DISCOUNTS = {
     "GOLD": 300,
     "PLATINUM": 400,
     "BLACK": 0,
+}
+OAUTH_ERROR_MESSAGES = {
+    "oauth_failed": "Google 로그인에 실패했습니다.",
+    "state_missing": "인증 세션이 만료되었습니다. 다시 시도해 주세요.",
+    "exchange_failed": "Google 인증을 처리할 수 없습니다.",
+    "no_user": "사용자 정보를 가져올 수 없습니다.",
+    "access_denied": "접근 권한이 없습니다.",
 }
 LOST_FOUND_STATUSES = ("STORED", "RETURNED", "DISPOSED")
 NOTE_CATEGORIES = ("NOTICE", "HANDOVER")
@@ -534,6 +546,42 @@ def create_cash_closing_audit(
 
 def calc_cash_total(counts_by_denom: dict[int, int]) -> int:
     return sum(denom * counts_by_denom.get(denom, 0) for denom in COIN_BILL_DENOMS)
+
+
+def parse_denomination_counts(
+    count_10000: int,
+    count_5000: int,
+    count_2000: int,
+    count_1000: int,
+    count_500: int,
+    count_100: int,
+    count_50: int,
+    count_10: int,
+    count_5: int,
+    count_1: int,
+) -> dict[int, int]:
+    counts = {
+        10000: count_10000,
+        5000: count_5000,
+        2000: count_2000,
+        1000: count_1000,
+        500: count_500,
+        100: count_100,
+        50: count_50,
+        10: count_10,
+        5: count_5,
+        1: count_1,
+    }
+    if any(value < 0 for value in counts.values()):
+        raise HTTPException(status_code=400, detail="Bill/Coin counts must be non-negative.")
+    return counts
+
+
+def resolve_staff_names(db: SupabaseDB, staff_ids: set) -> dict[int, str]:
+    if not staff_ids:
+        return {}
+    staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
+    return {row.id: row.username for row in staff_rows}
 
 
 def business_date_range_utc(business_date: str) -> tuple[datetime, datetime]:
@@ -1407,8 +1455,7 @@ def api_order(order_id: str, db: SupabaseDB = Depends(get_db)) -> OrderSummaryRe
 
 @app.get("/auth/google")
 def auth_google(request: Request):
-    import hashlib, secrets as _secrets
-    code_verifier = base64.urlsafe_b64encode(_secrets.token_bytes(32)).rstrip(b"=").decode()
+    code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     code_challenge = base64.urlsafe_b64encode(
         hashlib.sha256(code_verifier.encode()).digest()
     ).rstrip(b"=").decode()
@@ -1431,13 +1478,6 @@ def auth_callback(
     error: Optional[str] = None,
     db: SupabaseDB = Depends(get_db),
 ):
-    _oauth_errors = {
-        "oauth_failed": "Google 로그인에 실패했습니다.",
-        "state_missing": "인증 세션이 만료되었습니다. 다시 시도해 주세요.",
-        "exchange_failed": "Google 인증을 처리할 수 없습니다.",
-        "no_user": "사용자 정보를 가져올 수 없습니다.",
-        "access_denied": "접근 권한이 없습니다.",
-    }
     if error or not code:
         return RedirectResponse(url="/staff/login?oauth_error=oauth_failed", status_code=303)
 
@@ -1445,8 +1485,7 @@ def auth_callback(
     if not code_verifier:
         return RedirectResponse(url="/staff/login?oauth_error=state_missing", status_code=303)
 
-    import httpx as _httpx
-    resp = _httpx.post(
+    resp = httpx.post(
         f"{SUPABASE_URL}/auth/v1/token",
         params={"grant_type": "pkce"},
         json={"auth_code": code, "code_verifier": code_verifier},
@@ -1470,14 +1509,7 @@ def auth_callback(
 
 @app.get("/staff/login", response_class=HTMLResponse)
 def staff_login_page(request: Request, oauth_error: Optional[str] = None) -> HTMLResponse:
-    _oauth_errors = {
-        "oauth_failed": "Google 로그인에 실패했습니다.",
-        "state_missing": "인증 세션이 만료되었습니다. 다시 시도해 주세요.",
-        "exchange_failed": "Google 인증을 처리할 수 없습니다.",
-        "no_user": "사용자 정보를 가져올 수 없습니다.",
-        "access_denied": "접근 권한이 없습니다.",
-    }
-    error_msg = _oauth_errors.get(oauth_error) if oauth_error else None
+    error_msg = OAUTH_ERROR_MESSAGES.get(oauth_error) if oauth_error else None
     return templates.TemplateResponse("staff_login.html", {"request": request, "error": error_msg})
 
 
@@ -1488,9 +1520,8 @@ def staff_login(
     password: str = Form(...),
     db: SupabaseDB = Depends(get_db),
 ):
-    import supabase as _supabase
     try:
-        auth_client = _supabase.create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        auth_client = supabase.create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
         response = auth_client.auth.sign_in_with_password({"email": email.strip(), "password": password.strip()})
         user = response.user
         if not user:
@@ -1785,10 +1816,7 @@ def staff_handover_page(
     staff_ids = {note.staff_id for note in notes if note.staff_id}
     staff_ids.update(read.staff_id for read in reads)
     staff_ids.update(comment.staff_id for comment in comments if comment.staff_id)
-    staff_name_by_id: dict[int, str] = {}
-    if staff_ids:
-        staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
-        staff_name_by_id = {row.id: row.username for row in staff_rows}
+    staff_name_by_id = resolve_staff_names(db, staff_ids)
 
     author_name_by_note = {
         note.note_id: staff_name_by_id.get(note.staff_id or -1, "알 수 없음")
@@ -2026,10 +2054,7 @@ def staff_handover_read_toggle(
         .all()
     )
     staff_ids = {row.staff_id for row in reads}
-    staff_name_by_id: dict[int, str] = {}
-    if staff_ids:
-        staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
-        staff_name_by_id = {row.id: row.username for row in staff_rows}
+    staff_name_by_id = resolve_staff_names(db, staff_ids)
     reader_names: list[str] = []
     for read in reads:
         name = staff_name_by_id.get(read.staff_id, f"ID {read.staff_id}")
@@ -2099,10 +2124,7 @@ def staff_cash_closing_page(
             staff_ids.add(editing_closing.submitted_by_staff_id)
         if editing_closing.verified_by_staff_id:
             staff_ids.add(editing_closing.verified_by_staff_id)
-    staff_name_by_id: dict[int, str] = {}
-    if staff_ids:
-        staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
-        staff_name_by_id = {row.id: row.username for row in staff_rows}
+    staff_name_by_id = resolve_staff_names(db, staff_ids)
     creator_name_by_closing: dict[int, str] = {}
     for audit in create_audits:
         if audit.closing_id in creator_name_by_closing:
@@ -2515,10 +2537,7 @@ def staff_cash_closing_detail(
     )
     staff_ids = {value for value in (row.staff_id, row.submitted_by_staff_id, row.verified_by_staff_id) if value}
     staff_ids.update(audit.staff_id for audit in audits if audit.staff_id)
-    staff_name_by_id: dict[int, str] = {}
-    if staff_ids:
-        staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
-        staff_name_by_id = {staff_row.staff_id: staff_row.name for staff_row in staff_rows}
+    staff_name_by_id = resolve_staff_names(db, staff_ids)
 
     created_by_staff_id = row.staff_id
     for audit in reversed(audits):
@@ -2659,10 +2678,7 @@ def admin_sales_dashboard(
     staff_ids = {row.staff_id for row in rental_rows if row.staff_id}
     if editing_rental and editing_rental.staff_id:
         staff_ids.add(editing_rental.staff_id)
-    staff_name_by_id: dict[int, str] = {}
-    if staff_ids:
-        staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
-        staff_name_by_id = {row.id: row.username for row in staff_rows}
+    staff_name_by_id = resolve_staff_names(db, staff_ids)
 
     return templates.TemplateResponse(
         "staff_admin_sales.html",
@@ -2836,10 +2852,7 @@ def admin_completion_message_page(
     updated_at: dict[str, str] = {}
     if rows:
         staff_ids = {row.staff_id for row in rows if row.staff_id}
-        staff_name_by_id: dict[int, str] = {}
-        if staff_ids:
-            staff_rows = db.query("user_profiles").filter(("id", "IN", list(staff_ids))).all()
-            staff_name_by_id = {row.id: row.username for row in staff_rows}
+        staff_name_by_id = resolve_staff_names(db, staff_ids)
         for row in rows:
             if row.staff_id:
                 updated_by[row.setting_key] = staff_name_by_id.get(row.staff_id, f"ID {row.staff_id}")
@@ -2950,7 +2963,6 @@ def admin_staff_accounts_create(
     db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
     _ = get_current_staff(request, db, require_admin=True)
-    import supabase as _supabase
     resolved_email = email.strip()
     resolved_display = display_name.strip() or resolved_email.split("@")[0]
     resolved_role = "admin" if is_admin in {"1", "on", "true", "yes"} else "editor"
@@ -2967,7 +2979,7 @@ def admin_staff_accounts_create(
         )
 
     try:
-        admin_client = _supabase.create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        admin_client = supabase.create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
         auth_resp = admin_client.auth.admin.create_user({
             "email": resolved_email,
             "password": password.strip(),

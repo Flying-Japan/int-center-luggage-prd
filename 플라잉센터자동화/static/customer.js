@@ -671,19 +671,6 @@
     }
   }
 
-  function buildSubmissionFormData() {
-    const formData = new FormData(formEl);
-    const idImage = optimizedFilesByField.get("id_image");
-    const luggageImage = optimizedFilesByField.get("luggage_image");
-    if (idImage) {
-      formData.set("id_image", idImage, idImage.name);
-    }
-    if (luggageImage) {
-      formData.set("luggage_image", luggageImage, luggageImage.name);
-    }
-    return formData;
-  }
-
   function initFilePickers() {
     const triggers = Array.from(document.querySelectorAll("[data-file-trigger]"));
     triggers.forEach((trigger) => {

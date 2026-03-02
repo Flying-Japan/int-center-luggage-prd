@@ -198,20 +198,12 @@
   let autoCash = 0;
   let autoQr = 0;
   let actualQrTouched = false;
-  const yenFormatter = new Intl.NumberFormat("ja-JP");
-
   function toInteger(value) {
     const num = Number(value || 0);
     if (Number.isNaN(num)) {
       return 0;
     }
     return Math.trunc(num);
-  }
-
-  function formatYen(value) {
-    const amount = toInteger(value);
-    const sign = amount < 0 ? "-" : "";
-    return `${sign}¥ ${yenFormatter.format(Math.abs(amount))}`;
   }
 
   function toNumber(value) {
@@ -235,12 +227,12 @@
     const qrDiff = actualQr - autoQr;
     const totalDiff = cashDiff + qrDiff;
 
-    totalPreview.value = formatYen(total);
-    qrPreview.value = formatYen(autoQr);
-    autoPreview.value = formatYen(autoCash);
-    diffPreview.value = formatYen(cashDiff);
-    qrDiffPreview.value = formatYen(qrDiff);
-    totalDiffPreview.value = formatYen(totalDiff);
+    totalPreview.value = FJ.formatYen(total);
+    qrPreview.value = FJ.formatYen(autoQr);
+    autoPreview.value = FJ.formatYen(autoCash);
+    diffPreview.value = FJ.formatYen(cashDiff);
+    qrDiffPreview.value = FJ.formatYen(qrDiff);
+    totalDiffPreview.value = FJ.formatYen(totalDiff);
   }
 
   async function fetchAutoSales() {
