@@ -222,8 +222,7 @@ def build_completion_messages_from_ko(
 
 
 def load_completion_messages(db: SupabaseDB) -> dict[str, dict[str, str]]:
-    # Import here to avoid circular dependency (get_app_setting lives in main.py for now)
-    from app.main import get_app_setting
+    from app.services.settings import get_app_setting
 
     ko_primary = get_app_setting(
         db,

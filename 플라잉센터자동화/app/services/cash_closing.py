@@ -115,7 +115,6 @@ def parse_actual_qr_amount(raw_value: int, auto_qr_amount: int) -> int:
 
 def build_cash_closing_fields(
     counts: dict[int, int],
-    paypay_amount: int,
     actual_qr_amount: int,
     db: SupabaseDB,
     business_date: str,

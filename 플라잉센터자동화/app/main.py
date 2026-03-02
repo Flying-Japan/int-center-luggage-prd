@@ -73,6 +73,7 @@ from app.services.flying_pass import (
     recalculate_order_prepaid,
 )
 from app.services.order_number import build_order_id, build_tag_no
+from app.services.settings import get_app_setting, upsert_app_setting
 from app.services.pricing import calculate_prepaid_amount, calculate_price_per_day
 from app.services.retention import run_retention_cleanup
 from app.services.sales import (
@@ -327,13 +328,6 @@ def build_staff_accounts_redirect(
     return "/staff/admin/staff-accounts"
 
 
-def get_app_setting(db: SupabaseDB, setting_key: str, default_value: str) -> str:
-    row = db.query("app_settings").filter(("setting_key", "=", setting_key)).first()
-    if row is None:
-        return default_value
-    return row.setting_value or default_value
-
-
 def is_schedule_feature_enabled(db: SupabaseDB) -> bool:
     value = get_app_setting(db, SCHEDULE_FEATURE_ENABLED_KEY, "1")
     return value.lower() not in {"0", "false", "off", "no"}
@@ -385,21 +379,6 @@ def normalize_schedule_embed_url(raw_value: str) -> str:
         detail="캘린더 통합의 임베드 링크 또는 공개 캘린더 링크를 입력해주세요.",
     )
 
-
-def upsert_app_setting(db: SupabaseDB, setting_key: str, setting_value: str, staff_id: str):
-    row = db.query("app_settings").filter(("setting_key", "=", setting_key)).first()
-    normalized_value = setting_value.strip()
-    if row is None:
-        return db.insert("app_settings", {
-            "setting_key": setting_key,
-            "setting_value": normalized_value,
-            "staff_id": staff_id,
-        })
-    else:
-        row.setting_value = normalized_value
-        row.staff_id = staff_id
-        db.update(row)
-        return row
 
 
 def serialize_staff_order(order) -> dict[str, object]:
@@ -1535,7 +1514,7 @@ def staff_cash_closing_create(
         count_10000, count_5000, count_2000, count_1000, count_500,
         count_100, count_50, count_10, count_5, count_1,
     )
-    computed = build_cash_closing_fields(counts, actual_qr_amount, actual_qr_amount, db, business_date)
+    computed = build_cash_closing_fields(counts, actual_qr_amount, db, business_date)
 
     row = db.insert("cash_closings", {
         "business_date": business_date,
@@ -1635,7 +1614,7 @@ def staff_cash_closing_update(
         count_10000, count_5000, count_2000, count_1000, count_500,
         count_100, count_50, count_10, count_5, count_1,
     )
-    computed = build_cash_closing_fields(counts, actual_qr_amount, actual_qr_amount, db, business_date)
+    computed = build_cash_closing_fields(counts, actual_qr_amount, db, business_date)
 
     row.business_date = business_date
     row.closing_type = normalized_closing_type
