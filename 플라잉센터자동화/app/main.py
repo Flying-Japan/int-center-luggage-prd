@@ -464,7 +464,7 @@ def normalize_schedule_embed_url(raw_value: str) -> str:
 def get_unpaid_ext_parent_ids(db: SupabaseDB, root_ids: Optional[list[str]] = None) -> set[str]:
     """Return set of root order_ids that have unpaid extension orders."""
     q = db.query("orders").filter(
-        ("parent_order_id", "IS NOT NULL"),
+        ("parent_order_id", "IS NOT NULL", None),
         ("status", "=", "PAYMENT_PENDING"),
     )
     if root_ids:

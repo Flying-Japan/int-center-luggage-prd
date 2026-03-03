@@ -27,7 +27,7 @@ def generate_extension_orders(db: SupabaseDB) -> dict[str, int]:
         .filter(
             ("status", "IN", ["PAID", "PAYMENT_PENDING"]),
             ("expected_pickup_at", "<", now.isoformat()),
-            ("parent_order_id", "IS NULL"),
+            ("parent_order_id", "IS NULL", None),
         )
         .all()
     )
