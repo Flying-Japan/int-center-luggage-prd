@@ -1497,8 +1497,13 @@ tbody tr:hover {
 
 /* action buttons: compact inline */
 #staff-orders-table .inline-actions {
+  display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+#staff-orders-table [data-col-key="pickup_action"] {
+  overflow: visible;
 }
 
 #staff-orders-table .inline-actions .btn-sm + .btn-sm {
