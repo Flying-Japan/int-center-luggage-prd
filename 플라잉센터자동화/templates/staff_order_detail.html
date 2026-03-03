@@ -86,8 +86,37 @@
     <p><strong>요금</strong><span>일 {{ order.price_per_day | yen }}, 선결제 {{ order.prepaid_amount | yen }}, 추가 {{ order.extra_amount | yen }}, 최종 {{ order.final_amount | yen }}</span></p>
     <p><strong>멤버할인</strong><span>{{ display_flying_pass_tier(order.flying_pass_tier) }} / 할인 {{ order.flying_pass_discount_amount | yen }} / 직원수정 {{ order.staff_prepaid_override_amount | yen if order.staff_prepaid_override_amount is not none else '없음' }}</span></p>
     <p><strong>일수</strong><span>예정 {{ order.expected_storage_days }}, 실제 {{ order.actual_storage_days if order.actual_storage_days else '-' }}, 초과 {{ order.extra_days }}</span></p>
+    {% if parent_order_id %}
+    <p><strong>원본 접수</strong><span><a href="/staff/orders/{{ parent_order_id }}" style="color:var(--primary);text-decoration:underline">{{ parent_order_id }}</a> <span class="extension-badge">연장</span></span></p>
+    {% endif %}
   </div>
 </section>
+
+{% if extension_orders %}
+<section class="card">
+  <h3 class="card-title">연장 접수 내역</h3>
+  <table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead>
+      <tr style="border-bottom:1px solid var(--line)">
+        <th style="text-align:left;padding:6px 8px">접수번호</th>
+        <th style="text-align:left;padding:6px 8px">생성일</th>
+        <th style="text-align:left;padding:6px 8px">금액</th>
+        <th style="text-align:left;padding:6px 8px">상태</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ext in extension_orders %}
+      <tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:6px 8px"><a href="/staff/orders/{{ ext.order_id }}" style="color:var(--primary);text-decoration:underline">{{ ext.order_id }}</a></td>
+        <td style="padding:6px 8px">{{ ext.created_at[:10] if ext.created_at else '-' }}</td>
+        <td style="padding:6px 8px">{{ ext.prepaid_amount | yen }}</td>
+        <td style="padding:6px 8px"><span class="status-pill status-{{ ext.status|lower }}">{{ status_label.get(ext.status, '미정') }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
 
 <section class="card">
   <h3 class="card-title">업무 처리</h3>
@@ -126,6 +155,16 @@
       </form>
       {% endif %}
     </section>
+
+    {% if order.status != 'PICKED_UP' %}
+    <section class="detail-action-box">
+      <h4 class="detail-action-title">연장 접수</h4>
+      <p class="card-desc">수동으로 연장 접수를 생성합니다 (1일, 할인 없음).</p>
+      <form action="/staff/orders/{{ order.order_id }}/create-extension" method="post" class="detail-action-form">
+        <button class="btn btn-secondary" type="submit">연장 접수 생성</button>
+      </form>
+    </section>
+    {% endif %}
   </div>
 </section>
 {% endblock %}

@@ -819,9 +819,19 @@
     row.dataset.autoPrepaidAmount = String(toNonNegativeInt(order.auto_prepaid_amount));
     if (order.in_warehouse) row.classList.add("is-in-warehouse");
     if (order.payment_status === "CANCELLED" || order.is_cancelled) row.classList.add("is-cancelled");
+    if (order.is_extension) row.classList.add("is-extension");
 
     row.appendChild(buildCheckboxCell(order.order_id));
-    row.appendChild(buildInputCell(order.name, "name", "text"));
+
+    // Name cell — prepend extension badge if applicable
+    var nameTd = buildInputCell(order.name, "name", "text");
+    if (order.is_extension) {
+      var badge = document.createElement("span");
+      badge.className = "extension-badge";
+      badge.textContent = "연장";
+      nameTd.insertBefore(badge, nameTd.firstChild);
+    }
+    row.appendChild(nameTd);
     row.appendChild(buildInputCell(order.tag_no, "tag_no", "text"));
     var createdTd = document.createElement("td");
     createdTd.dataset.colKey = "created_time";

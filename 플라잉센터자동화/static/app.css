@@ -1583,6 +1583,24 @@ tbody tr:hover {
   box-shadow: 0 2px 6px rgba(46, 125, 50, 0.3);
 }
 
+/* ── Extension row ── */
+#staff-orders-table tbody tr.is-extension {
+  border-left: 3px solid #805ad5;
+  background: rgba(128, 90, 213, 0.03);
+}
+
+.extension-badge {
+  display: inline-flex;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #805ad5;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
 /* ── Cancelled row ── */
 #staff-orders-table tbody tr.is-cancelled {
   opacity: 0.45;

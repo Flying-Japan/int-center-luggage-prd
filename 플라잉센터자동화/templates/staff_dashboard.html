@@ -216,11 +216,14 @@
     <form action="/staff/admin/retention/run" method="post" class="admin-tools">
       <button class="btn btn-secondary" type="submit">보관기간 정리 실행 (관리자)</button>
     </form>
+    <form action="/staff/admin/extensions/run" method="post" class="admin-tools">
+      <button class="btn btn-secondary" type="submit">연장접수 생성 실행 (관리자)</button>
+    </form>
     {% endif %}
   </details>
 </section>
 
-<script src="/static/staff_dashboard.js?v=20260303i"></script>
+<script src="/static/staff_dashboard.js?v=20260304a"></script>
 <script>
 (function () {
   const formEl = document.getElementById("manual-order-form");
