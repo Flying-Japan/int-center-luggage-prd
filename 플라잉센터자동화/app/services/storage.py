@@ -3,7 +3,9 @@ from datetime import datetime, time, timezone
 from app.config import BUSINESS_CLOSE_HOUR, BUSINESS_OPEN_HOUR, JST
 
 
-def to_jst(dt: datetime) -> datetime:
+def to_jst(dt) -> datetime:
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(JST)

@@ -88,6 +88,7 @@ from app.utils import (
     auto_pickup_note,
     business_date_range_utc,
     date_to_ymd,
+    ensure_utc_datetime,
     format_yen,
     next_pickup_default_jst,
     parse_pickup_datetime,
@@ -496,7 +497,7 @@ def serialize_staff_order(order) -> dict[str, object]:
         "needs_extra_payment": (
             order.status == "PAID"
             and order.expected_pickup_at is not None
-            and utc_now() > order.expected_pickup_at
+            and utc_now() > ensure_utc_datetime(order.expected_pickup_at)
         ),
     }
 
