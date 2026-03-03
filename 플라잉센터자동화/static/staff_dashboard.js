@@ -393,6 +393,11 @@
     if (field === "tag_no") {
       var colorCls = tagNoColorClass(value);
       if (colorCls) td.classList.add(colorCls);
+      input.addEventListener("input", function () {
+        TAG_COLOR_MAP.forEach(function (m) { td.classList.remove(m.cls); });
+        var newCls = tagNoColorClass(input.value);
+        if (newCls) td.classList.add(newCls);
+      });
     }
     return td;
   }
@@ -725,7 +730,7 @@
     warehouseButton.className = "warehouse-btn" + (order.in_warehouse ? " is-active" : "");
     warehouseButton.type = "button";
     warehouseButton.dataset.action = "toggle-warehouse";
-    warehouseButton.textContent = order.in_warehouse ? "창고O" : "창고";
+    warehouseButton.textContent = "창고";
     if (!order.is_picked_up) {
       actions.appendChild(warehouseButton);
     }
