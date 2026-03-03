@@ -194,7 +194,7 @@ DISCOUNT_TABLE = [
 
 CUSTOMER_PAYMENT_METHODS = {"PAY_QR", "CASH"}
 STAFF_PAYMENT_METHODS = {"PAY_QR", "CASH"}
-STAFF_STATUS_FILTERS = ("PAYMENT_PENDING", "PAID", "PICKED_UP")
+STAFF_STATUS_FILTERS = ("PAYMENT_PENDING", "PAID", "PICKED_UP", "CANCELLED")
 OAUTH_ERROR_MESSAGES = {
     "oauth_failed": "Google 로그인에 실패했습니다.",
     "state_missing": "인증 세션이 만료되었습니다. 다시 시도해 주세요.",
@@ -295,6 +295,8 @@ def resolved_note(order) -> str:
 
 
 def payment_status_of(order) -> str:
+    if order.status == "CANCELLED":
+        return "CANCELLED"
     return "PAYMENT_PENDING" if order.status == "PAYMENT_PENDING" else "PAID"
 
 
@@ -306,7 +308,7 @@ def normalize_status_filters(raw_filters: list[str]) -> list[str]:
             if value in STAFF_STATUS_FILTERS and value not in normalized:
                 normalized.append(value)
     if not normalized:
-        return list(STAFF_STATUS_FILTERS)
+        return ["PAYMENT_PENDING", "PAID", "PICKED_UP"]
     return normalized
 
 
@@ -484,11 +486,18 @@ def serialize_staff_order(order) -> dict[str, object]:
         "payment_method_label": display_payment_method(order.payment_method),
         "payment_status": payment_status_of(order),
         "is_picked_up": order.status == "PICKED_UP",
+        "is_cancelled": order.status == "CANCELLED",
         "expected_pickup_time": expected_jst.strftime("%H:%M"),
         "expected_pickup_date": expected_jst.strftime("%Y-%m-%d"),
         "luggage_image_url": f"/staff/orders/{order.order_id}/luggage-image" if order.luggage_image_url else "",
         "note": resolved_note(order),
         "detail_url": f"/staff/orders/{order.order_id}",
+        "in_warehouse": bool(getattr(order, "in_warehouse", False)),
+        "needs_extra_payment": (
+            order.status == "PAID"
+            and order.expected_pickup_at is not None
+            and utc_now() > order.expected_pickup_at
+        ),
     }
 
 
@@ -527,6 +536,8 @@ def query_staff_orders(
     query = db.query("orders")
     if status_filters:
         query = query.filter(("status", "IN", status_filters))
+    else:
+        query = query.filter(("status", "!=", "CANCELLED"))
     if not show_all_picked_up:
         cutoff_jst = (
             utc_now().astimezone(JST).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -2541,9 +2552,92 @@ def staff_inline_update_order(
     auto_note = auto_pickup_note(order.created_at, expected_pickup)
     order.note = note if note else (auto_note or None)
 
+    in_warehouse_raw = payload.get("in_warehouse")
+    if in_warehouse_raw is not None:
+        order.in_warehouse = bool(in_warehouse_raw)
+
     order.staff_id = staff.staff_id
     db.update(order)
     return JSONResponse({"order": serialize_staff_order(order)})
+
+
+@app.post("/staff/api/orders/{order_id}/toggle-warehouse")
+def staff_toggle_warehouse(
+    request: Request,
+    order_id: str,
+    db: SupabaseDB = Depends(get_db),
+) -> JSONResponse:
+    staff = ensure_staff(request, db)
+    order = db.get("orders", "order_id", order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order.in_warehouse = not bool(getattr(order, "in_warehouse", False))
+    order.staff_id = staff.staff_id
+    db.update(order)
+    return JSONResponse({"order": serialize_staff_order(order)})
+
+
+@app.post("/staff/api/orders/{order_id}/cancel")
+def staff_cancel_order(
+    request: Request,
+    order_id: str,
+    db: SupabaseDB = Depends(get_db),
+) -> JSONResponse:
+    staff = ensure_staff(request, db)
+    order = db.get("orders", "order_id", order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.status == "PICKED_UP":
+        raise HTTPException(status_code=400, detail="수령완료 건은 취소할 수 없습니다.")
+    order.status = "CANCELLED"
+    order.staff_id = staff.staff_id
+    db.update(order)
+    return JSONResponse({"order": serialize_staff_order(order)})
+
+
+@app.post("/staff/api/orders/bulk-action")
+def staff_bulk_action(
+    request: Request,
+    payload: dict = Body(...),
+    db: SupabaseDB = Depends(get_db),
+) -> JSONResponse:
+    staff = ensure_staff(request, db)
+    order_ids = payload.get("order_ids", [])
+    action = str(payload.get("action", "")).strip()
+
+    if not order_ids or not isinstance(order_ids, list):
+        raise HTTPException(status_code=400, detail="주문을 선택해주세요.")
+    if action not in {"warehouse_on", "warehouse_off", "cancel", "set_paid", "set_pending"}:
+        raise HTTPException(status_code=400, detail="Invalid bulk action.")
+
+    updated = 0
+    for oid in order_ids:
+        order = db.get("orders", "order_id", str(oid))
+        if order is None:
+            continue
+
+        if action == "warehouse_on":
+            order.in_warehouse = True
+        elif action == "warehouse_off":
+            order.in_warehouse = False
+        elif action == "cancel":
+            if order.status == "PICKED_UP":
+                continue
+            order.status = "CANCELLED"
+        elif action == "set_paid":
+            if order.status in ("PICKED_UP", "CANCELLED"):
+                continue
+            order.status = "PAID"
+        elif action == "set_pending":
+            if order.status in ("PICKED_UP", "CANCELLED"):
+                continue
+            order.status = "PAYMENT_PENDING"
+
+        order.staff_id = staff.staff_id
+        db.update(order)
+        updated += 1
+
+    return JSONResponse({"updated": updated})
 
 
 @app.post("/staff/api/orders/{order_id}/pickup")
