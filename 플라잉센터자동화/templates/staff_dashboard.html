@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+{% block head_extra %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+{% endblock %}
 {% block content %}
 <section class="hero hero-row">
   <div>
@@ -216,7 +220,7 @@
   </details>
 </section>
 
-<script src="/static/staff_dashboard.js?v=20260303e"></script>
+<script src="/static/staff_dashboard.js?v=20260303i"></script>
 <script>
 (function () {
   const formEl = document.getElementById("manual-order-form");

@@ -1068,8 +1068,9 @@ td .btn-sm + .btn-sm {
 
 #staff-orders-table .price-summary-row {
   display: inline-flex;
+  align-items: center;
   max-width: none;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -1485,9 +1486,24 @@ tbody tr:hover {
 }
 
 #staff-orders-table .table-control[type="time"] {
-  min-width: 100px;
+  min-width: 80px;
   max-width: none;
   width: 100%;
+}
+
+#staff-orders-table .pickup-datetime-input,
+#staff-orders-table .pickup-datetime-input + .flatpickr-input {
+  font-size: 12px;
+  height: 28px;
+  cursor: pointer;
+}
+
+#staff-orders-table .flatpickr-input.form-control {
+  font-size: 12px;
+}
+
+.flatpickr-calendar {
+  font-size: 13px;
 }
 
 #staff-orders-table .table-control.late-pickup {
@@ -1502,7 +1518,8 @@ tbody tr:hover {
   gap: 4px;
 }
 
-#staff-orders-table [data-col-key="pickup_action"] {
+#staff-orders-table [data-col-key="pickup_action"],
+#staff-orders-table [data-col-key="pickup_time"] {
   overflow: visible;
 }
 

@@ -18,8 +18,8 @@
     { key: "name", min: 120, weight: 1.5 },
     { key: "tag_no", min: 62, weight: 0 },
     { key: "created_time", min: 105, weight: 0 },
-    { key: "price", min: 200, weight: 0 },
-    { key: "pickup_time", min: 100, weight: 0 },
+    { key: "price", min: 170, weight: 0 },
+    { key: "pickup_time", min: 155, weight: 0 },
     { key: "luggage_image", min: 66, weight: 0 },
     { key: "pickup_action", min: 220, weight: 0 },
     { key: "note", min: 140, weight: 4.5 },
@@ -295,8 +295,9 @@
   }
 
 
-  function applyLatePickupStyle(inputEl) {
-    inputEl.classList.toggle("late-pickup", isLatePickupTime(inputEl.value));
+  function applyLatePickupStyle(inputEl, timeVal) {
+    var tv = timeVal || inputEl.value || "";
+    inputEl.classList.toggle("late-pickup", isLatePickupTime(tv));
   }
 
   var TAG_COLOR_MAP = [
@@ -629,19 +630,57 @@
 
   function buildPickupTimeCell(order) {
     const td = document.createElement("td");
-    const timeInput = document.createElement("input");
-    timeInput.className = "control table-control";
-    timeInput.type = "time";
-    timeInput.value = order.expected_pickup_time || "09:00";
-    timeInput.dataset.field = "expected_pickup_time";
-    applyLatePickupStyle(timeInput);
-    td.appendChild(timeInput);
+    const pickupDate = order.expected_pickup_date || "";
+    const pickupTime = order.expected_pickup_time || "09:00";
+
+    const input = document.createElement("input");
+    input.className = "control table-control pickup-datetime-input";
+    input.type = "text";
+    input.readOnly = true;
+    input.dataset.field = "expected_pickup_datetime";
+    input.value = pickupDate && pickupTime ? `${pickupDate} ${pickupTime}` : "";
+    td.appendChild(input);
 
     const hiddenDate = document.createElement("input");
     hiddenDate.type = "hidden";
     hiddenDate.dataset.field = "expected_pickup_date";
-    hiddenDate.value = order.expected_pickup_date || "";
+    hiddenDate.value = pickupDate;
     td.appendChild(hiddenDate);
+
+    const hiddenTime = document.createElement("input");
+    hiddenTime.type = "hidden";
+    hiddenTime.dataset.field = "expected_pickup_time";
+    hiddenTime.value = pickupTime;
+    td.appendChild(hiddenTime);
+
+    if (typeof flatpickr === "function") {
+      flatpickr(input, {
+        enableTime: true,
+        noCalendar: false,
+        dateFormat: "Y-m-d H:i",
+        altInput: true,
+        altFormat: "m/d H:i",
+        time_24hr: true,
+        defaultDate: pickupDate && pickupTime ? `${pickupDate} ${pickupTime}` : null,
+        minTime: "09:00",
+        maxTime: "21:00",
+        minuteIncrement: 30,
+        onChange: function (selectedDates) {
+          if (selectedDates.length > 0) {
+            const d = selectedDates[0];
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, "0");
+            const dd = String(d.getDate()).padStart(2, "0");
+            const hh = String(d.getHours()).padStart(2, "0");
+            const mi = String(d.getMinutes()).padStart(2, "0");
+            hiddenDate.value = `${yyyy}-${mm}-${dd}`;
+            hiddenTime.value = `${hh}:${mi}`;
+            applyLatePickupStyle(input, `${hh}:${mi}`);
+          }
+        },
+      });
+    }
+    applyLatePickupStyle(input, pickupTime);
     return td;
   }
 
@@ -727,7 +766,7 @@
     }
 
     const warehouseButton = document.createElement("button");
-    warehouseButton.className = "warehouse-btn" + (order.in_warehouse ? " is-active" : "");
+    warehouseButton.className = "btn btn-sm warehouse-btn" + (order.in_warehouse ? " is-active" : "");
     warehouseButton.type = "button";
     warehouseButton.dataset.action = "toggle-warehouse";
     warehouseButton.textContent = "창고";
@@ -737,7 +776,7 @@
 
     if (!order.is_picked_up) {
       const cancelButton = document.createElement("button");
-      cancelButton.className = "cancel-btn";
+      cancelButton.className = "btn btn-sm cancel-btn";
       cancelButton.type = "button";
       cancelButton.dataset.action = "cancel-order";
       cancelButton.textContent = "삭제";
@@ -1109,7 +1148,11 @@
         window.alert(await readErrorMessage(response));
         return;
       }
-      fetchOrders();
+      const data = await response.json();
+      const inWarehouse = data.order && data.order.in_warehouse;
+      row.classList.toggle("is-in-warehouse", !!inWarehouse);
+      const whBtn = target.closest(".warehouse-btn") || target;
+      whBtn.classList.toggle("is-active", !!inWarehouse);
       return;
     }
 
