@@ -1439,15 +1439,15 @@ tbody tr:hover {
 }
 
 /* ── Tag number color coding ── */
-.tag-color-red    .table-control { border-left: 4px solid #e53e3e; background: #fff5f5; }
-.tag-color-blue   .table-control { border-left: 4px solid #3182ce; background: #ebf8ff; }
-.tag-color-yellow .table-control { border-left: 4px solid #d69e2e; background: #fffff0; }
-.tag-color-green  .table-control { border-left: 4px solid #38a169; background: #f0fff4; }
-.tag-color-purple .table-control { border-left: 4px solid #805ad5; background: #faf5ff; }
-.tag-color-black  .table-control { border-left: 4px solid #1a202c; background: #f0f1f3; }
-.tag-color-gray   .table-control { border-left: 4px solid #718096; background: #f7fafc; }
-.tag-color-pink   .table-control { border-left: 4px solid #ed64a6; background: #fff5f7; }
-.tag-color-brown  .table-control { border-left: 4px solid #8b6914; background: #fffaf0; }
+#staff-orders-table .tag-color-red    .table-control { border-left: 4px solid #e53e3e !important; background: #fff5f5 !important; }
+#staff-orders-table .tag-color-blue   .table-control { border-left: 4px solid #3182ce !important; background: #ebf8ff !important; }
+#staff-orders-table .tag-color-yellow .table-control { border-left: 4px solid #d69e2e !important; background: #fffff0 !important; }
+#staff-orders-table .tag-color-green  .table-control { border-left: 4px solid #38a169 !important; background: #f0fff4 !important; }
+#staff-orders-table .tag-color-purple .table-control { border-left: 4px solid #805ad5 !important; background: #faf5ff !important; }
+#staff-orders-table .tag-color-black  .table-control { border-left: 4px solid #1a202c !important; background: #f0f1f3 !important; }
+#staff-orders-table .tag-color-gray   .table-control { border-left: 4px solid #718096 !important; background: #f7fafc !important; }
+#staff-orders-table .tag-color-pink   .table-control { border-left: 4px solid #ed64a6 !important; background: #fff5f7 !important; }
+#staff-orders-table .tag-color-brown  .table-control { border-left: 4px solid #8b6914 !important; background: #fffaf0 !important; }
 
 #staff-orders-table [data-col-key="created_time"] {
   font-variant-numeric: tabular-nums;

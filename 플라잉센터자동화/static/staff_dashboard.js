@@ -8,19 +8,20 @@
   const tbodyEl = document.getElementById("staff-orders-tbody");
   const tableEl = document.getElementById("staff-orders-table");
   const tableWrapEl = tableEl ? tableEl.closest(".table-wrap") : null;
-  const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP"];
-  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v9";
-  ["v2","v3","v4","v5","v6","v7","v8"].forEach(function (v) {
+  const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP", "CANCELLED"];
+  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v10";
+  ["v2","v3","v4","v5","v6","v7","v8","v9"].forEach(function (v) {
     FJ.safeStorageRemove("flying-japan-staff-col-widths-" + v);
   });
   const columnSchema = [
+    { key: "checkbox", min: 36, weight: 0 },
     { key: "name", min: 120, weight: 1.5 },
     { key: "tag_no", min: 62, weight: 0 },
     { key: "created_time", min: 105, weight: 0 },
     { key: "price", min: 200, weight: 0 },
     { key: "pickup_time", min: 100, weight: 0 },
     { key: "luggage_image", min: 66, weight: 0 },
-    { key: "pickup_action", min: 148, weight: 0 },
+    { key: "pickup_action", min: 220, weight: 0 },
     { key: "note", min: 140, weight: 4.5 },
     { key: "detail", min: 58, weight: 0 },
   ];
@@ -298,6 +299,88 @@
     inputEl.classList.toggle("late-pickup", isLatePickupTime(inputEl.value));
   }
 
+  var TAG_COLOR_MAP = [
+    { min: 1,  max: 10, cls: "tag-color-red" },
+    { min: 11, max: 20, cls: "tag-color-blue" },
+    { min: 21, max: 30, cls: "tag-color-yellow" },
+    { min: 31, max: 40, cls: "tag-color-green" },
+    { min: 41, max: 50, cls: "tag-color-purple" },
+    { min: 51, max: 60, cls: "tag-color-black" },
+    { min: 61, max: 70, cls: "tag-color-gray" },
+    { min: 71, max: 80, cls: "tag-color-pink" },
+    { min: 81, max: 90, cls: "tag-color-brown" },
+  ];
+
+  function tagNoColorClass(tagNo) {
+    if (!tagNo) return "";
+    var numPart = parseInt(String(tagNo).replace(/^[A-Za-z]+/, ""), 10);
+    if (!Number.isFinite(numPart) || numPart < 1) return "";
+    for (var i = 0; i < TAG_COLOR_MAP.length; i++) {
+      if (numPart >= TAG_COLOR_MAP[i].min && numPart <= TAG_COLOR_MAP[i].max) {
+        return TAG_COLOR_MAP[i].cls;
+      }
+    }
+    return "";
+  }
+
+  function buildCheckboxCell(orderId) {
+    const td = document.createElement("td");
+    td.dataset.colKey = "checkbox";
+    td.style.textAlign = "center";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "bulk-check";
+    cb.dataset.orderId = orderId;
+    cb.addEventListener("change", updateBulkBar);
+    td.appendChild(cb);
+    return td;
+  }
+
+  function getSelectedOrderIds() {
+    return Array.from(tbodyEl.querySelectorAll(".bulk-check:checked")).map(function (cb) {
+      return cb.dataset.orderId;
+    });
+  }
+
+  function updateBulkBar() {
+    var bar = document.getElementById("bulk-action-bar");
+    if (!bar) return;
+    var count = getSelectedOrderIds().length;
+    var countEl = bar.querySelector("[data-role='bulk-count']");
+    if (countEl) countEl.textContent = String(count);
+    bar.classList.toggle("is-visible", count > 0);
+  }
+
+  async function executeBulkAction(action) {
+    var ids = getSelectedOrderIds();
+    if (!ids.length) return;
+    var labels = {
+      warehouse_on: "선택한 항목을 창고보관으로 표시하시겠습니까?",
+      warehouse_off: "선택한 항목의 창고보관을 해제하시겠습니까?",
+      cancel: "선택한 항목을 삭제(취소)하시겠습니까?",
+      set_paid: "선택한 항목을 결제완료로 변경하시겠습니까?",
+      set_pending: "선택한 항목을 결제대기로 변경하시겠습니까?",
+    };
+    if (!window.confirm(labels[action] || "일괄 처리하시겠습니까?")) return;
+
+    try {
+      var response = await fetch("/staff/api/orders/bulk-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_ids: ids, action: action }),
+      });
+      if (!response.ok) {
+        window.alert(await readErrorMessage(response));
+        return;
+      }
+      var data = await response.json();
+      window.alert((data.updated || 0) + "건 처리 완료");
+      fetchOrders();
+    } catch (_e) {
+      window.alert("일괄 처리 중 오류가 발생했습니다.");
+    }
+  }
+
   function buildInputCell(value, field, type) {
     const td = document.createElement("td");
     td.dataset.colKey = field;
@@ -307,6 +390,10 @@
     input.value = value || "";
     input.dataset.field = field;
     td.appendChild(input);
+    if (field === "tag_no") {
+      var colorCls = tagNoColorClass(value);
+      if (colorCls) td.classList.add(colorCls);
+    }
     return td;
   }
 
@@ -589,6 +676,16 @@
     const td = document.createElement("td");
     const actions = document.createElement("div");
     actions.className = "inline-actions";
+    const isCancelled = order.payment_status === "CANCELLED" || order.is_cancelled;
+
+    if (isCancelled) {
+      const cancelledLabel = document.createElement("span");
+      cancelledLabel.style.cssText = "color:#c53030;font-weight:700;font-size:12px;";
+      cancelledLabel.textContent = "취소됨";
+      actions.appendChild(cancelledLabel);
+      td.appendChild(actions);
+      return td;
+    }
 
     const paymentButton = document.createElement("button");
     paymentButton.className = "btn btn-sm payment-state-btn";
@@ -600,6 +697,13 @@
       paymentButton.classList.add("is-disabled");
     }
     actions.appendChild(paymentButton);
+
+    if (order.needs_extra_payment) {
+      const badge = document.createElement("span");
+      badge.className = "extra-payment-badge";
+      badge.textContent = "연장결제";
+      actions.appendChild(badge);
+    }
 
     if (order.is_picked_up) {
       const undoButton = document.createElement("button");
@@ -616,6 +720,25 @@
       pickupButton.textContent = "수령완료";
       actions.appendChild(pickupButton);
     }
+
+    const warehouseButton = document.createElement("button");
+    warehouseButton.className = "warehouse-btn" + (order.in_warehouse ? " is-active" : "");
+    warehouseButton.type = "button";
+    warehouseButton.dataset.action = "toggle-warehouse";
+    warehouseButton.textContent = order.in_warehouse ? "창고O" : "창고";
+    if (!order.is_picked_up) {
+      actions.appendChild(warehouseButton);
+    }
+
+    if (!order.is_picked_up) {
+      const cancelButton = document.createElement("button");
+      cancelButton.className = "cancel-btn";
+      cancelButton.type = "button";
+      cancelButton.dataset.action = "cancel-order";
+      cancelButton.textContent = "삭제";
+      actions.appendChild(cancelButton);
+    }
+
     td.appendChild(actions);
     return td;
   }
@@ -650,7 +773,10 @@
     row.dataset.orderId = order.order_id;
     row.dataset.basePrepaidAmount = String(toNonNegativeInt(order.base_prepaid_amount));
     row.dataset.autoPrepaidAmount = String(toNonNegativeInt(order.auto_prepaid_amount));
+    if (order.in_warehouse) row.classList.add("is-in-warehouse");
+    if (order.payment_status === "CANCELLED" || order.is_cancelled) row.classList.add("is-cancelled");
 
+    row.appendChild(buildCheckboxCell(order.order_id));
     row.appendChild(buildInputCell(order.name, "name", "text"));
     row.appendChild(buildInputCell(order.tag_no, "tag_no", "text"));
     var createdTd = document.createElement("td");
@@ -673,7 +799,7 @@
       lastRenderedOrders.clear();
       var emptyRow = document.createElement("tr");
       var emptyTd = document.createElement("td");
-      emptyTd.colSpan = 9;
+      emptyTd.colSpan = 10;
       emptyTd.textContent = tbodyEl.dataset.emptyText || "데이터가 없습니다.";
       emptyRow.appendChild(emptyTd);
       tbodyEl.appendChild(emptyRow);
@@ -968,6 +1094,37 @@
       return;
     }
 
+    if (action === "toggle-warehouse") {
+      const orderId = row.dataset.orderId;
+      if (!orderId) return;
+      const response = await fetch(`/staff/api/orders/${encodeURIComponent(orderId)}/toggle-warehouse`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        window.alert(await readErrorMessage(response));
+        return;
+      }
+      fetchOrders();
+      return;
+    }
+
+    if (action === "cancel-order") {
+      if (!window.confirm("이 접수건을 삭제(취소)하시겠습니까?")) {
+        return;
+      }
+      const orderId = row.dataset.orderId;
+      if (!orderId) return;
+      const response = await fetch(`/staff/api/orders/${encodeURIComponent(orderId)}/cancel`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        window.alert(await readErrorMessage(response));
+        return;
+      }
+      fetchOrders();
+      return;
+    }
+
     if (action === "toggle-payment-status") {
       if (!window.confirm(confirmSaveText)) {
         return;
@@ -1036,6 +1193,30 @@
       refreshColumnWidths();
     }, 120);
   });
+
+  // ── Bulk action bar ──
+  var bulkBar = document.getElementById("bulk-action-bar");
+  if (bulkBar) {
+    bulkBar.addEventListener("click", function (event) {
+      var target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      var btn = target.closest("[data-bulk-action]");
+      if (!btn) return;
+      executeBulkAction(btn.dataset.bulkAction);
+    });
+  }
+
+  // ── Select-all checkbox in thead ──
+  var selectAllCb = document.getElementById("bulk-select-all");
+  if (selectAllCb) {
+    selectAllCb.addEventListener("change", function () {
+      var checked = selectAllCb.checked;
+      Array.from(tbodyEl.querySelectorAll(".bulk-check")).forEach(function (cb) {
+        cb.checked = checked;
+      });
+      updateBulkBar();
+    });
+  }
 
   setupColumnResizeHandles();
   refreshColumnWidths();

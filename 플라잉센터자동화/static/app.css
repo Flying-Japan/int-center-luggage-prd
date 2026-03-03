@@ -598,6 +598,33 @@ body.customer-site .file-picker {
 .staff-search-form {
   display: grid;
   gap: 12px;
+  background: #e2ecf9;
+  border: 1px solid #b8cceb;
+  border-radius: 16px;
+  padding: 16px;
+}
+
+.staff-search-form .field-label {
+  color: #1a2d4d;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.staff-search-form .control {
+  border: 2px solid #8ba8d4;
+  background: #ffffff;
+  font-weight: 600;
+  color: #1a2d4d;
+}
+
+.staff-search-form .control::placeholder {
+  color: #5a7399;
+  font-weight: 600;
+}
+
+.staff-search-form .control:focus {
+  border-color: #2f6fd0;
+  box-shadow: 0 0 0 4px rgba(47, 111, 208, 0.2);
 }
 
 .staff-search-row {
@@ -1411,6 +1438,17 @@ tbody tr:hover {
   text-align: center;
 }
 
+/* ── Tag number color coding ── */
+#staff-orders-table .tag-color-red    .table-control { border-left: 4px solid #e53e3e !important; background: #fff5f5 !important; }
+#staff-orders-table .tag-color-blue   .table-control { border-left: 4px solid #3182ce !important; background: #ebf8ff !important; }
+#staff-orders-table .tag-color-yellow .table-control { border-left: 4px solid #d69e2e !important; background: #fffff0 !important; }
+#staff-orders-table .tag-color-green  .table-control { border-left: 4px solid #38a169 !important; background: #f0fff4 !important; }
+#staff-orders-table .tag-color-purple .table-control { border-left: 4px solid #805ad5 !important; background: #faf5ff !important; }
+#staff-orders-table .tag-color-black  .table-control { border-left: 4px solid #1a202c !important; background: #f0f1f3 !important; }
+#staff-orders-table .tag-color-gray   .table-control { border-left: 4px solid #718096 !important; background: #f7fafc !important; }
+#staff-orders-table .tag-color-pink   .table-control { border-left: 4px solid #ed64a6 !important; background: #fff5f7 !important; }
+#staff-orders-table .tag-color-brown  .table-control { border-left: 4px solid #8b6914 !important; background: #fffaf0 !important; }
+
 #staff-orders-table [data-col-key="created_time"] {
   font-variant-numeric: tabular-nums;
 }
@@ -1459,7 +1497,7 @@ tbody tr:hover {
 
 /* action buttons: compact inline */
 #staff-orders-table .inline-actions {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
@@ -1488,6 +1526,157 @@ tbody tr:hover {
 
 #staff-orders-table tbody tr:hover {
   background: #edf3fc;
+}
+
+/* ── Warehouse highlight ── */
+#staff-orders-table tbody tr.is-in-warehouse {
+  background: #e6f7ed;
+  border-left: 4px solid #38a169;
+}
+
+#staff-orders-table tbody tr.is-in-warehouse:nth-child(even) {
+  background: #dcf2e5;
+}
+
+#staff-orders-table tbody tr.is-in-warehouse:hover {
+  background: #c6edda;
+}
+
+.warehouse-btn {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #b2dfdb;
+  background: #e8f5e9;
+  color: #2e7d32;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.warehouse-btn.is-active {
+  background: #2e7d32;
+  color: #fff;
+  border-color: #2e7d32;
+  box-shadow: 0 2px 6px rgba(46, 125, 50, 0.3);
+}
+
+/* ── Cancelled row ── */
+#staff-orders-table tbody tr.is-cancelled {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.cancel-btn {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #f5c6cb;
+  background: #fff5f5;
+  color: #c53030;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cancel-btn:hover {
+  background: #fed7d7;
+  border-color: #e53e3e;
+}
+
+/* ── Bulk action bar ── */
+.bulk-action-bar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, #1e3a5f 0%, #1a2d4d 100%);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(26, 45, 77, 0.3);
+  animation: riseIn 0.25s ease both;
+}
+
+.bulk-action-bar.is-visible {
+  display: flex;
+}
+
+.bulk-action-label {
+  font-size: 13px;
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.bulk-action-bar .btn-sm {
+  font-size: 11px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.bulk-action-bar .btn-primary {
+  background: #38a169;
+  border-color: #38a169;
+  color: #fff;
+}
+
+.bulk-action-bar .btn-secondary {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+.bulk-action-bar .cancel-btn {
+  background: #e53e3e;
+  border-color: #e53e3e;
+  color: #fff;
+}
+
+.bulk-action-bar .warehouse-btn {
+  background: #2e7d32;
+  border-color: #2e7d32;
+  color: #fff;
+}
+
+/* ── Bulk checkbox column ── */
+#staff-orders-table [data-col-key="checkbox"] {
+  text-align: center;
+  width: 36px;
+}
+
+.bulk-check {
+  width: 16px;
+  height: 16px;
+  accent-color: #1e63da;
+  cursor: pointer;
+}
+
+#bulk-select-all {
+  width: 16px;
+  height: 16px;
+  accent-color: #1e63da;
+  cursor: pointer;
+}
+
+/* ── Extra payment indicator ── */
+.extra-payment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: linear-gradient(160deg, #ff6b35 0%, #e53e3e 100%);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+  animation: pulse-badge 1.8s ease-in-out infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 /* resize handles */

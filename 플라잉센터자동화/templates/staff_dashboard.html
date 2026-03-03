@@ -32,6 +32,11 @@
           <input class="status-filter-input" type="checkbox" name="status_filter" value="PICKED_UP" {% if 'PICKED_UP' in selected_status_filters %}checked{% endif %} />
           <span>수령완료</span>
         </label>
+
+        <label class="status-filter-chip">
+          <input class="status-filter-input" type="checkbox" name="status_filter" value="CANCELLED" {% if 'CANCELLED' in selected_status_filters %}checked{% endif %} />
+          <span>취소</span>
+        </label>
       </div>
       <label class="check-row">
         <input id="show-all-picked-up" type="checkbox" name="show_all_picked_up" value="true" {% if show_all_picked_up %}checked{% endif %} />
@@ -56,6 +61,7 @@
   <div class="table-wrap">
     <table id="staff-orders-table">
       <colgroup>
+        <col data-col-key="checkbox" />
         <col data-col-key="name" />
         <col data-col-key="tag_no" />
         <col data-col-key="created_time" />
@@ -68,6 +74,7 @@
       </colgroup>
       <thead>
         <tr>
+          <th data-col-key="checkbox" style="text-align:center;width:36px;"><input id="bulk-select-all" type="checkbox" title="전체 선택" /></th>
           <th data-col-key="name">이름</th>
           <th data-col-key="tag_no">짐번호</th>
           <th data-col-key="created_time">접수 시각</th>
@@ -85,7 +92,7 @@
         data-confirm-save-text="입력한 내용으로 수정하시겠습니까?"
         data-confirm-pickup-text="수령완료 처리하시겠습니까?"
         data-confirm-undo-pickup-text="수령완료를 취소하시겠습니까?"
-        data-flying-pass-tiers='{{ flying_pass_tiers_json | tojson }}'
+        data-flying-pass-tiers='{{ flying_pass_tiers_json | safe }}'
       >
         {% for order in orders %}
         <tr data-order-id="{{ order.order_id }}">
@@ -122,10 +129,19 @@
           <td data-col-key="detail"><a class="btn btn-secondary btn-sm" href="/staff/orders/{{ order.order_id }}">상세</a></td>
         </tr>
         {% else %}
-        <tr><td colspan="9">데이터가 없습니다.</td></tr>
+        <tr><td colspan="10">데이터가 없습니다.</td></tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
+
+  <div id="bulk-action-bar" class="bulk-action-bar">
+    <span class="bulk-action-label"><strong data-role="bulk-count">0</strong>건 선택됨</span>
+    <button class="btn btn-sm warehouse-btn" type="button" data-bulk-action="warehouse_on">창고보관</button>
+    <button class="btn btn-sm warehouse-btn" type="button" data-bulk-action="warehouse_off">창고해제</button>
+    <button class="btn btn-sm btn-primary" type="button" data-bulk-action="set_paid">결제완료</button>
+    <button class="btn btn-sm btn-secondary" type="button" data-bulk-action="set_pending">결제대기</button>
+    <button class="btn btn-sm cancel-btn" type="button" data-bulk-action="cancel">삭제(취소)</button>
   </div>
 </section>
 
@@ -200,7 +216,7 @@
   </details>
 </section>
 
-<script src="/static/staff_dashboard.js?v=20260302p"></script>
+<script src="/static/staff_dashboard.js?v=20260303b"></script>
 <script>
 (function () {
   const formEl = document.getElementById("manual-order-form");

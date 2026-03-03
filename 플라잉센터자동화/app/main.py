@@ -1,11 +1,13 @@
 import base64
 import hashlib
 import io
+import json
 import logging
 import re
 import secrets
 import threading
 import time
+import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -107,6 +109,80 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 templates.env.filters["yen"] = format_yen
 
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    try:
+        tb = traceback.format_exc()
+        detail = str(exc)
+        exc_type = type(exc).__name__
+        logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, tb)
+        return JSONResponse(status_code=500, content={"detail": detail, "type": exc_type, "traceback": tb})
+    except Exception:
+        return JSONResponse(status_code=500, content={"detail": "exception handler itself failed"})
+
+
+@app.get("/debug/dashboard-diag")
+def debug_dashboard_diag(db: SupabaseDB = Depends(get_db)):
+    """No-auth diagnostic that exercises the dashboard code path."""
+    steps: list[dict] = []
+    try:
+        staff = db.query("user_profiles").filter(("is_active", "=", True)).first()
+        steps.append({"step": "get_staff", "ok": staff is not None, "name": getattr(staff, "name", None)})
+    except Exception as e:
+        steps.append({"step": "get_staff", "ok": False, "error": f"{type(e).__name__}: {e}"})
+        return JSONResponse(content={"steps": steps})
+
+    try:
+        menu = build_staff_menu(db, "dashboard", staff.is_admin)
+        steps.append({"step": "build_menu", "ok": True, "count": len(menu)})
+    except Exception as e:
+        steps.append({"step": "build_menu", "ok": False, "error": f"{type(e).__name__}: {e}"})
+
+    try:
+        orders = query_staff_orders(db, list(STAFF_STATUS_FILTERS), "", limit=10, show_all_picked_up=False)
+        steps.append({"step": "query_orders", "ok": True, "count": len(orders)})
+    except Exception as e:
+        steps.append({"step": "query_orders", "ok": False, "error": f"{type(e).__name__}: {e}"})
+
+    try:
+        from app.services.flying_pass import build_flying_pass_tiers_json
+        tiers = build_flying_pass_tiers_json()
+        steps.append({"step": "flying_pass_tiers", "ok": True, "count": len(tiers)})
+    except Exception as e:
+        steps.append({"step": "flying_pass_tiers", "ok": False, "error": f"{type(e).__name__}: {e}"})
+
+    try:
+        now_utc = utc_now()
+        now_jst = now_utc.astimezone(JST)
+        manual_default_pickup = next_pickup_default_jst(now_utc)
+        ctx = {
+            "request": None,
+            "orders": orders if 'orders' in dir() else [],
+            "selected_status_filters": list(STAFF_STATUS_FILTERS),
+            "q": "",
+            "show_all_picked_up": False,
+            "staff": staff,
+            "staff_menu_items": menu if 'menu' in dir() else [],
+            "now_jst": now_jst,
+            "manual_default_pickup_date": manual_default_pickup.strftime("%Y-%m-%d"),
+            "manual_default_pickup_time": manual_default_pickup.strftime("%H:%M"),
+            "JST": JST,
+            "max_bag_qty": MAX_BAG_QTY,
+            "display_payment_method": display_payment_method,
+            "display_flying_pass_tier": display_flying_pass_tier,
+            "to_jst_datetime": to_jst_datetime,
+            "flying_pass_tiers_json": json.dumps(tiers) if 'tiers' in dir() else "[]",
+            "retention_msg": "",
+            "retention_err": "",
+        }
+        template = templates.get_template("staff_dashboard.html")
+        html = template.render(ctx)
+        steps.append({"step": "render_template", "ok": True, "bytes": len(html)})
+    except Exception as e:
+        steps.append({"step": "render_template", "ok": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()})
+
+    return JSONResponse(content={"steps": steps})
+
 
 DISCOUNT_TABLE = [
     {"days": "1~6", "rate": "0%"},
@@ -118,7 +194,7 @@ DISCOUNT_TABLE = [
 
 CUSTOMER_PAYMENT_METHODS = {"PAY_QR", "CASH"}
 STAFF_PAYMENT_METHODS = {"PAY_QR", "CASH"}
-STAFF_STATUS_FILTERS = ("PAYMENT_PENDING", "PAID", "PICKED_UP")
+STAFF_STATUS_FILTERS = ("PAYMENT_PENDING", "PAID", "PICKED_UP", "CANCELLED")
 OAUTH_ERROR_MESSAGES = {
     "oauth_failed": "Google 로그인에 실패했습니다.",
     "state_missing": "인증 세션이 만료되었습니다. 다시 시도해 주세요.",
@@ -219,6 +295,8 @@ def resolved_note(order) -> str:
 
 
 def payment_status_of(order) -> str:
+    if order.status == "CANCELLED":
+        return "CANCELLED"
     return "PAYMENT_PENDING" if order.status == "PAYMENT_PENDING" else "PAID"
 
 
@@ -230,7 +308,7 @@ def normalize_status_filters(raw_filters: list[str]) -> list[str]:
             if value in STAFF_STATUS_FILTERS and value not in normalized:
                 normalized.append(value)
     if not normalized:
-        return list(STAFF_STATUS_FILTERS)
+        return ["PAYMENT_PENDING", "PAID", "PICKED_UP"]
     return normalized
 
 
@@ -408,11 +486,18 @@ def serialize_staff_order(order) -> dict[str, object]:
         "payment_method_label": display_payment_method(order.payment_method),
         "payment_status": payment_status_of(order),
         "is_picked_up": order.status == "PICKED_UP",
+        "is_cancelled": order.status == "CANCELLED",
         "expected_pickup_time": expected_jst.strftime("%H:%M"),
         "expected_pickup_date": expected_jst.strftime("%Y-%m-%d"),
         "luggage_image_url": f"/staff/orders/{order.order_id}/luggage-image" if order.luggage_image_url else "",
         "note": resolved_note(order),
         "detail_url": f"/staff/orders/{order.order_id}",
+        "in_warehouse": bool(getattr(order, "in_warehouse", False)),
+        "needs_extra_payment": (
+            order.status == "PAID"
+            and order.expected_pickup_at is not None
+            and utc_now() > order.expected_pickup_at
+        ),
     }
 
 
@@ -451,6 +536,8 @@ def query_staff_orders(
     query = db.query("orders")
     if status_filters:
         query = query.filter(("status", "IN", status_filters))
+    else:
+        query = query.filter(("status", "!=", "CANCELLED"))
     if not show_all_picked_up:
         cutoff_jst = (
             utc_now().astimezone(JST).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -771,6 +858,7 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+
 @app.get("/customer", response_class=HTMLResponse)
 def customer_form(request: Request, lang: str = "ko") -> HTMLResponse:
     normalized_lang, t = get_translations(lang)
@@ -1073,7 +1161,7 @@ def staff_dashboard(
             "display_payment_method": display_payment_method,
             "display_flying_pass_tier": display_flying_pass_tier,
             "to_jst_datetime": to_jst_datetime,
-            "flying_pass_tiers_json": build_flying_pass_tiers_json(),
+            "flying_pass_tiers_json": json.dumps(build_flying_pass_tiers_json()),
             "retention_msg": retention_msg.strip(),
             "retention_err": retention_err.strip(),
         },
@@ -2464,9 +2552,92 @@ def staff_inline_update_order(
     auto_note = auto_pickup_note(order.created_at, expected_pickup)
     order.note = note if note else (auto_note or None)
 
+    in_warehouse_raw = payload.get("in_warehouse")
+    if in_warehouse_raw is not None:
+        order.in_warehouse = bool(in_warehouse_raw)
+
     order.staff_id = staff.staff_id
     db.update(order)
     return JSONResponse({"order": serialize_staff_order(order)})
+
+
+@app.post("/staff/api/orders/{order_id}/toggle-warehouse")
+def staff_toggle_warehouse(
+    request: Request,
+    order_id: str,
+    db: SupabaseDB = Depends(get_db),
+) -> JSONResponse:
+    staff = ensure_staff(request, db)
+    order = db.get("orders", "order_id", order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order.in_warehouse = not bool(getattr(order, "in_warehouse", False))
+    order.staff_id = staff.staff_id
+    db.update(order)
+    return JSONResponse({"order": serialize_staff_order(order)})
+
+
+@app.post("/staff/api/orders/{order_id}/cancel")
+def staff_cancel_order(
+    request: Request,
+    order_id: str,
+    db: SupabaseDB = Depends(get_db),
+) -> JSONResponse:
+    staff = ensure_staff(request, db)
+    order = db.get("orders", "order_id", order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.status == "PICKED_UP":
+        raise HTTPException(status_code=400, detail="수령완료 건은 취소할 수 없습니다.")
+    order.status = "CANCELLED"
+    order.staff_id = staff.staff_id
+    db.update(order)
+    return JSONResponse({"order": serialize_staff_order(order)})
+
+
+@app.post("/staff/api/orders/bulk-action")
+def staff_bulk_action(
+    request: Request,
+    payload: dict = Body(...),
+    db: SupabaseDB = Depends(get_db),
+) -> JSONResponse:
+    staff = ensure_staff(request, db)
+    order_ids = payload.get("order_ids", [])
+    action = str(payload.get("action", "")).strip()
+
+    if not order_ids or not isinstance(order_ids, list):
+        raise HTTPException(status_code=400, detail="주문을 선택해주세요.")
+    if action not in {"warehouse_on", "warehouse_off", "cancel", "set_paid", "set_pending"}:
+        raise HTTPException(status_code=400, detail="Invalid bulk action.")
+
+    updated = 0
+    for oid in order_ids:
+        order = db.get("orders", "order_id", str(oid))
+        if order is None:
+            continue
+
+        if action == "warehouse_on":
+            order.in_warehouse = True
+        elif action == "warehouse_off":
+            order.in_warehouse = False
+        elif action == "cancel":
+            if order.status == "PICKED_UP":
+                continue
+            order.status = "CANCELLED"
+        elif action == "set_paid":
+            if order.status in ("PICKED_UP", "CANCELLED"):
+                continue
+            order.status = "PAID"
+        elif action == "set_pending":
+            if order.status in ("PICKED_UP", "CANCELLED"):
+                continue
+            order.status = "PAYMENT_PENDING"
+
+        order.staff_id = staff.staff_id
+        db.update(order)
+        updated += 1
+
+    return JSONResponse({"updated": updated})
 
 
 @app.post("/staff/api/orders/{order_id}/pickup")
