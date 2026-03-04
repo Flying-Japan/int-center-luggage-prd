@@ -1224,37 +1224,46 @@ td .btn-sm + .btn-sm {
   cursor: not-allowed;
 }
 
+/* ── Payment toggle button ── */
 .payment-state-btn {
   justify-content: center;
-  border-radius: 999px;
+  border-radius: 4px;
   border: 1px solid transparent;
   box-shadow: none;
-  padding: 7px 12px;
-  min-width: 84px;
+  /* size handled by #staff-orders-table .payment-state-btn override */
 }
 
 .payment-state-btn.is-paid {
-  background: #e8f8ef;
-  color: #11683e;
-  border-color: #bee8d0;
+  /* subdued green-tinted text on near-white — signals OK state quietly */
+  background: #f0faf4;
+  color: #166534;
+  border-color: #bbf7d0;
+  font-weight: 600;
 }
 
 .payment-state-btn.is-pending {
-  background: #fff4e5;
-  color: #996028;
-  border-color: #f2d3a7;
+  /* amber accent — the ONE semantic color for "needs action" */
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fcd34d;
+  font-weight: 700;
 }
 
+/* ── Pickup / undo-pickup buttons ── */
 .pickup-complete-btn {
+  /* primary blue — the other accent, for primary action only */
   background: var(--primary, #2f80f8);
   color: #fff;
   border: 1px solid var(--primary, #2f80f8);
+  font-weight: 600;
 }
 
 .pickup-undo-btn {
-  background: #fff0f0;
-  color: #b73636;
-  border: 1px solid #f5cccc;
+  /* ghost — picked-up rows are done, undo is a recovery action */
+  background: transparent;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
+  font-weight: 500;
 }
 
 .file-btn {
@@ -1418,11 +1427,18 @@ tbody tr:hover {
 
 #staff-orders-table th,
 #staff-orders-table td {
-  padding: 7px 8px;
+  padding: 6px 8px;
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.3;
   border-bottom: 1px solid #e2e9f3;
+}
+
+/* action column: tighter vertical padding keeps row at ~42px */
+#staff-orders-table td[data-col-key="pickup_action"] {
+  padding-top: 5px;
+  padding-bottom: 5px;
+  vertical-align: middle;
 }
 
 #staff-orders-table th {
@@ -1514,11 +1530,12 @@ tbody tr:hover {
   box-shadow: 0 0 0 2px rgba(216, 69, 69, 0.10);
 }
 
-/* action buttons: compact grid */
+/* ── action column: single-row flex layout ── */
 #staff-orders-table .inline-actions {
-  display: grid;
-  grid-template-columns: auto auto;
-  gap: 3px 4px;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 3px;
 }
 
 #staff-orders-table [data-col-key="pickup_action"],
@@ -1531,26 +1548,28 @@ tbody tr:hover {
 }
 
 #staff-orders-table .btn-sm {
-  padding: 3px 8px;
+  padding: 0 7px;
   min-height: 0;
-  height: 24px;
-  font-size: 11px;
-  border-radius: 6px;
-  line-height: 1;
+  height: 22px;
+  font-size: 10px;
+  border-radius: 4px;
+  line-height: 22px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 #staff-orders-table .payment-state-btn {
-  min-width: 64px;
-  padding: 3px 8px;
+  min-width: 52px;
+  padding: 0 7px;
 }
 
 /* zebra + hover */
 #staff-orders-table tbody tr:nth-child(even) {
-  background: #f5f9fd;
+  background: #f8fafc;
 }
 
 #staff-orders-table tbody tr:hover {
-  background: #e8f1fd;
+  background: #f0f6ff;
   box-shadow: inset 3px 0 0 var(--primary);
 }
 
@@ -1561,44 +1580,48 @@ tbody tr:hover {
 }
 
 /* ── Warehouse highlight ── */
+/* slate-blue tint: associates with the button's active fill, not green */
 #staff-orders-table tbody tr.is-in-warehouse {
-  background: #e6f7ed;
-  border-left: 4px solid #38a169;
+  background: #f1f5f9;
+  border-left: 3px solid #475569;
 }
 
 #staff-orders-table tbody tr.is-in-warehouse:nth-child(even) {
-  background: #dcf2e5;
+  background: #e8edf3;
 }
 
 #staff-orders-table tbody tr.is-in-warehouse:hover {
-  background: #c6edda;
+  background: #dde4ef;
 }
 
 .warehouse-btn {
   font-size: 10px;
-  padding: 2px 6px;
+  padding: 0 6px;
   height: 22px;
-  border-radius: 6px;
-  border: 1px solid #b2dfdb;
-  background: #e8f5e9;
-  color: #2e7d32;
-  font-weight: 700;
+  line-height: 22px;
+  border-radius: 4px;
+  /* ghost state — warehouse is a toggle, not a primary action */
+  border: 1px solid #cbd5e1;
+  background: transparent;
+  color: #64748b;
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-  opacity: 0.75;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
 .warehouse-btn.is-active {
-  background: #2e7d32;
+  /* active: use a dark slate fill — no competing green accent */
+  background: #334155;
   color: #fff;
-  border-color: #2e7d32;
-  box-shadow: 0 2px 6px rgba(46, 125, 50, 0.3);
+  border-color: #334155;
+  box-shadow: none;
 }
 
 /* ── Extension row ── */
 #staff-orders-table tbody tr.is-extension {
-  border-left: 3px solid #9f7aea;
-  background: rgba(159, 122, 234, 0.07);
+  border-left: 3px solid #a78bfa;
+  background: rgba(167, 139, 250, 0.05);
 }
 
 .extension-badge {
@@ -1633,25 +1656,30 @@ tbody tr:hover {
 
 .cancel-btn {
   font-size: 11px;
-  padding: 4px 8px;
-  border-radius: 6px;
+  padding: 0 6px;
+  height: 22px;
+  line-height: 22px;
+  border-radius: 4px;
   border: 1px solid transparent;
   background: transparent;
-  color: #c53030;
-  font-weight: 700;
+  /* fully invisible at rest — revealed on row hover to avoid visual noise */
+  color: #94a3b8;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  opacity: 0.4;
-  transition: opacity 0.15s, background 0.15s;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
 }
 
 #staff-orders-table tbody tr:hover .cancel-btn {
   opacity: 1;
+  color: #dc2626;
 }
 
 .cancel-btn:hover {
-  background: #fed7d7;
-  border-color: #e53e3e;
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #dc2626;
   opacity: 1;
 }
 
@@ -1702,11 +1730,13 @@ tbody tr:hover {
   background: #e53e3e;
   border-color: #e53e3e;
   color: #fff;
+  /* override the table-row hover-reveal opacity */
+  opacity: 1;
 }
 
 .bulk-action-bar .warehouse-btn {
-  background: #2e7d32;
-  border-color: #2e7d32;
+  background: #475569;
+  border-color: #475569;
   color: #fff;
 }
 
@@ -1731,24 +1761,26 @@ tbody tr:hover {
 }
 
 /* ── Extra payment indicator ── */
+/* Demoted to a compact inline badge — no pulse, no full-width span */
 .extra-payment-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  grid-column: 1 / -1;
-  padding: 3px 8px;
-  border-radius: 999px;
-  background: linear-gradient(160deg, #ff6b35 0%, #e53e3e 100%);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 800;
+  flex-shrink: 0;
+  /* remove the grid-column span that was forcing a new row */
+  grid-column: unset;
+  padding: 0 5px;
+  height: 18px;
+  line-height: 18px;
+  border-radius: 3px;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+  font-size: 9px;
+  font-weight: 700;
   white-space: nowrap;
-  animation: pulse-badge 1.8s ease-in-out infinite;
-}
-
-@keyframes pulse-badge {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
+  letter-spacing: 0.02em;
+  /* subtle single blink on page load only — not continuous */
+  animation: none;
 }
 
 /* resize handles */
