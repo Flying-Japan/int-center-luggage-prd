@@ -62,6 +62,16 @@
   </form>
 
   <p class="card-desc">접수 순서대로(오래된 순) 정렬됩니다.</p>
+
+  <div id="bulk-action-bar" class="bulk-action-bar">
+    <span class="bulk-action-label"><strong data-role="bulk-count">0</strong>건 선택됨</span>
+    <button class="btn btn-sm warehouse-btn" type="button" data-bulk-action="warehouse_on">창고보관</button>
+    <button class="btn btn-sm warehouse-btn" type="button" data-bulk-action="warehouse_off">창고해제</button>
+    <button class="btn btn-sm btn-primary" type="button" data-bulk-action="set_paid">결제완료</button>
+    <button class="btn btn-sm btn-secondary" type="button" data-bulk-action="set_pending">결제대기</button>
+    <button class="btn btn-sm cancel-btn" type="button" data-bulk-action="cancel">삭제(취소)</button>
+  </div>
+
   <div class="table-wrap">
     <table id="staff-orders-table">
       <colgroup>
@@ -139,14 +149,6 @@
     </table>
   </div>
 
-  <div id="bulk-action-bar" class="bulk-action-bar">
-    <span class="bulk-action-label"><strong data-role="bulk-count">0</strong>건 선택됨</span>
-    <button class="btn btn-sm warehouse-btn" type="button" data-bulk-action="warehouse_on">창고보관</button>
-    <button class="btn btn-sm warehouse-btn" type="button" data-bulk-action="warehouse_off">창고해제</button>
-    <button class="btn btn-sm btn-primary" type="button" data-bulk-action="set_paid">결제완료</button>
-    <button class="btn btn-sm btn-secondary" type="button" data-bulk-action="set_pending">결제대기</button>
-    <button class="btn btn-sm cancel-btn" type="button" data-bulk-action="cancel">삭제(취소)</button>
-  </div>
 </section>
 
 <section class="card" id="manual-tools">
@@ -223,7 +225,7 @@
   </details>
 </section>
 
-<script src="/static/staff_dashboard.js?v=20260304b"></script>
+<script src="/static/staff_dashboard.js?v=20260304d"></script>
 <script>
 (function () {
   const formEl = document.getElementById("manual-order-form");
