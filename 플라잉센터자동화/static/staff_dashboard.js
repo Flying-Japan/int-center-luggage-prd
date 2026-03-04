@@ -9,21 +9,20 @@
   const tableEl = document.getElementById("staff-orders-table");
   const tableWrapEl = tableEl ? tableEl.closest(".table-wrap") : null;
   const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP", "CANCELLED"];
-  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v10";
-  ["v2","v3","v4","v5","v6","v7","v8","v9"].forEach(function (v) {
+  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v19";
+  ["v2","v3","v4","v5","v6","v7","v8","v9","v10","v11","v12","v13","v14","v15","v16","v17","v18"].forEach(function (v) {
     FJ.safeStorageRemove("flying-japan-staff-col-widths-" + v);
   });
   const columnSchema = [
-    { key: "checkbox", min: 36, weight: 0 },
-    { key: "name", min: 120, weight: 1.5 },
-    { key: "tag_no", min: 62, weight: 0 },
-    { key: "created_time", min: 105, weight: 0 },
-    { key: "price", min: 200, weight: 0 },
-    { key: "pickup_time", min: 100, weight: 0 },
-    { key: "luggage_image", min: 66, weight: 0 },
-    { key: "pickup_action", min: 220, weight: 0 },
-    { key: "note", min: 140, weight: 4.5 },
-    { key: "detail", min: 58, weight: 0 },
+    { key: "checkbox", min: 34, weight: 0 },
+    { key: "name", min: 140, weight: 2 },
+    { key: "tag_no", min: 44, weight: 0 },
+    { key: "created_time", min: 82, weight: 0 },
+    { key: "price", min: 155, weight: 0 },
+    { key: "pickup_time", min: 135, weight: 0 },
+    { key: "pickup_action", min: 180, weight: 0 },
+    { key: "note", min: 120, weight: 3 },
+    { key: "detail", min: 42, weight: 0 },
   ];
   var _rawTiers = [];
   try { _rawTiers = JSON.parse(tbodyEl.dataset.flyingPassTiers || "[]"); } catch (_) {}
@@ -295,8 +294,9 @@
   }
 
 
-  function applyLatePickupStyle(inputEl) {
-    inputEl.classList.toggle("late-pickup", isLatePickupTime(inputEl.value));
+  function applyLatePickupStyle(inputEl, timeVal) {
+    var tv = timeVal || inputEl.value || "";
+    inputEl.classList.toggle("late-pickup", isLatePickupTime(tv));
   }
 
   var TAG_COLOR_MAP = [
@@ -389,6 +389,10 @@
     input.type = type || "text";
     input.value = value || "";
     input.dataset.field = field;
+    if (field === "note") {
+      input.title = value || "";
+      input.addEventListener("input", function () { input.title = input.value; });
+    }
     td.appendChild(input);
     if (field === "tag_no") {
       var colorCls = tagNoColorClass(value);
@@ -629,19 +633,57 @@
 
   function buildPickupTimeCell(order) {
     const td = document.createElement("td");
-    const timeInput = document.createElement("input");
-    timeInput.className = "control table-control";
-    timeInput.type = "time";
-    timeInput.value = order.expected_pickup_time || "09:00";
-    timeInput.dataset.field = "expected_pickup_time";
-    applyLatePickupStyle(timeInput);
-    td.appendChild(timeInput);
+    const pickupDate = order.expected_pickup_date || "";
+    const pickupTime = order.expected_pickup_time || "09:00";
+
+    const input = document.createElement("input");
+    input.className = "control table-control pickup-datetime-input";
+    input.type = "text";
+    input.readOnly = true;
+    input.dataset.field = "expected_pickup_datetime";
+    input.value = pickupDate && pickupTime ? `${pickupDate} ${pickupTime}` : "";
+    td.appendChild(input);
 
     const hiddenDate = document.createElement("input");
     hiddenDate.type = "hidden";
     hiddenDate.dataset.field = "expected_pickup_date";
-    hiddenDate.value = order.expected_pickup_date || "";
+    hiddenDate.value = pickupDate;
     td.appendChild(hiddenDate);
+
+    const hiddenTime = document.createElement("input");
+    hiddenTime.type = "hidden";
+    hiddenTime.dataset.field = "expected_pickup_time";
+    hiddenTime.value = pickupTime;
+    td.appendChild(hiddenTime);
+
+    if (typeof flatpickr === "function") {
+      flatpickr(input, {
+        enableTime: true,
+        noCalendar: false,
+        dateFormat: "Y-m-d H:i",
+        altInput: true,
+        altFormat: "m/d H:i",
+        time_24hr: true,
+        defaultDate: pickupDate && pickupTime ? `${pickupDate} ${pickupTime}` : null,
+        minTime: "09:00",
+        maxTime: "21:00",
+        minuteIncrement: 30,
+        onChange: function (selectedDates) {
+          if (selectedDates.length > 0) {
+            const d = selectedDates[0];
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, "0");
+            const dd = String(d.getDate()).padStart(2, "0");
+            const hh = String(d.getHours()).padStart(2, "0");
+            const mi = String(d.getMinutes()).padStart(2, "0");
+            hiddenDate.value = `${yyyy}-${mm}-${dd}`;
+            hiddenTime.value = `${hh}:${mi}`;
+            applyLatePickupStyle(input, `${hh}:${mi}`);
+          }
+        },
+      });
+    }
+    applyLatePickupStyle(input, pickupTime);
     return td;
   }
 
@@ -703,13 +745,6 @@
     }
     actions.appendChild(paymentButton);
 
-    if (order.needs_extra_payment) {
-      const badge = document.createElement("span");
-      badge.className = "extra-payment-badge";
-      badge.textContent = "연장결제";
-      actions.appendChild(badge);
-    }
-
     if (order.is_picked_up) {
       const undoButton = document.createElement("button");
       undoButton.className = "btn btn-sm pickup-undo-btn";
@@ -727,7 +762,7 @@
     }
 
     const warehouseButton = document.createElement("button");
-    warehouseButton.className = "warehouse-btn" + (order.in_warehouse ? " is-active" : "");
+    warehouseButton.className = "btn btn-sm warehouse-btn" + (order.in_warehouse ? " is-active" : "");
     warehouseButton.type = "button";
     warehouseButton.dataset.action = "toggle-warehouse";
     warehouseButton.textContent = "창고";
@@ -737,7 +772,7 @@
 
     if (!order.is_picked_up) {
       const cancelButton = document.createElement("button");
-      cancelButton.className = "cancel-btn";
+      cancelButton.className = "btn btn-sm cancel-btn";
       cancelButton.type = "button";
       cancelButton.dataset.action = "cancel-order";
       cancelButton.textContent = "삭제";
@@ -780,17 +815,51 @@
     row.dataset.autoPrepaidAmount = String(toNonNegativeInt(order.auto_prepaid_amount));
     if (order.in_warehouse) row.classList.add("is-in-warehouse");
     if (order.payment_status === "CANCELLED" || order.is_cancelled) row.classList.add("is-cancelled");
+    if (order.is_extension) row.classList.add("is-extension");
 
     row.appendChild(buildCheckboxCell(order.order_id));
-    row.appendChild(buildInputCell(order.name, "name", "text"));
+
+    // Name cell — wrap in flex container for extension badge
+    var nameTd = buildInputCell(order.name, "name", "text");
+    if (order.is_extension) {
+      var wrap = document.createElement("div");
+      wrap.className = "name-cell-wrap";
+      var badge = document.createElement("span");
+      badge.className = "extension-badge";
+      badge.textContent = "연장";
+      wrap.appendChild(badge);
+      wrap.appendChild(nameTd.querySelector("input"));
+      nameTd.appendChild(wrap);
+    }
+    row.appendChild(nameTd);
     row.appendChild(buildInputCell(order.tag_no, "tag_no", "text"));
     var createdTd = document.createElement("td");
     createdTd.dataset.colKey = "created_time";
     createdTd.textContent = order.created_time || "";
     row.appendChild(createdTd);
+    // Luggage image icon — merge into name cell
+    if (order.luggage_image_url) {
+      var imgWrap = document.createElement("div");
+      imgWrap.className = "luggage-hover-wrap";
+      var imgIcon = document.createElement("span");
+      imgIcon.className = "luggage-icon";
+      imgIcon.textContent = "\uD83D\uDCF7";
+      imgIcon.title = "짐 사진";
+      imgWrap.appendChild(imgIcon);
+      var imgCard = document.createElement("div");
+      imgCard.className = "luggage-hover-card";
+      imgCard.setAttribute("aria-hidden", "true");
+      var img = document.createElement("img");
+      img.src = order.luggage_image_url;
+      img.alt = (order.name || "고객") + " 짐 사진";
+      img.loading = "lazy";
+      imgCard.appendChild(img);
+      imgWrap.appendChild(imgCard);
+      nameTd.appendChild(imgWrap);
+      nameTd.classList.add("luggage-cell");
+    }
     var priceTd = buildPaymentPriceCell(order); priceTd.dataset.colKey = "price"; row.appendChild(priceTd);
     var pickupTd = buildPickupTimeCell(order); pickupTd.dataset.colKey = "pickup_time"; row.appendChild(pickupTd);
-    var imgTd = buildImageLinkCell(order.luggage_image_url || "", `${order.name || "고객"} 짐 사진`); imgTd.dataset.colKey = "luggage_image"; row.appendChild(imgTd);
     var actionTd = buildPickupActionCell(order); actionTd.dataset.colKey = "pickup_action"; row.appendChild(actionTd);
     row.appendChild(buildInputCell(order.note, "note", "text"));
     var detailTd = buildDetailCell(order); detailTd.dataset.colKey = "detail"; row.appendChild(detailTd);
@@ -804,7 +873,7 @@
       lastRenderedOrders.clear();
       var emptyRow = document.createElement("tr");
       var emptyTd = document.createElement("td");
-      emptyTd.colSpan = 10;
+      emptyTd.colSpan = 9;
       emptyTd.textContent = tbodyEl.dataset.emptyText || "데이터가 없습니다.";
       emptyRow.appendChild(emptyTd);
       tbodyEl.appendChild(emptyRow);
@@ -1109,7 +1178,11 @@
         window.alert(await readErrorMessage(response));
         return;
       }
-      fetchOrders();
+      const data = await response.json();
+      const inWarehouse = data.order && data.order.in_warehouse;
+      row.classList.toggle("is-in-warehouse", !!inWarehouse);
+      const whBtn = target.closest(".warehouse-btn") || target;
+      whBtn.classList.toggle("is-active", !!inWarehouse);
       return;
     }
 

@@ -3122,19 +3122,24 @@ body.staff-site .staff-search-form .control:focus {
   box-shadow: 0 0 0 2px rgba(35, 131, 226, 0.15);
 }
 
-/* ── Status filter chips ── */
-body.staff-site .status-filter-chip span {
+/* ── Status filter chips: force flat style ── */
+body.staff-site .status-filter-buttons .status-filter-chip span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid #e5e5e5;
   background: #ffffff;
   color: #787774;
   border-radius: 4px;
-  padding: 5px 10px;
+  padding: 4px 10px;
   font-size: 12px;
   font-weight: 500;
   min-width: 0;
+  min-height: 0;
+  box-shadow: none;
 }
 
-body.staff-site .status-filter-chip input:checked + span {
+body.staff-site .status-filter-buttons .status-filter-chip input:checked + span {
   border-color: #2383e2;
   background: #e8f0fe;
   color: #2383e2;
@@ -3142,18 +3147,21 @@ body.staff-site .status-filter-chip input:checked + span {
   font-weight: 600;
 }
 
-body.staff-site .status-filter-all {
+body.staff-site .status-filter-buttons .status-filter-all {
+  display: inline-flex;
+  align-items: center;
   border: 1px solid #e5e5e5;
   background: #ffffff;
   color: #787774;
   border-radius: 4px;
-  padding: 5px 10px;
+  padding: 4px 10px;
   font-size: 12px;
   font-weight: 500;
   box-shadow: none;
+  min-height: 0;
 }
 
-body.staff-site .status-filter-all.is-active {
+body.staff-site .status-filter-buttons .status-filter-all.is-active {
   border-color: #2383e2;
   background: #e8f0fe;
   color: #2383e2;
@@ -3269,6 +3277,7 @@ body.staff-site #staff-orders-table td {
   overflow: visible;
   text-overflow: clip;
   white-space: nowrap;
+  line-height: 1.3;
 }
 
 body.staff-site #staff-orders-table th {
@@ -3279,21 +3288,25 @@ body.staff-site #staff-orders-table th {
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
-  padding: 6px 8px;
+  padding: 4px 6px;
 }
 
 body.staff-site #staff-orders-table td {
-  padding: 5px 8px;
+  padding: 3px 6px;
   border-bottom: 1px solid #efefed;
   vertical-align: middle;
-  line-height: 1.4;
 }
 
-/* name & note: allow truncation for long text */
+/* name & note: allow truncation */
 body.staff-site #staff-orders-table td[data-col-key="name"],
 body.staff-site #staff-orders-table td[data-col-key="note"] {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* action column: tight, no wrap */
+body.staff-site #staff-orders-table td[data-col-key="pickup_action"] {
+  padding: 2px 4px;
 }
 
 body.staff-site #staff-orders-table tbody tr:nth-child(even) { background: transparent; }
@@ -3310,8 +3323,10 @@ body.staff-site #staff-orders-table .table-control {
   border: 1px solid transparent;
   background: transparent;
   color: #37352f;
-  height: 26px;
-  padding: 3px 6px;
+  height: 24px;
+  min-height: 0;
+  padding: 2px 4px;
+  box-shadow: none;
 }
 
 body.staff-site #staff-orders-table .table-control:hover {
@@ -3328,15 +3343,40 @@ body.staff-site #staff-orders-table .table-control:focus {
 /* ── Flatpickr in table ── */
 body.staff-site #staff-orders-table .pickup-datetime-input,
 body.staff-site #staff-orders-table .flatpickr-input {
-  height: 26px;
+  height: 24px;
+  min-height: 0;
   font-size: 12px;
 }
 
-/* ── Created time: tabular nums ── */
+/* ── Created time ── */
 body.staff-site #staff-orders-table [data-col-key="created_time"] {
   font-variant-numeric: tabular-nums;
   color: #787774;
   font-size: 12px;
+}
+
+/* ── Price cell: compact layout ── */
+body.staff-site #staff-orders-table .price-summary-row {
+  gap: 4px;
+}
+
+body.staff-site #staff-orders-table .price-amount {
+  font-size: 12px;
+  font-weight: 600;
+  color: #37352f;
+}
+
+body.staff-site #staff-orders-table .price-config-wrap .btn-sm[data-action="toggle-price-config"] {
+  font-size: 10px;
+  height: 20px;
+  line-height: 20px;
+  color: #a5a5a3;
+  padding: 0 4px;
+}
+
+body.staff-site #staff-orders-table .price-config-wrap .btn-sm[data-action="toggle-price-config"]:hover {
+  color: #37352f;
+  background: #f0f0ef;
 }
 
 /* ── Hard reset: ALL buttons inside staff table ── */
@@ -3348,10 +3388,10 @@ body.staff-site #staff-orders-table button {
   min-height: 0;
   border-radius: 3px;
   color: #787774;
-  padding: 0 6px;
-  height: 24px;
-  line-height: 24px;
-  font-size: 12px;
+  padding: 0 5px;
+  height: 22px;
+  line-height: 22px;
+  font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -3365,7 +3405,8 @@ body.staff-site #staff-orders-table button:hover {
 }
 
 body.staff-site #staff-orders-table .inline-actions {
-  gap: 1px 2px;
+  flex-wrap: nowrap;
+  gap: 1px;
 }
 
 /* ── Payment status: dot + text ── */

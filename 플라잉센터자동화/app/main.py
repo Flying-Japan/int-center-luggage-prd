@@ -77,6 +77,7 @@ from app.services.flying_pass import (
 from app.services.order_number import build_order_id, build_tag_no
 from app.services.settings import get_app_setting, upsert_app_setting
 from app.services.pricing import calculate_prepaid_amount, calculate_price_per_day
+from app.services.extension import build_extension_order_record, generate_extension_orders
 from app.services.retention import run_retention_cleanup
 from app.services.sales import (
     build_sales_analytics,
@@ -460,12 +461,36 @@ def normalize_schedule_embed_url(raw_value: str) -> str:
 
 
 
-def serialize_staff_order(order) -> dict[str, object]:
+def get_unpaid_ext_parent_ids(db: SupabaseDB, root_ids: Optional[list[str]] = None) -> set[str]:
+    """Return set of root order_ids that have unpaid extension orders."""
+    q = db.query("orders").filter(
+        ("parent_order_id", "IS NOT NULL", None),
+        ("status", "=", "PAYMENT_PENDING"),
+    )
+    if root_ids:
+        q = q.filter(("parent_order_id", "IN", root_ids))
+    rows = q.all()
+    return {r.parent_order_id for r in rows}
+
+
+def serialize_staff_order(order, unpaid_ext_parent_ids: Optional[set[str]] = None) -> dict[str, object]:
     expected_jst = to_jst_datetime(order.expected_pickup_at)
     resolved_tier = normalize_flying_pass_tier(order.flying_pass_tier)
     _discount_rate, base_prepaid_amount = calculate_prepaid_amount(order.price_per_day, order.expected_storage_days)
     member_discount_amount = flying_pass_discount_amount(base_prepaid_amount, resolved_tier)
     auto_prepaid_amount = max(int(base_prepaid_amount) - member_discount_amount, 0)
+    parent_order_id = getattr(order, "parent_order_id", None) or ""
+    is_extension = bool(parent_order_id)
+
+    if unpaid_ext_parent_ids is not None:
+        needs_extra = order.order_id in unpaid_ext_parent_ids
+    else:
+        needs_extra = (
+            order.status == "PAID"
+            and order.expected_pickup_at is not None
+            and utc_now() > ensure_utc_datetime(order.expected_pickup_at)
+        )
+
     return {
         "order_id": order.order_id,
         "name": order.name,
@@ -494,11 +519,9 @@ def serialize_staff_order(order) -> dict[str, object]:
         "note": resolved_note(order),
         "detail_url": f"/staff/orders/{order.order_id}",
         "in_warehouse": bool(getattr(order, "in_warehouse", False)),
-        "needs_extra_payment": (
-            order.status == "PAID"
-            and order.expected_pickup_at is not None
-            and utc_now() > ensure_utc_datetime(order.expected_pickup_at)
-        ),
+        "needs_extra_payment": needs_extra,
+        "parent_order_id": parent_order_id,
+        "is_extension": is_extension,
     }
 
 
@@ -812,23 +835,36 @@ def build_cash_closing_context(
 logger = logging.getLogger("flying-center")
 
 
-def _retention_scheduler() -> None:
-    """Background thread: run retention cleanup daily at 03:00 JST."""
+def _daily_scheduler(hour: int, label: str, func) -> None:
+    """Background thread: run *func(db)* daily at *hour*:00 JST."""
     while True:
         now = datetime.now(JST)
-        next_run = now.replace(hour=3, minute=0, second=0, microsecond=0)
+        next_run = now.replace(hour=hour, minute=0, second=0, microsecond=0)
         if now >= next_run:
             next_run += timedelta(days=1)
         time.sleep((next_run - now).total_seconds())
         try:
             db = SupabaseDB(url=SUPABASE_URL, service_role_key=SUPABASE_SERVICE_ROLE_KEY)
             try:
-                result = run_retention_cleanup(db)
-                logger.info("Retention cleanup: %s", result)
+                result = func(db)
+                logger.info("%s: %s", label, result)
             finally:
                 db.close()
         except Exception:
-            logger.exception("Retention cleanup failed")
+            logger.exception("%s failed", label)
+
+
+def _extension_catchup() -> None:
+    """Run extension catch-up in background so startup is not blocked."""
+    try:
+        db = SupabaseDB(url=SUPABASE_URL, service_role_key=SUPABASE_SERVICE_ROLE_KEY)
+        try:
+            result = generate_extension_orders(db)
+            logger.info("Extension order startup catch-up: %s", result)
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("Extension order startup catch-up failed")
 
 
 @app.on_event("startup")
@@ -839,9 +875,21 @@ def on_startup() -> None:
     finally:
         db.close()
 
-    t = threading.Thread(target=_retention_scheduler, daemon=True)
-    t.start()
+    threading.Thread(target=_extension_catchup, daemon=True).start()
+
+    threading.Thread(
+        target=_daily_scheduler,
+        args=(3, "Retention cleanup", run_retention_cleanup),
+        daemon=True,
+    ).start()
     logger.info("Retention scheduler started (daily 03:00 JST)")
+
+    threading.Thread(
+        target=_daily_scheduler,
+        args=(0, "Extension order generation", generate_extension_orders),
+        daemon=True,
+    ).start()
+    logger.info("Extension order scheduler started (daily 00:00 JST)")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -2470,7 +2518,9 @@ def staff_orders_api(
         limit=500,
         show_all_picked_up=show_all_picked_up,
     )
-    return JSONResponse({"orders": [serialize_staff_order(order) for order in orders]})
+    root_ids = [o.order_id for o in orders if not getattr(o, "parent_order_id", None)]
+    unpaid_ext = get_unpaid_ext_parent_ids(db, root_ids) if root_ids else set()
+    return JSONResponse({"orders": [serialize_staff_order(order, unpaid_ext) for order in orders]})
 
 
 @app.post("/staff/api/orders/{order_id}/inline-update")
@@ -2692,6 +2742,20 @@ def staff_order_detail(
         raise HTTPException(status_code=404, detail="Order not found")
     last_modified_staff = db.get("user_profiles", "id", order.staff_id) if order.staff_id else None
 
+    # Fetch extension orders (children) if this is a root order
+    parent_id = getattr(order, "parent_order_id", None) or ""
+    extension_orders = []
+    parent_order = None
+    if not parent_id:
+        extension_orders = (
+            db.query("orders")
+            .filter(("parent_order_id", "=", order.order_id))
+            .order_by("created_at DESC")
+            .all()
+        )
+    else:
+        parent_order = db.get("orders", "order_id", parent_id)
+
     return templates.TemplateResponse(
         "staff_order_detail.html",
         {
@@ -2705,8 +2769,35 @@ def staff_order_detail(
             "actual_pickup_jst": to_jst_datetime(order.actual_pickup_at) if order.actual_pickup_at else None,
             "last_modified_staff": last_modified_staff,
             "display_flying_pass_tier": display_flying_pass_tier,
+            "parent_order_id": parent_id,
+            "parent_order": parent_order,
+            "extension_orders": extension_orders,
         },
     )
+
+
+@app.post("/staff/orders/{order_id}/create-extension")
+def staff_create_extension(
+    request: Request,
+    order_id: str,
+    db: SupabaseDB = Depends(get_db),
+) -> RedirectResponse:
+    staff = ensure_staff(request, db)
+    order = db.get("orders", "order_id", order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.status not in {"PAID", "PAYMENT_PENDING"}:
+        raise HTTPException(status_code=400, detail="결제대기/결제완료 상태만 연장할 수 있습니다.")
+
+    root_id = getattr(order, "parent_order_id", None) or order.order_id
+    record = build_extension_order_record(
+        db, order,
+        root_id=root_id,
+        note=f"수동연장 ({root_id})",
+        staff_id=staff.staff_id,
+    )
+    db.insert("orders", record)
+    return RedirectResponse(url=f"/staff/orders/{order_id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @app.post("/staff/orders/{order_id}/mark-paid")
@@ -2971,4 +3062,21 @@ def admin_run_retention(request: Request, db: SupabaseDB = Depends(get_db)) -> R
         query = urlencode({"retention_msg": retention_msg})
     except Exception:
         query = urlencode({"retention_err": "보관기간 정리 중 오류가 발생했습니다. 다시 시도해주세요."})
+    return RedirectResponse(url=f"/staff/dashboard?{query}#manual-tools", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.post("/staff/admin/extensions/run")
+def admin_run_extensions(request: Request, db: SupabaseDB = Depends(get_db)) -> RedirectResponse:
+    _ = get_current_staff(request, db, require_admin=True)
+    try:
+        result = generate_extension_orders(db)
+        created = int(result.get("created", 0) or 0)
+        skipped = int(result.get("skipped_dup", 0) or 0)
+        if created == 0 and skipped == 0:
+            ext_msg = "연장접수 생성 완료: 연장 대상 접수가 없습니다."
+        else:
+            ext_msg = f"연장접수 생성 완료: {created:,}건 생성, {skipped:,}건 중복 건너뜀"
+        query = urlencode({"retention_msg": ext_msg})
+    except Exception:
+        query = urlencode({"retention_err": "연장접수 생성 중 오류가 발생했습니다. 다시 시도해주세요."})
     return RedirectResponse(url=f"/staff/dashboard?{query}#manual-tools", status_code=status.HTTP_303_SEE_OTHER)

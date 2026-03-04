@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+{% block head_extra %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css" />
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+{% endblock %}
 {% block content %}
 <section class="hero hero-row">
   <div>
@@ -58,6 +62,16 @@
   </form>
 
   <p class="card-desc">접수 순서대로(오래된 순) 정렬됩니다.</p>
+
+  <div id="bulk-action-bar" class="bulk-action-bar">
+    <span class="bulk-action-label"><strong data-role="bulk-count">0</strong>건 선택됨</span>
+    <button class="btn btn-sm warehouse-btn" type="button" data-bulk-action="warehouse_on">창고보관</button>
+    <button class="btn btn-sm warehouse-btn" type="button" data-bulk-action="warehouse_off">창고해제</button>
+    <button class="btn btn-sm btn-primary" type="button" data-bulk-action="set_paid">결제완료</button>
+    <button class="btn btn-sm btn-secondary" type="button" data-bulk-action="set_pending">결제대기</button>
+    <button class="btn btn-sm cancel-btn" type="button" data-bulk-action="cancel">삭제(취소)</button>
+  </div>
+
   <div class="table-wrap">
     <table id="staff-orders-table">
       <colgroup>
@@ -67,7 +81,6 @@
         <col data-col-key="created_time" />
         <col data-col-key="price" />
         <col data-col-key="pickup_time" />
-        <col data-col-key="luggage_image" />
         <col data-col-key="pickup_action" />
         <col data-col-key="note" />
         <col data-col-key="detail" />
@@ -80,7 +93,6 @@
           <th data-col-key="created_time">접수 시각</th>
           <th data-col-key="price">짐보관가격/할인</th>
           <th data-col-key="pickup_time">짐 찾는 시각</th>
-          <th data-col-key="luggage_image">짐 사진</th>
           <th data-col-key="pickup_action">업무처리</th>
           <th data-col-key="note">비고</th>
           <th data-col-key="detail">상세</th>
@@ -103,18 +115,6 @@
             <div>{{ order.prepaid_amount | yen }}</div>
           </td>
           <td data-col-key="pickup_time"><input class="control table-control" type="time" value="{{ to_jst_datetime(order.expected_pickup_at).strftime('%H:%M') }}" /></td>
-          <td data-col-key="luggage_image" class="luggage-cell">
-            {% if order.luggage_image_url %}
-            <div class="luggage-hover-wrap">
-              <button class="btn btn-secondary btn-sm" type="button">보기</button>
-              <div class="luggage-hover-card" aria-hidden="true">
-                <img src="/staff/orders/{{ order.order_id }}/luggage-image" alt="{{ order.name }} 짐 사진" loading="lazy" />
-              </div>
-            </div>
-            {% else %}
-            -
-            {% endif %}
-          </td>
           <td data-col-key="pickup_action">
             <div class="inline-actions">
               <button class="btn btn-secondary btn-sm" type="button">{{ "결제완료" if order.status != "PAYMENT_PENDING" else "결제대기" }}</button>
@@ -135,14 +135,6 @@
     </table>
   </div>
 
-  <div id="bulk-action-bar" class="bulk-action-bar">
-    <span class="bulk-action-label"><strong data-role="bulk-count">0</strong>건 선택됨</span>
-    <button class="btn btn-sm warehouse-btn" type="button" data-bulk-action="warehouse_on">창고보관</button>
-    <button class="btn btn-sm warehouse-btn" type="button" data-bulk-action="warehouse_off">창고해제</button>
-    <button class="btn btn-sm btn-primary" type="button" data-bulk-action="set_paid">결제완료</button>
-    <button class="btn btn-sm btn-secondary" type="button" data-bulk-action="set_pending">결제대기</button>
-    <button class="btn btn-sm cancel-btn" type="button" data-bulk-action="cancel">삭제(취소)</button>
-  </div>
 </section>
 
 <section class="card" id="manual-tools">
@@ -212,11 +204,14 @@
     <form action="/staff/admin/retention/run" method="post" class="admin-tools">
       <button class="btn btn-secondary" type="submit">보관기간 정리 실행 (관리자)</button>
     </form>
+    <form action="/staff/admin/extensions/run" method="post" class="admin-tools">
+      <button class="btn btn-secondary" type="submit">연장접수 생성 실행 (관리자)</button>
+    </form>
     {% endif %}
   </details>
 </section>
 
-<script src="/static/staff_dashboard.js?v=20260303e"></script>
+<script src="/static/staff_dashboard.js?v=20260304m"></script>
 <script>
 (function () {
   const formEl = document.getElementById("manual-order-form");
