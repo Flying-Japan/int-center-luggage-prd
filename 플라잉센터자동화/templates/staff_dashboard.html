@@ -81,7 +81,6 @@
         <col data-col-key="created_time" />
         <col data-col-key="price" />
         <col data-col-key="pickup_time" />
-        <col data-col-key="luggage_image" />
         <col data-col-key="pickup_action" />
         <col data-col-key="note" />
         <col data-col-key="detail" />
@@ -94,7 +93,6 @@
           <th data-col-key="created_time">접수 시각</th>
           <th data-col-key="price">짐보관가격/할인</th>
           <th data-col-key="pickup_time">짐 찾는 시각</th>
-          <th data-col-key="luggage_image">짐 사진</th>
           <th data-col-key="pickup_action">업무처리</th>
           <th data-col-key="note">비고</th>
           <th data-col-key="detail">상세</th>
@@ -117,18 +115,6 @@
             <div>{{ order.prepaid_amount | yen }}</div>
           </td>
           <td data-col-key="pickup_time"><input class="control table-control" type="time" value="{{ to_jst_datetime(order.expected_pickup_at).strftime('%H:%M') }}" /></td>
-          <td data-col-key="luggage_image" class="luggage-cell">
-            {% if order.luggage_image_url %}
-            <div class="luggage-hover-wrap">
-              <button class="btn btn-secondary btn-sm" type="button">보기</button>
-              <div class="luggage-hover-card" aria-hidden="true">
-                <img src="/staff/orders/{{ order.order_id }}/luggage-image" alt="{{ order.name }} 짐 사진" loading="lazy" />
-              </div>
-            </div>
-            {% else %}
-            -
-            {% endif %}
-          </td>
           <td data-col-key="pickup_action">
             <div class="inline-actions">
               <button class="btn btn-secondary btn-sm" type="button">{{ "결제완료" if order.status != "PAYMENT_PENDING" else "결제대기" }}</button>
@@ -225,7 +211,7 @@
   </details>
 </section>
 
-<script src="/static/staff_dashboard.js?v=20260304e"></script>
+<script src="/static/staff_dashboard.js?v=20260304g"></script>
 <script>
 (function () {
   const formEl = document.getElementById("manual-order-form");

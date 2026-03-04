@@ -9,8 +9,8 @@
   const tableEl = document.getElementById("staff-orders-table");
   const tableWrapEl = tableEl ? tableEl.closest(".table-wrap") : null;
   const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP", "CANCELLED"];
-  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v13";
-  ["v2","v3","v4","v5","v6","v7","v8","v9","v10","v11","v12"].forEach(function (v) {
+  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v14";
+  ["v2","v3","v4","v5","v6","v7","v8","v9","v10","v11","v12","v13"].forEach(function (v) {
     FJ.safeStorageRemove("flying-japan-staff-col-widths-" + v);
   });
   const columnSchema = [
@@ -20,7 +20,6 @@
     { key: "created_time", min: 94, weight: 0 },
     { key: "price", min: 160, weight: 0 },
     { key: "pickup_time", min: 145, weight: 0 },
-    { key: "luggage_image", min: 60, weight: 0 },
     { key: "pickup_action", min: 190, weight: 0 },
     { key: "note", min: 140, weight: 4.5 },
     { key: "detail", min: 52, weight: 0 },
@@ -746,13 +745,6 @@
     }
     actions.appendChild(paymentButton);
 
-    if (order.needs_extra_payment) {
-      const badge = document.createElement("span");
-      badge.className = "extra-payment-badge";
-      badge.textContent = "연장결제";
-      actions.appendChild(badge);
-    }
-
     if (order.is_picked_up) {
       const undoButton = document.createElement("button");
       undoButton.className = "btn btn-sm pickup-undo-btn";
@@ -845,9 +837,29 @@
     createdTd.dataset.colKey = "created_time";
     createdTd.textContent = order.created_time || "";
     row.appendChild(createdTd);
+    // Luggage image icon — merge into name cell
+    if (order.luggage_image_url) {
+      var imgWrap = document.createElement("div");
+      imgWrap.className = "luggage-hover-wrap";
+      var imgIcon = document.createElement("span");
+      imgIcon.className = "luggage-icon";
+      imgIcon.textContent = "\uD83D\uDCF7";
+      imgIcon.title = "짐 사진";
+      imgWrap.appendChild(imgIcon);
+      var imgCard = document.createElement("div");
+      imgCard.className = "luggage-hover-card";
+      imgCard.setAttribute("aria-hidden", "true");
+      var img = document.createElement("img");
+      img.src = order.luggage_image_url;
+      img.alt = (order.name || "고객") + " 짐 사진";
+      img.loading = "lazy";
+      imgCard.appendChild(img);
+      imgWrap.appendChild(imgCard);
+      nameTd.appendChild(imgWrap);
+      nameTd.classList.add("luggage-cell");
+    }
     var priceTd = buildPaymentPriceCell(order); priceTd.dataset.colKey = "price"; row.appendChild(priceTd);
     var pickupTd = buildPickupTimeCell(order); pickupTd.dataset.colKey = "pickup_time"; row.appendChild(pickupTd);
-    var imgTd = buildImageLinkCell(order.luggage_image_url || "", `${order.name || "고객"} 짐 사진`); imgTd.dataset.colKey = "luggage_image"; row.appendChild(imgTd);
     var actionTd = buildPickupActionCell(order); actionTd.dataset.colKey = "pickup_action"; row.appendChild(actionTd);
     row.appendChild(buildInputCell(order.note, "note", "text"));
     var detailTd = buildDetailCell(order); detailTd.dataset.colKey = "detail"; row.appendChild(detailTd);
@@ -861,7 +873,7 @@
       lastRenderedOrders.clear();
       var emptyRow = document.createElement("tr");
       var emptyTd = document.createElement("td");
-      emptyTd.colSpan = 10;
+      emptyTd.colSpan = 9;
       emptyTd.textContent = tbodyEl.dataset.emptyText || "데이터가 없습니다.";
       emptyRow.appendChild(emptyTd);
       tbodyEl.appendChild(emptyRow);

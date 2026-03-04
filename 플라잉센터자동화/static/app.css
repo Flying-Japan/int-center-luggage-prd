@@ -1578,6 +1578,46 @@ tbody tr:hover {
   transform: none;
 }
 
+/* hover-reveal: 요금설정 toggle */
+#staff-orders-table .price-config-wrap > .btn {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+#staff-orders-table tbody tr:hover .price-config-wrap > .btn,
+#staff-orders-table .price-config-wrap.is-open > .btn {
+  opacity: 1;
+}
+
+/* hover-reveal: 창고 button (keep visible when active) */
+#staff-orders-table .warehouse-btn:not(.is-active) {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+#staff-orders-table tbody tr:hover .warehouse-btn {
+  opacity: 1;
+}
+
+/* luggage photo icon in name cell */
+.luggage-icon {
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.5;
+  transition: opacity 0.12s;
+}
+.luggage-icon:hover {
+  opacity: 1;
+}
+td[data-col-key="name"] {
+  position: relative;
+}
+td[data-col-key="name"] .luggage-hover-wrap {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
 /* ── Warehouse highlight ── */
 /* slate-blue tint: associates with the button's active fill, not green */
 #staff-orders-table tbody tr.is-in-warehouse {
