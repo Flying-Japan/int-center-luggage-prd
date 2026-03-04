@@ -9,8 +9,8 @@
   const tableEl = document.getElementById("staff-orders-table");
   const tableWrapEl = tableEl ? tableEl.closest(".table-wrap") : null;
   const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP", "CANCELLED"];
-  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v18";
-  ["v2","v3","v4","v5","v6","v7","v8","v9","v10","v11","v12","v13","v14","v15","v16","v17"].forEach(function (v) {
+  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v19";
+  ["v2","v3","v4","v5","v6","v7","v8","v9","v10","v11","v12","v13","v14","v15","v16","v17","v18"].forEach(function (v) {
     FJ.safeStorageRemove("flying-japan-staff-col-widths-" + v);
   });
   const columnSchema = [

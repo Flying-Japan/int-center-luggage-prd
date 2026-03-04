@@ -2892,6 +2892,662 @@ code {
   color: #284672;
 }
 
+/* ═══════════════════════════════════════════════════
+   NOTION-STYLE STAFF SITE OVERRIDES
+   ═══════════════════════════════════════════════════ */
+
+body.staff-site {
+  --text: #37352f;
+  --subtext: #787774;
+  --muted: #a5a5a3;
+  --line: #e5e5e5;
+  --line-strong: #d4d4d4;
+  --primary: #2383e2;
+  --primary-strong: #1b6ec2;
+  --primary-soft: #e8f0fe;
+  --surface: #ffffff;
+  --surface-soft: #f7f7f5;
+  --bg: #ffffff;
+  --bg-deep: #ffffff;
+
+  background: #ffffff;
+  color: #37352f;
+  font-size: 13px;
+}
+
+body.staff-site::before { display: none; }
+body.staff-site .bg-orb { display: none; }
+
+/* ── Topbar ── */
+body.staff-site .topbar {
+  background: #ffffff;
+  border-bottom: 1px solid #e5e5e5;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+body.staff-site .topbar-inner { padding: 8px 24px; }
+
+body.staff-site .brand {
+  font-size: 14px;
+  font-weight: 600;
+  color: #37352f;
+  letter-spacing: 0;
+}
+
+body.staff-site .brand-logo { width: 24px; height: 24px; }
+
+body.staff-site .pill-nav {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  gap: 2px;
+}
+
+body.staff-site .pill-link {
+  color: #787774;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+
+body.staff-site .pill-link:hover {
+  background: #f7f7f5;
+  color: #37352f;
+}
+
+body.staff-site .pill-link-strong {
+  background: #f0f0ef;
+  color: #37352f;
+  font-weight: 600;
+}
+
+body.staff-site .pill-link-strong:hover {
+  background: #e8e8e6;
+  color: #37352f;
+}
+
+body.staff-site .pill-user {
+  color: #787774;
+  font-size: 12px;
+  border-left-color: #e5e5e5;
+}
+
+/* ── Layout ── */
+body.staff-site .container {
+  gap: 0;
+  margin: 0 auto;
+  padding: 0;
+}
+
+/* ── Hero → flat page title ── */
+body.staff-site .hero {
+  padding: 20px 24px 4px;
+  animation: none;
+}
+
+body.staff-site .hero-kicker { display: none; }
+
+body.staff-site .hero-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #37352f;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+body.staff-site .hero-desc {
+  font-size: 12px;
+  color: #a5a5a3;
+  margin: 2px 0 0;
+}
+
+body.staff-site .hero-row .btn-secondary {
+  font-size: 12px;
+  min-height: 28px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  background: transparent;
+  color: #787774;
+  border: 1px solid #e5e5e5;
+  box-shadow: none;
+}
+
+body.staff-site .hero-row .btn-secondary:hover {
+  background: #f7f7f5;
+  color: #37352f;
+}
+
+/* ── Staff menu ── */
+body.staff-site .staff-menu {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 4px 24px 8px;
+  gap: 2px;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+body.staff-site .staff-menu-link {
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #787774;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 10px;
+  box-shadow: none;
+}
+
+body.staff-site .staff-menu-link:hover {
+  background: #f7f7f5;
+  color: #37352f;
+}
+
+body.staff-site .staff-menu-link.is-active {
+  background: #f0f0ef;
+  color: #37352f;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+/* ── Cards → flat sections ── */
+body.staff-site .card {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 16px 24px;
+  animation: none;
+}
+
+body.staff-site .card:hover {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+body.staff-site .card-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a5a5a3;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+body.staff-site .card-desc {
+  font-size: 12px;
+  color: #a5a5a3;
+  margin-top: 4px;
+}
+
+/* ── Search form ── */
+body.staff-site .staff-search-form {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+body.staff-site .staff-search-form .field-label {
+  color: #787774;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+body.staff-site .staff-search-form .control {
+  border: 1px solid #e5e5e5;
+  background: #ffffff;
+  font-weight: 400;
+  color: #37352f;
+  border-radius: 4px;
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 13px;
+  box-shadow: none;
+}
+
+body.staff-site .staff-search-form .control::placeholder {
+  color: #c4c4c2;
+  font-weight: 400;
+}
+
+body.staff-site .staff-search-form .control:focus {
+  border-color: #2383e2;
+  box-shadow: 0 0 0 2px rgba(35, 131, 226, 0.15);
+}
+
+/* ── Status filter chips ── */
+body.staff-site .status-filter-chip span {
+  border: 1px solid #e5e5e5;
+  background: #ffffff;
+  color: #787774;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  min-width: 0;
+}
+
+body.staff-site .status-filter-chip input:checked + span {
+  border-color: #2383e2;
+  background: #e8f0fe;
+  color: #2383e2;
+  box-shadow: none;
+  font-weight: 600;
+}
+
+body.staff-site .status-filter-all {
+  border: 1px solid #e5e5e5;
+  background: #ffffff;
+  color: #787774;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+body.staff-site .status-filter-all.is-active {
+  border-color: #2383e2;
+  background: #e8f0fe;
+  color: #2383e2;
+  box-shadow: none;
+}
+
+/* ── Check row ── */
+body.staff-site .check-row {
+  color: #787774;
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+/* ── Buttons ── */
+body.staff-site .btn,
+body.staff-site button {
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  min-height: 32px;
+  padding: 6px 12px;
+  letter-spacing: 0;
+  transition: background 0.1s;
+}
+
+body.staff-site .btn:hover,
+body.staff-site button:hover {
+  transform: none;
+  filter: none;
+}
+
+body.staff-site .btn:active,
+body.staff-site button:active {
+  transform: none;
+}
+
+body.staff-site .btn-primary {
+  background: #2383e2;
+  color: #ffffff;
+  border: none;
+  box-shadow: none;
+  font-weight: 500;
+}
+
+body.staff-site .btn-primary:hover {
+  background: #1b6ec2;
+}
+
+body.staff-site .btn-secondary {
+  background: #ffffff;
+  color: #37352f;
+  border: 1px solid #e5e5e5;
+  box-shadow: none;
+}
+
+body.staff-site .btn-secondary:hover {
+  background: #f7f7f5;
+}
+
+body.staff-site .btn-sm {
+  border-radius: 4px;
+}
+
+/* ── Table wrap ── */
+body.staff-site .table-wrap {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  margin-top: 8px;
+  border-top: 1px solid #e5e5e5;
+}
+
+/* ── Table base ── */
+body.staff-site table { background: #ffffff; }
+
+body.staff-site th,
+body.staff-site td {
+  border-bottom: 1px solid #efefed;
+  font-size: 13px;
+}
+
+body.staff-site th {
+  background: #ffffff;
+  color: #a5a5a3;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+body.staff-site tbody tr:nth-child(even) { background: transparent; }
+body.staff-site tbody tr:hover { background: #f7f7f5; }
+
+/* ── Staff orders table specifics ── */
+body.staff-site #staff-orders-table th {
+  background: #ffffff;
+  border-bottom: 1px solid #e5e5e5;
+  color: #a5a5a3;
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 8px;
+}
+
+body.staff-site #staff-orders-table th,
+body.staff-site #staff-orders-table td {
+  border-bottom: 1px solid #efefed;
+}
+
+body.staff-site #staff-orders-table tbody tr:nth-child(even) { background: transparent; }
+
+body.staff-site #staff-orders-table tbody tr:hover {
+  background: #f7f7f5;
+  box-shadow: none;
+}
+
+/* ── Table inputs ── */
+body.staff-site #staff-orders-table .table-control {
+  font-size: 13px;
+  border-radius: 4px;
+  color: #37352f;
+}
+
+body.staff-site #staff-orders-table .table-control:hover {
+  border-color: #d4d4d4;
+}
+
+body.staff-site #staff-orders-table .table-control:focus {
+  border-color: #2383e2;
+  box-shadow: 0 0 0 2px rgba(35, 131, 226, 0.12);
+}
+
+/* ── Table action buttons ── */
+body.staff-site #staff-orders-table .btn-sm {
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  height: 24px;
+  line-height: 24px;
+}
+
+/* ── Payment status: dot + text ── */
+body.staff-site .payment-state-btn {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  font-size: 11px;
+  gap: 5px;
+  padding: 0 8px;
+}
+
+body.staff-site .payment-state-btn::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+body.staff-site .payment-state-btn.is-paid {
+  background: transparent;
+  border-color: transparent;
+  color: #4dab9a;
+  font-weight: 500;
+}
+
+body.staff-site .payment-state-btn.is-paid::before { background: #4dab9a; }
+
+body.staff-site .payment-state-btn.is-pending {
+  background: transparent;
+  border-color: transparent;
+  color: #cb912f;
+  font-weight: 600;
+}
+
+body.staff-site .payment-state-btn.is-pending::before { background: #cb912f; }
+
+body.staff-site .payment-state-btn.is-disabled { opacity: 0.5; }
+
+/* ── Pickup button ── */
+body.staff-site .pickup-complete-btn {
+  background: #2383e2;
+  color: #fff;
+  border-color: #2383e2;
+  font-weight: 500;
+}
+
+body.staff-site .pickup-complete-btn:hover { background: #1b6ec2; }
+
+body.staff-site .pickup-undo-btn {
+  background: transparent;
+  color: #787774;
+  border-color: #e5e5e5;
+}
+
+/* ── Warehouse ── */
+body.staff-site .warehouse-btn {
+  border-color: #e5e5e5;
+  background: transparent;
+  color: #787774;
+}
+
+body.staff-site .warehouse-btn.is-active {
+  background: #37352f;
+  color: #fff;
+  border-color: #37352f;
+}
+
+/* ── Cancel ── */
+body.staff-site #staff-orders-table tbody tr:hover .cancel-btn { color: #e03e3e; }
+
+body.staff-site .cancel-btn:hover {
+  background: #fce8e8;
+  border-color: transparent;
+  color: #e03e3e;
+}
+
+/* ── Warehouse row ── */
+body.staff-site #staff-orders-table tbody tr.is-in-warehouse {
+  background: #f7f7f5;
+  border-left: 3px solid #787774;
+}
+
+body.staff-site #staff-orders-table tbody tr.is-in-warehouse:nth-child(even) { background: #f7f7f5; }
+body.staff-site #staff-orders-table tbody tr.is-in-warehouse:hover { background: #efefed; }
+
+/* ── Extension row ── */
+body.staff-site #staff-orders-table tbody tr.is-extension {
+  border-left-color: #a78bfa;
+  background: rgba(167, 139, 250, 0.04);
+}
+
+body.staff-site .extension-badge {
+  background: #a78bfa;
+  border-radius: 3px;
+  font-size: 9px;
+  padding: 1px 4px;
+}
+
+/* ── Price cell ── */
+body.staff-site .price-amount {
+  color: #37352f;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+body.staff-site .price-hover-card {
+  border: 1px solid #e5e5e5;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+body.staff-site .price-hover-title { color: #37352f; font-size: 11px; }
+
+body.staff-site .price-hover-line strong { color: #787774; }
+body.staff-site .price-hover-line span { color: #37352f; }
+
+body.staff-site .price-config-popover {
+  border: 1px solid #e5e5e5;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+body.staff-site .price-config-title { color: #37352f; font-size: 11px; }
+
+/* ── Bulk action bar ── */
+body.staff-site .bulk-action-bar {
+  border-radius: 0;
+  background: #37352f;
+  padding: 8px 24px;
+  box-shadow: none;
+  animation: none;
+  margin-bottom: 0;
+}
+
+body.staff-site .bulk-action-bar .btn-sm {
+  border-radius: 4px;
+  height: 26px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+body.staff-site .bulk-action-bar .btn-primary {
+  background: #4dab9a;
+  border-color: #4dab9a;
+}
+
+body.staff-site .bulk-action-bar .cancel-btn {
+  background: #e03e3e;
+  border-color: #e03e3e;
+}
+
+body.staff-site .bulk-action-bar .warehouse-btn {
+  background: #787774;
+  border-color: #787774;
+  color: #fff;
+}
+
+/* ── Resize handles ── */
+body.staff-site .col-resize-handle::after {
+  background: rgba(35, 131, 226, 0.4);
+}
+
+/* ── Discount/manual section ── */
+body.staff-site .discount-details {
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+body.staff-site .discount-summary {
+  color: #37352f;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+body.staff-site .discount-summary::after {
+  background: #f0f0ef;
+  color: #787774;
+  border-radius: 4px;
+  width: 20px;
+  height: 20px;
+  font-size: 14px;
+}
+
+/* ── Controls ── */
+body.staff-site .control {
+  border: 1px solid #e5e5e5;
+  background: #ffffff;
+  border-radius: 4px;
+  box-shadow: none;
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+body.staff-site .control:focus {
+  border-color: #2383e2;
+  box-shadow: 0 0 0 2px rgba(35, 131, 226, 0.12);
+}
+
+/* ── Forms ── */
+body.staff-site form { margin-top: 12px; }
+body.staff-site .field-label { font-size: 11px; color: #787774; font-weight: 600; }
+body.staff-site .field-hint { color: #a5a5a3; font-size: 11px; }
+
+/* ── Admin tools ── */
+body.staff-site .admin-tools { margin-top: 8px; }
+
+body.staff-site .admin-tools .btn {
+  font-size: 12px;
+  min-height: 28px;
+  padding: 4px 10px;
+}
+
+/* ── Error/Success ── */
+body.staff-site .error { border-radius: 4px; font-size: 12px; }
+body.staff-site .success-note { border-radius: 4px; font-size: 12px; }
+
+/* ── Luggage hover card ── */
+body.staff-site .luggage-hover-card {
+  border: 1px solid #e5e5e5;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+body.staff-site .luggage-hover-card img { border-radius: 4px; }
+
+/* ── Manual late warning ── */
+body.staff-site .manual-late-warning { border-radius: 4px; }
+
+/* ── Checkbox styling ── */
+body.staff-site .bulk-check,
+body.staff-site #bulk-select-all {
+  accent-color: #2383e2;
+}
+
+body.staff-site .check-row input[type="checkbox"] {
+  accent-color: #2383e2;
+}
+
+/* ── Flatpickr override ── */
+body.staff-site .flatpickr-input.form-control {
+  font-size: 12px;
+  color: #37352f;
+}
+
+/* ═══════════════════════════════════════════════════
+   END NOTION-STYLE OVERRIDES
+   ═══════════════════════════════════════════════════ */
+
 @keyframes riseIn {
   from {
     opacity: 0;
@@ -3082,6 +3738,12 @@ code {
     padding: 18px;
     border-radius: 20px;
   }
+
+  body.staff-site .hero { padding: 16px 16px 4px; }
+  body.staff-site .card { padding: 12px 16px; }
+  body.staff-site .staff-menu { padding: 4px 16px 8px; }
+  body.staff-site .bulk-action-bar { padding: 8px 16px; }
+  body.staff-site .topbar-inner { padding: 8px 16px; }
 
   body.customer-site .container {
     margin: 16px auto 98px;
