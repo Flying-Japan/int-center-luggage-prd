@@ -3304,6 +3304,11 @@ body.staff-site #staff-orders-table td[data-col-key="note"] {
   text-overflow: ellipsis;
 }
 
+/* tag_no: add left gap so 📷 icon doesn't crowd it */
+body.staff-site #staff-orders-table td[data-col-key="tag_no"] {
+  padding-left: 10px;
+}
+
 /* action column: tight, no wrap */
 body.staff-site #staff-orders-table td[data-col-key="pickup_action"] {
   padding: 2px 4px;
