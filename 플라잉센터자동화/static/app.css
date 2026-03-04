@@ -3190,7 +3190,20 @@ body.staff-site button:active {
   transform: none;
 }
 
-body.staff-site .btn-primary {
+/* Reset: original CSS gives ALL <button> gradient bg — neutralize */
+body.staff-site button {
+  background: #ffffff;
+  color: #37352f;
+  border: 1px solid #e5e5e5;
+  box-shadow: none;
+}
+
+body.staff-site button:hover {
+  background: #f7f7f5;
+}
+
+body.staff-site .btn-primary,
+body.staff-site button[type="submit"] {
   background: #2383e2;
   color: #ffffff;
   border: none;
@@ -3198,8 +3211,10 @@ body.staff-site .btn-primary {
   font-weight: 500;
 }
 
-body.staff-site .btn-primary:hover {
+body.staff-site .btn-primary:hover,
+body.staff-site button[type="submit"]:hover {
   background: #1b6ec2;
+  color: #ffffff;
 }
 
 body.staff-site .btn-secondary {
@@ -3324,27 +3339,33 @@ body.staff-site #staff-orders-table [data-col-key="created_time"] {
   font-size: 12px;
 }
 
-/* ── Table action buttons: text-only Notion style ── */
-body.staff-site #staff-orders-table .inline-actions {
-  gap: 1px 2px;
-}
-
-body.staff-site #staff-orders-table .btn-sm {
-  border: none;
-  border-radius: 3px;
+/* ── Hard reset: ALL buttons inside staff table ── */
+body.staff-site #staff-orders-table .btn,
+body.staff-site #staff-orders-table button {
   background: transparent;
-  font-size: 12px;
-  font-weight: 500;
+  border: none;
+  box-shadow: none;
+  min-height: 0;
+  border-radius: 3px;
+  color: #787774;
+  padding: 0 6px;
   height: 24px;
   line-height: 24px;
-  padding: 0 6px;
-  color: #787774;
-  box-shadow: none;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
-body.staff-site #staff-orders-table .btn-sm:hover {
+body.staff-site #staff-orders-table .btn:hover,
+body.staff-site #staff-orders-table button:hover {
   background: #f0f0ef;
   color: #37352f;
+  transform: none;
+  filter: none;
+}
+
+body.staff-site #staff-orders-table .inline-actions {
+  gap: 1px 2px;
 }
 
 /* ── Payment status: dot + text ── */
