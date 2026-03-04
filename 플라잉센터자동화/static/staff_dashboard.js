@@ -9,21 +9,21 @@
   const tableEl = document.getElementById("staff-orders-table");
   const tableWrapEl = tableEl ? tableEl.closest(".table-wrap") : null;
   const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP", "CANCELLED"];
-  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v10";
-  ["v2","v3","v4","v5","v6","v7","v8","v9"].forEach(function (v) {
+  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v11";
+  ["v2","v3","v4","v5","v6","v7","v8","v9","v10"].forEach(function (v) {
     FJ.safeStorageRemove("flying-japan-staff-col-widths-" + v);
   });
   const columnSchema = [
     { key: "checkbox", min: 36, weight: 0 },
-    { key: "name", min: 120, weight: 1.5 },
-    { key: "tag_no", min: 62, weight: 0 },
-    { key: "created_time", min: 105, weight: 0 },
-    { key: "price", min: 170, weight: 0 },
-    { key: "pickup_time", min: 155, weight: 0 },
-    { key: "luggage_image", min: 66, weight: 0 },
-    { key: "pickup_action", min: 220, weight: 0 },
+    { key: "name", min: 110, weight: 1.5 },
+    { key: "tag_no", min: 56, weight: 0 },
+    { key: "created_time", min: 94, weight: 0 },
+    { key: "price", min: 160, weight: 0 },
+    { key: "pickup_time", min: 145, weight: 0 },
+    { key: "luggage_image", min: 60, weight: 0 },
+    { key: "pickup_action", min: 190, weight: 0 },
     { key: "note", min: 140, weight: 4.5 },
-    { key: "detail", min: 58, weight: 0 },
+    { key: "detail", min: 52, weight: 0 },
   ];
   var _rawTiers = [];
   try { _rawTiers = JSON.parse(tbodyEl.dataset.flyingPassTiers || "[]"); } catch (_) {}
@@ -390,6 +390,10 @@
     input.type = type || "text";
     input.value = value || "";
     input.dataset.field = field;
+    if (field === "note") {
+      input.title = value || "";
+      input.addEventListener("input", function () { input.title = input.value; });
+    }
     td.appendChild(input);
     if (field === "tag_no") {
       var colorCls = tagNoColorClass(value);
@@ -823,13 +827,17 @@
 
     row.appendChild(buildCheckboxCell(order.order_id));
 
-    // Name cell — prepend extension badge if applicable
+    // Name cell — wrap in flex container for extension badge
     var nameTd = buildInputCell(order.name, "name", "text");
     if (order.is_extension) {
+      var wrap = document.createElement("div");
+      wrap.className = "name-cell-wrap";
       var badge = document.createElement("span");
       badge.className = "extension-badge";
       badge.textContent = "연장";
-      nameTd.insertBefore(badge, nameTd.firstChild);
+      wrap.appendChild(badge);
+      wrap.appendChild(nameTd.querySelector("input"));
+      nameTd.appendChild(wrap);
     }
     row.appendChild(nameTd);
     row.appendChild(buildInputCell(order.tag_no, "tag_no", "text"));
