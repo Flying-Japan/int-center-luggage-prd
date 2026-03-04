@@ -9,20 +9,20 @@
   const tableEl = document.getElementById("staff-orders-table");
   const tableWrapEl = tableEl ? tableEl.closest(".table-wrap") : null;
   const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP", "CANCELLED"];
-  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v16";
-  ["v2","v3","v4","v5","v6","v7","v8","v9","v10","v11","v12","v13","v14","v15"].forEach(function (v) {
+  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v17";
+  ["v2","v3","v4","v5","v6","v7","v8","v9","v10","v11","v12","v13","v14","v15","v16"].forEach(function (v) {
     FJ.safeStorageRemove("flying-japan-staff-col-widths-" + v);
   });
   const columnSchema = [
-    { key: "checkbox", min: 36, weight: 0 },
-    { key: "name", min: 120, weight: 1 },
-    { key: "tag_no", min: 56, weight: 0 },
-    { key: "created_time", min: 94, weight: 0 },
-    { key: "price", min: 160, weight: 0 },
-    { key: "pickup_time", min: 145, weight: 0 },
-    { key: "pickup_action", min: 190, weight: 0 },
-    { key: "note", min: 100, weight: 2 },
-    { key: "detail", min: 52, weight: 0 },
+    { key: "checkbox", min: 34, weight: 0 },   // fixed checkbox
+    { key: "name", min: 130, weight: 1.5 },     // Korean names + 📷 icon
+    { key: "tag_no", min: 48, weight: 0 },      // 1-2 digit number
+    { key: "created_time", min: 88, weight: 0 }, // "03/02 15:05"
+    { key: "price", min: 150, weight: 0 },       // "¥9,600 · 현금 요금설정"
+    { key: "pickup_time", min: 130, weight: 0 }, // datetime picker
+    { key: "pickup_action", min: 175, weight: 0 }, // 3-4 compact buttons
+    { key: "note", min: 110, weight: 3 },        // flexible, gets most extra space
+    { key: "detail", min: 44, weight: 0 },       // "상세" button
   ];
   var _rawTiers = [];
   try { _rawTiers = JSON.parse(tbodyEl.dataset.flyingPassTiers || "[]"); } catch (_) {}
