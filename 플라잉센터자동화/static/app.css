@@ -1533,12 +1533,11 @@ tbody tr:hover {
 /* ── action column: single-row flex layout ── */
 #staff-orders-table .inline-actions {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 3px;
+  gap: 2px 3px;
 }
 
-#staff-orders-table [data-col-key="pickup_action"],
 #staff-orders-table [data-col-key="pickup_time"] {
   overflow: visible;
 }
