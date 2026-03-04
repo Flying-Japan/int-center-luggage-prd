@@ -9,8 +9,8 @@
   const tableEl = document.getElementById("staff-orders-table");
   const tableWrapEl = tableEl ? tableEl.closest(".table-wrap") : null;
   const statusValues = ["PAYMENT_PENDING", "PAID", "PICKED_UP", "CANCELLED"];
-  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v14";
-  ["v2","v3","v4","v5","v6","v7","v8","v9","v10","v11","v12","v13"].forEach(function (v) {
+  const COL_WIDTH_STORAGE_KEY = "flying-japan-staff-col-widths-v15";
+  ["v2","v3","v4","v5","v6","v7","v8","v9","v10","v11","v12","v13","v14"].forEach(function (v) {
     FJ.safeStorageRemove("flying-japan-staff-col-widths-" + v);
   });
   const columnSchema = [
@@ -21,7 +21,7 @@
     { key: "price", min: 160, weight: 0 },
     { key: "pickup_time", min: 145, weight: 0 },
     { key: "pickup_action", min: 190, weight: 0 },
-    { key: "note", min: 140, weight: 4.5 },
+    { key: "note", min: 100, weight: 2 },
     { key: "detail", min: 52, weight: 0 },
   ];
   var _rawTiers = [];
