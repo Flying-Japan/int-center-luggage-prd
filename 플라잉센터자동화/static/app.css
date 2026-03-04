@@ -3249,6 +3249,13 @@ body.staff-site tbody tr:nth-child(even) { background: transparent; }
 body.staff-site tbody tr:hover { background: #f7f7f5; }
 
 /* ── Staff orders table specifics ── */
+body.staff-site #staff-orders-table th,
+body.staff-site #staff-orders-table td {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
 body.staff-site #staff-orders-table th {
   background: #fbfbfa;
   border-bottom: 1px solid #e5e5e5;
@@ -3258,7 +3265,6 @@ body.staff-site #staff-orders-table th {
   text-transform: none;
   letter-spacing: 0;
   padding: 6px 8px;
-  white-space: nowrap;
 }
 
 body.staff-site #staff-orders-table td {
@@ -3266,6 +3272,13 @@ body.staff-site #staff-orders-table td {
   border-bottom: 1px solid #efefed;
   vertical-align: middle;
   line-height: 1.4;
+}
+
+/* name & note: allow truncation for long text */
+body.staff-site #staff-orders-table td[data-col-key="name"],
+body.staff-site #staff-orders-table td[data-col-key="note"] {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 body.staff-site #staff-orders-table tbody tr:nth-child(even) { background: transparent; }
