@@ -3250,19 +3250,22 @@ body.staff-site tbody tr:hover { background: #f7f7f5; }
 
 /* ── Staff orders table specifics ── */
 body.staff-site #staff-orders-table th {
-  background: #ffffff;
+  background: #fbfbfa;
   border-bottom: 1px solid #e5e5e5;
-  color: #a5a5a3;
+  color: #787774;
   font-size: 11px;
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
-  padding: 8px;
+  padding: 6px 8px;
+  white-space: nowrap;
 }
 
-body.staff-site #staff-orders-table th,
 body.staff-site #staff-orders-table td {
+  padding: 5px 8px;
   border-bottom: 1px solid #efefed;
+  vertical-align: middle;
+  line-height: 1.4;
 }
 
 body.staff-site #staff-orders-table tbody tr:nth-child(even) { background: transparent; }
@@ -3272,105 +3275,182 @@ body.staff-site #staff-orders-table tbody tr:hover {
   box-shadow: none;
 }
 
-/* ── Table inputs ── */
+/* ── Table inputs: borderless until hover ── */
 body.staff-site #staff-orders-table .table-control {
   font-size: 13px;
-  border-radius: 4px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background: transparent;
   color: #37352f;
+  height: 26px;
+  padding: 3px 6px;
 }
 
 body.staff-site #staff-orders-table .table-control:hover {
-  border-color: #d4d4d4;
+  background: #f7f7f5;
+  border-color: #e5e5e5;
 }
 
 body.staff-site #staff-orders-table .table-control:focus {
+  background: #ffffff;
   border-color: #2383e2;
   box-shadow: 0 0 0 2px rgba(35, 131, 226, 0.12);
 }
 
-/* ── Table action buttons ── */
+/* ── Flatpickr in table ── */
+body.staff-site #staff-orders-table .pickup-datetime-input,
+body.staff-site #staff-orders-table .flatpickr-input {
+  height: 26px;
+  font-size: 12px;
+}
+
+/* ── Created time: tabular nums ── */
+body.staff-site #staff-orders-table [data-col-key="created_time"] {
+  font-variant-numeric: tabular-nums;
+  color: #787774;
+  font-size: 12px;
+}
+
+/* ── Table action buttons: text-only Notion style ── */
+body.staff-site #staff-orders-table .inline-actions {
+  gap: 1px 2px;
+}
+
 body.staff-site #staff-orders-table .btn-sm {
-  border-radius: 4px;
-  font-size: 11px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  font-size: 12px;
   font-weight: 500;
   height: 24px;
   line-height: 24px;
+  padding: 0 6px;
+  color: #787774;
+  box-shadow: none;
+}
+
+body.staff-site #staff-orders-table .btn-sm:hover {
+  background: #f0f0ef;
+  color: #37352f;
 }
 
 /* ── Payment status: dot + text ── */
 body.staff-site .payment-state-btn {
   display: inline-flex;
   align-items: center;
-  border-radius: 4px;
-  font-size: 11px;
+  border: none;
+  border-radius: 3px;
+  font-size: 12px;
   gap: 5px;
-  padding: 0 8px;
+  padding: 0 6px;
+  background: transparent;
 }
 
 body.staff-site .payment-state-btn::before {
   content: "";
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
 body.staff-site .payment-state-btn.is-paid {
   background: transparent;
-  border-color: transparent;
+  border: none;
   color: #4dab9a;
   font-weight: 500;
 }
 
+body.staff-site .payment-state-btn.is-paid:hover { background: #f0faf4; }
 body.staff-site .payment-state-btn.is-paid::before { background: #4dab9a; }
 
 body.staff-site .payment-state-btn.is-pending {
   background: transparent;
-  border-color: transparent;
+  border: none;
   color: #cb912f;
   font-weight: 600;
 }
 
+body.staff-site .payment-state-btn.is-pending:hover { background: #fef8ee; }
 body.staff-site .payment-state-btn.is-pending::before { background: #cb912f; }
 
-body.staff-site .payment-state-btn.is-disabled { opacity: 0.5; }
+body.staff-site .payment-state-btn.is-disabled { opacity: 0.45; }
 
-/* ── Pickup button ── */
+/* ── Pickup button: the ONLY filled button in the table ── */
 body.staff-site .pickup-complete-btn {
   background: #2383e2;
   color: #fff;
-  border-color: #2383e2;
+  border: none;
   font-weight: 500;
+  padding: 0 10px;
 }
 
-body.staff-site .pickup-complete-btn:hover { background: #1b6ec2; }
+body.staff-site .pickup-complete-btn:hover { background: #1b6ec2; color: #fff; }
 
 body.staff-site .pickup-undo-btn {
   background: transparent;
   color: #787774;
-  border-color: #e5e5e5;
+  border: none;
 }
 
-/* ── Warehouse ── */
-body.staff-site .warehouse-btn {
-  border-color: #e5e5e5;
+body.staff-site .pickup-undo-btn:hover { background: #f0f0ef; color: #37352f; }
+
+/* ── Warehouse: text toggle ── */
+body.staff-site #staff-orders-table .warehouse-btn {
+  border: none;
   background: transparent;
-  color: #787774;
+  color: #a5a5a3;
+  font-size: 11px;
 }
 
-body.staff-site .warehouse-btn.is-active {
+body.staff-site #staff-orders-table .warehouse-btn:hover {
+  background: #f0f0ef;
+  color: #37352f;
+}
+
+body.staff-site #staff-orders-table .warehouse-btn.is-active {
   background: #37352f;
   color: #fff;
-  border-color: #37352f;
 }
 
-/* ── Cancel ── */
+body.staff-site #staff-orders-table .warehouse-btn.is-active:hover {
+  background: #4b4b48;
+}
+
+/* ── Cancel: ghost, only visible on hover ── */
+body.staff-site #staff-orders-table .cancel-btn {
+  border: none;
+  font-size: 11px;
+}
+
 body.staff-site #staff-orders-table tbody tr:hover .cancel-btn { color: #e03e3e; }
 
-body.staff-site .cancel-btn:hover {
+body.staff-site #staff-orders-table .cancel-btn:hover {
   background: #fce8e8;
-  border-color: transparent;
+  border: none;
   color: #e03e3e;
+}
+
+/* ── Detail link: text link ── */
+body.staff-site #staff-orders-table td[data-col-key="detail"] .btn-sm {
+  color: #2383e2;
+  font-weight: 500;
+}
+
+body.staff-site #staff-orders-table td[data-col-key="detail"] .btn-sm:hover {
+  background: #e8f0fe;
+  color: #1b6ec2;
+}
+
+/* ── 요금설정 button: subtle text ── */
+body.staff-site .price-config-wrap .btn-sm[data-action="toggle-price-config"] {
+  color: #a5a5a3;
+  font-size: 11px;
+}
+
+body.staff-site .price-config-wrap .btn-sm[data-action="toggle-price-config"]:hover {
+  color: #37352f;
+  background: #f0f0ef;
 }
 
 /* ── Warehouse row ── */
