@@ -2368,14 +2368,24 @@ def admin_staff_accounts_create(
         )
 
     try:
-        db.upsert("user_profiles", {
-            "id": str(new_user.id),
-            "username": resolved_email.split("@")[0],
-            "email": resolved_email,
-            "display_name": resolved_display,
-            "role": resolved_role,
-            "is_active": True,
-        })
+        # Update the profile auto-created by the on_auth_user_created trigger
+        profile = db.get("user_profiles", "id", str(new_user.id))
+        if profile:
+            profile.username = resolved_email.split("@")[0]
+            profile.email = resolved_email
+            profile.display_name = resolved_display
+            profile.role = resolved_role
+            profile.is_active = True
+            db.update(profile)
+        else:
+            db.insert("user_profiles", {
+                "id": str(new_user.id),
+                "username": resolved_email.split("@")[0],
+                "email": resolved_email,
+                "display_name": resolved_display,
+                "role": resolved_role,
+                "is_active": True,
+            })
     except Exception as e:
         return RedirectResponse(
             url=build_staff_accounts_redirect(err=f"프로필 생성 실패: {e}"),
