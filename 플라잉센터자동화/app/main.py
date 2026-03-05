@@ -2368,9 +2368,10 @@ def admin_staff_accounts_create(
         )
 
     try:
-        db.insert("user_profiles", {
+        db.upsert("user_profiles", {
             "id": str(new_user.id),
             "username": resolved_email.split("@")[0],
+            "email": resolved_email,
             "display_name": resolved_display,
             "role": resolved_role,
             "is_active": True,

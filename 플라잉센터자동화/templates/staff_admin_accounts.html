@@ -20,17 +20,24 @@
 
   <form method="post" action="/staff/admin/staff-accounts" class="account-create-grid">
     <label class="field">
+      <span class="field-label">이름</span>
+      <input class="control" type="text" id="create-display-name" name="display_name" maxlength="100" placeholder="홍길동" required />
+    </label>
+    <label class="field">
       <span class="field-label">이메일</span>
-      <input class="control" type="email" name="email" maxlength="100" required />
+      <input class="control" type="email" id="create-email" name="email" maxlength="100" placeholder="이름 입력 시 자동 생성" required />
     </label>
     <label class="field">
       <span class="field-label">임시 비밀번호</span>
-      <input class="control" type="password" name="password" required />
+      <div style="display:flex;gap:6px">
+        <input class="control" type="text" id="create-password" name="password" style="flex:1" required />
+        <button class="btn btn-secondary" type="button" id="gen-pw-btn" style="white-space:nowrap">생성</button>
+      </div>
     </label>
     <label class="field">
       <span class="field-label">권한</span>
       <select class="control" name="is_admin" required>
-        <option value="0">직원</option>
+        <option value="0" selected>직원</option>
         <option value="1">매니저(관리자)</option>
       </select>
     </label>
@@ -128,6 +135,51 @@
       panel.classList.toggle("is-collapsed", !open);
       btn.setAttribute("aria-expanded", open ? "true" : "false");
     });
+  });
+
+  // Korean romanization
+  var INITIALS = ['g','kk','n','d','tt','r','m','b','pp','s','ss','','j','jj','ch','k','t','p','h'];
+  var MEDIALS = ['a','ae','ya','yae','eo','e','yeo','ye','o','wa','wae','oe','yo','u','wo','we','wi','yu','eu','ui','i'];
+  var FINALS = ['','k','k','ks','n','nj','nh','t','l','lk','lm','lp','ls','lt','lp','lh','m','p','ps','t','t','ng','t','t','k','t','p','h'];
+
+  function romanize(str) {
+    var result = '';
+    for (var i = 0; i < str.length; i++) {
+      var code = str.charCodeAt(i);
+      if (code >= 0xAC00 && code <= 0xD7A3) {
+        var offset = code - 0xAC00;
+        var initial = Math.floor(offset / (21 * 28));
+        var medial = Math.floor((offset % (21 * 28)) / 28);
+        var final = offset % 28;
+        result += INITIALS[initial] + MEDIALS[medial] + FINALS[final];
+      } else {
+        result += str[i];
+      }
+    }
+    return result;
+  }
+
+  var nameInput = document.getElementById('create-display-name');
+  var emailInput = document.getElementById('create-email');
+  var emailEdited = false;
+
+  emailInput.addEventListener('input', function () { emailEdited = true; });
+
+  nameInput.addEventListener('input', function () {
+    if (emailEdited) return;
+    var name = nameInput.value.trim();
+    if (name.length < 2) { emailInput.value = ''; return; }
+    var surname = romanize(name.charAt(0));
+    var given = romanize(name.slice(1));
+    emailInput.value = given + '.' + surname + '@center.local';
+  });
+
+  // Random password generator
+  document.getElementById('gen-pw-btn').addEventListener('click', function () {
+    var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    var pw = '';
+    for (var i = 0; i < 10; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+    document.getElementById('create-password').value = pw;
   });
 })();
 </script>

@@ -253,6 +253,13 @@ class SupabaseDB:
         result = self.client.table(full).insert(cleaned).execute()
         return Row(table, full, pk_col, result.data[0])
 
+    def upsert(self, table: str, data: dict) -> Row:
+        full = _full_table(table)
+        pk_col = _pk_for(full)
+        cleaned = _serialize(data)
+        result = self.client.table(full).upsert(cleaned).execute()
+        return Row(table, full, pk_col, result.data[0])
+
     def update(self, row: Row) -> None:
         dirty = object.__getattribute__(row, "_dirty")
         if not dirty:
