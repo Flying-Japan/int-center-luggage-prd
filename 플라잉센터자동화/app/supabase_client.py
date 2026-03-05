@@ -253,11 +253,12 @@ class SupabaseDB:
         result = self.client.table(full).insert(cleaned).execute()
         return Row(table, full, pk_col, result.data[0])
 
-    def upsert(self, table: str, data: dict) -> Row:
+    def upsert(self, table: str, data: dict, on_conflict: str = "") -> Row:
         full = _full_table(table)
         pk_col = _pk_for(full)
         cleaned = _serialize(data)
-        result = self.client.table(full).upsert(cleaned).execute()
+        conflict_col = on_conflict or pk_col
+        result = self.client.table(full).upsert(cleaned, on_conflict=conflict_col).execute()
         return Row(table, full, pk_col, result.data[0])
 
     def update(self, row: Row) -> None:
