@@ -2331,6 +2331,30 @@ def admin_staff_accounts_page(
     except Exception:
         pass
 
+    # Fetch audit dates from activity_logs for display
+    deleted_at: dict[str, str] = {}
+    last_role_change: dict[str, str] = {}
+    try:
+        audit_logs = (
+            db.query("activity_logs")
+            .filter(("target_type", "=", "user"))
+            .order_by("created_at DESC")
+            .all()
+        )
+        for log in audit_logs:
+            tid = log.target_id
+            if not tid:
+                continue
+            if log.action == "account_deleted" and tid not in deleted_at:
+                deleted_at[tid] = log.created_at
+            if log.action == "account_updated" and tid not in last_role_change:
+                details = log.details or {}
+                changes = details.get("changes", {})
+                if "role" in changes:
+                    last_role_change[tid] = log.created_at
+    except Exception:
+        pass
+
     return templates.TemplateResponse(
         "staff_admin_accounts.html",
         {
@@ -2340,6 +2364,8 @@ def admin_staff_accounts_page(
             "staff_rows": staff_rows,
             "active_admin_count": active_admin_count,
             "google_user_ids": google_user_ids,
+            "deleted_at": deleted_at,
+            "last_role_change": last_role_change,
             "msg": msg.strip(),
             "err": err.strip(),
             "focus_staff_id": focus_staff_id,

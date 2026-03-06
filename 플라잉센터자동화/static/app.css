@@ -2315,6 +2315,12 @@ body.is-resizing-column * {
 .acct-pill--red { background: #fee2e2; color: #b91c1c; }
 .acct-pill--yellow { background: #fef9c3; color: #a16207; }
 
+.acct-td--date {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
 .acct-email-suffix {
   display: inline-flex;
   align-items: center;

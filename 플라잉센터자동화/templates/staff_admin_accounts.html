@@ -62,10 +62,12 @@
   <table class="acct-tbl">
     <thead>
       <tr>
-        <th class="acct-th" style="width:40%">이름</th>
+        <th class="acct-th" style="width:28%">이름</th>
         <th class="acct-th">권한</th>
         <th class="acct-th">상태</th>
         <th class="acct-th">로그인</th>
+        <th class="acct-th">생성일</th>
+        <th class="acct-th">권한변경</th>
         <th class="acct-th acct-th--right"></th>
       </tr>
     </thead>
@@ -95,6 +97,12 @@
         <td class="acct-td">
           {% if row.id in google_user_ids %}<span class="acct-pill acct-pill--yellow">Google</span>{% else %}<span class="acct-pill acct-pill--gray">로컬</span>{% endif %}
         </td>
+        <td class="acct-td acct-td--date">
+          {% if row.created_at %}{{ to_jst_datetime(row.created_at).strftime('%Y-%m-%d') }}{% else %}-{% endif %}
+        </td>
+        <td class="acct-td acct-td--date">
+          {% if row.id in last_role_change %}{{ to_jst_datetime(last_role_change[row.id]).strftime('%Y-%m-%d') }}{% else %}-{% endif %}
+        </td>
         <td class="acct-td acct-td--right">
           <div class="acct-menu-wrap">
             <button class="acct-menu-btn" type="button" aria-label="메뉴">⋯</button>
@@ -112,7 +120,7 @@
         </td>
       </tr>
       <tr class="acct-panel-row">
-        <td colspan="5" style="padding:0;border:none">
+        <td colspan="7" style="padding:0;border:none">
           <div id="acct-panel-{{ row.id }}" class="acct-edit-panel {% if not is_open %}is-collapsed{% endif %}">
             <div class="acct-meta" style="margin-bottom:8px;font-size:11px;color:#94a3b8;display:flex;gap:16px;flex-wrap:wrap">
               {% if row.created_at %}<span>생성: {{ to_jst_datetime(row.created_at).strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
@@ -146,7 +154,7 @@
 
       {% if inactive_rows %}
       <tr class="acct-divider-row">
-        <td colspan="5">
+        <td colspan="7">
           <div class="acct-divider">
             <span class="acct-divider-label">잠금 계정 ({{ inactive_rows|length }})</span>
           </div>
