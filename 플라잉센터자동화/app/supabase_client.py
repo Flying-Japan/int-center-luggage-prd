@@ -117,6 +117,7 @@ class SupabaseQuery:
         self._conditions: list = []  # list of (col, op, val) OR [list of (col,op,val)] for OR groups
         self._order_cols: list[str] = []
         self._limit_val: Optional[int] = None
+        self._offset_val: Optional[int] = None
 
     def filter(self, *conditions: tuple) -> "SupabaseQuery":
         """AND conditions: filter(("col", "=", val), ("col2", "IN", [1,2]))"""
@@ -135,6 +136,10 @@ class SupabaseQuery:
 
     def limit(self, n: int) -> "SupabaseQuery":
         self._limit_val = n
+        return self
+
+    def offset(self, n: int) -> "SupabaseQuery":
+        self._offset_val = n
         return self
 
     def _apply(self, q):
@@ -193,7 +198,11 @@ class SupabaseQuery:
             desc = len(parts) > 1 and parts[1].upper() == "DESC"
             q = q.order(col, desc=desc)
 
-        if self._limit_val is not None:
+        if self._offset_val is not None and self._limit_val is not None:
+            q = q.range(self._offset_val, self._offset_val + self._limit_val - 1)
+        elif self._offset_val is not None:
+            q = q.range(self._offset_val, self._offset_val + 999)
+        elif self._limit_val is not None:
             q = q.limit(self._limit_val)
 
         return q
