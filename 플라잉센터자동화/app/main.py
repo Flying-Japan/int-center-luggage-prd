@@ -225,6 +225,7 @@ ADMIN_MENU_ITEMS = (
     ("admin_sales", "매출", "/staff/admin/sales"),
     ("completion_message", "완료문구", "/staff/admin/completion-message"),
     ("staff_accounts", "계정관리", "/staff/admin/staff-accounts"),
+    ("activity_logs", "활동로그", "/staff/admin/activity-logs"),
 )
 SCHEDULE_GOOGLE_EMBED_URL_KEY = "schedule_google_embed_url"
 SCHEDULE_FEATURE_ENABLED_KEY = "schedule_feature_enabled"
@@ -388,6 +389,25 @@ def build_admin_sales_redirect(
     if edit_rental_id:
         query["edit_rental_id"] = str(edit_rental_id)
     return f"/staff/admin/sales?{urlencode(query)}"
+
+
+def log_activity(
+    db: SupabaseDB,
+    actor,
+    action: str,
+    target_type: str,
+    target_id: str | None = None,
+    details: dict | None = None,
+) -> None:
+    """Insert a row into activity_logs for ISO 27001 audit trail."""
+    db.insert("activity_logs", {
+        "user_id": str(actor.id),
+        "user_name": actor.display_name or actor.username,
+        "action": action,
+        "target_type": target_type,
+        "target_id": target_id,
+        "details": details,
+    })
 
 
 def build_staff_accounts_redirect(
@@ -2337,8 +2357,9 @@ def admin_staff_accounts_create(
     is_admin: str = Form("0"),
     db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
-    _ = get_current_staff(request, db, require_admin=True)
-    resolved_email = email.strip()
+    actor = get_current_staff(request, db, require_admin=True)
+    raw_email = email.strip()
+    resolved_email = raw_email if "@" in raw_email else f"{raw_email}@center.local"
     resolved_display = display_name.strip() or resolved_email.split("@")[0]
     resolved_role = "admin" if is_admin in {"1", "on", "true", "yes"} else "editor"
 
@@ -2391,6 +2412,12 @@ def admin_staff_accounts_create(
             url=build_staff_accounts_redirect(err=f"프로필 생성 실패: {e}"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
+
+    log_activity(db, actor, "account_created", "user", str(new_user.id), {
+        "email": resolved_email,
+        "display_name": resolved_display,
+        "role": resolved_role,
+    })
 
     return RedirectResponse(
         url=build_staff_accounts_redirect(msg=f"{resolved_email} 계정을 생성했습니다."),
@@ -2448,10 +2475,28 @@ def admin_staff_accounts_update(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
+    changes = {}
+    if row.display_name != resolved_display:
+        changes["display_name"] = {"from": row.display_name, "to": resolved_display}
+    if row.role != resolved_role:
+        changes["role"] = {"from": row.role, "to": resolved_role}
+    if row.is_active != resolved_active:
+        changes["is_active"] = {"from": row.is_active, "to": resolved_active}
+
     row.display_name = resolved_display
     row.role = resolved_role
     row.is_active = resolved_active
     db.update(row)
+
+    if changes:
+        action = "account_deactivated" if "is_active" in changes and not resolved_active else \
+                 "account_reactivated" if "is_active" in changes and resolved_active else \
+                 "account_updated"
+        log_activity(db, actor, action, "user", str(row.id), {
+            "target_name": resolved_display,
+            "changes": changes,
+        })
+
     return RedirectResponse(
         url=build_staff_accounts_redirect(
             msg=f"{resolved_display} 계정을 수정했습니다.",
@@ -2502,6 +2547,12 @@ def admin_staff_accounts_toggle_active(
 
     row.is_active = target_active
     db.update(row)
+
+    action = "account_reactivated" if target_active else "account_deactivated"
+    log_activity(db, actor, action, "user", str(row.id), {
+        "target_name": row.display_name or row.username,
+    })
+
     state_label = "복구" if target_active else "잠금"
     return RedirectResponse(
         url=build_staff_accounts_redirect(
@@ -2509,6 +2560,113 @@ def admin_staff_accounts_toggle_active(
             focus_staff_id=str(row.id),
         ),
         status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/staff/admin/staff-accounts/{target_staff_id}/delete")
+def admin_staff_accounts_delete(
+    request: Request,
+    target_staff_id: str,
+    db: SupabaseDB = Depends(get_db),
+) -> RedirectResponse:
+    actor = get_current_staff(request, db, require_admin=True)
+    row = db.get("user_profiles", "id", target_staff_id)
+    if row is None:
+        return RedirectResponse(
+            url=build_staff_accounts_redirect(err="대상 계정을 찾을 수 없습니다."),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    if str(row.id) == str(actor.id):
+        return RedirectResponse(
+            url=build_staff_accounts_redirect(
+                err="현재 로그인한 본인 계정은 삭제할 수 없습니다.",
+                focus_staff_id=str(row.id),
+            ),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    if row.role == "admin" and row.is_active:
+        active_admin_count = (
+            db.query("user_profiles")
+            .filter(("role", "=", "admin"), ("is_active", "=", True))
+            .count()
+        )
+        if active_admin_count <= 1:
+            return RedirectResponse(
+                url=build_staff_accounts_redirect(
+                    err="최소 1명의 활성 관리자 계정은 유지되어야 합니다.",
+                    focus_staff_id=str(row.id),
+                ),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
+    display = row.display_name or row.username
+
+    try:
+        admin_client = supabase.create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        admin_client.auth.admin.delete_user(str(row.id))
+    except Exception as e:
+        return RedirectResponse(
+            url=build_staff_accounts_redirect(err=f"인증 계정 삭제 실패: {e}"),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    db.delete_row("user_profiles", "id", str(row.id))
+
+    log_activity(db, actor, "account_deleted", "user", str(row.id), {
+        "target_name": display,
+        "target_email": row.username,
+        "target_role": row.role,
+    })
+
+    return RedirectResponse(
+        url=build_staff_accounts_redirect(msg=f"{display} 계정을 삭제했습니다."),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+ACTIVITY_ACTION_LABELS: dict[str, str] = {
+    "account_created": "계정 생성",
+    "account_updated": "계정 수정",
+    "account_deactivated": "계정 비활성화",
+    "account_reactivated": "계정 복구",
+    "account_deleted": "계정 삭제",
+}
+
+
+@app.get("/staff/admin/activity-logs", response_class=HTMLResponse)
+def admin_activity_logs_page(
+    request: Request,
+    page: int = 1,
+    db: SupabaseDB = Depends(get_db),
+) -> HTMLResponse:
+    staff = get_current_staff(request, db, require_admin=True)
+    per_page = 50
+    offset = (max(1, page) - 1) * per_page
+
+    logs = (
+        db.query("activity_logs")
+        .order_by("created_at DESC")
+        .limit(per_page + 1)
+        .offset(offset)
+        .all()
+    )
+    has_next = len(logs) > per_page
+    logs = logs[:per_page]
+
+    return templates.TemplateResponse(
+        "staff_admin_activity_logs.html",
+        {
+            "request": request,
+            "staff": staff,
+            "staff_menu_items": build_staff_menu(db, "activity_logs", staff.is_admin),
+            "logs": logs,
+            "page": page,
+            "has_next": has_next,
+            "action_labels": ACTIVITY_ACTION_LABELS,
+            "to_jst_datetime": to_jst_datetime,
+        },
     )
 
 

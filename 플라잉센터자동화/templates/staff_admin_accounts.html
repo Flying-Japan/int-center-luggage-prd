@@ -25,7 +25,10 @@
     </label>
     <label class="field">
       <span class="field-label">이메일</span>
-      <input class="control" type="email" id="create-email" name="email" maxlength="100" placeholder="이름 입력 시 자동 생성" required />
+      <div style="display:flex;align-items:center;gap:0">
+        <input class="control" type="text" id="create-email" name="email" maxlength="100" placeholder="이름 입력 시 자동 생성" style="border-radius:6px 0 0 6px;border-right:none" required />
+        <span class="acct-email-suffix">@center.local</span>
+      </div>
     </label>
     <label class="field">
       <span class="field-label">임시 비밀번호</span>
@@ -90,7 +93,7 @@
           </span>
         </td>
         <td class="acct-td">
-          {% if row.id in google_user_ids %}<span class="acct-pill acct-pill--yellow">Google</span>{% else %}<span class="acct-pill acct-pill--gray">이메일</span>{% endif %}
+          {% if row.id in google_user_ids %}<span class="acct-pill acct-pill--yellow">Google</span>{% else %}<span class="acct-pill acct-pill--gray">로컬</span>{% endif %}
         </td>
         <td class="acct-td acct-td--right">
           <div class="acct-menu-wrap">
@@ -111,6 +114,11 @@
       <tr class="acct-panel-row">
         <td colspan="5" style="padding:0;border:none">
           <div id="acct-panel-{{ row.id }}" class="acct-edit-panel {% if not is_open %}is-collapsed{% endif %}">
+            <div class="acct-meta" style="margin-bottom:8px;font-size:11px;color:#94a3b8;display:flex;gap:16px;flex-wrap:wrap">
+              {% if row.created_at %}<span>생성: {{ to_jst_datetime(row.created_at).strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
+              {% if row.updated_at %}<span>수정: {{ to_jst_datetime(row.updated_at).strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
+              {% if not row.is_active and row.updated_at %}<span style="color:#dc2626">비활성화: {{ to_jst_datetime(row.updated_at).strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
+            </div>
             <form method="post" action="/staff/admin/staff-accounts/{{ row.id }}/update" class="acct-edit-form" onsubmit="return window.confirm('저장할까요?');">
               <label class="field"><span class="field-label">표시 이름</span><input class="control" type="text" name="display_name" maxlength="100" value="{{ row.display_name or row.username }}" required /></label>
               <label class="field"><span class="field-label">권한</span>
@@ -223,7 +231,7 @@
     if (name.length < 2) { emailInput.value = ''; return; }
     var surname = romanize(name.charAt(0));
     var given = romanize(name.slice(1));
-    emailInput.value = given + '.' + surname + '@center.local';
+    emailInput.value = given + '.' + surname;
   });
 
   // Random password generator

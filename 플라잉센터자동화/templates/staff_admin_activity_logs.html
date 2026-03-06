@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero hero-row">
+  <div>
+    <p class="hero-kicker">Admin</p>
+    <h2 class="hero-title">활동로그</h2>
+    <p class="hero-desc">계정 관련 활동 기록 (ISO 27001)</p>
+  </div>
+</section>
+{% include "staff_menu.html" %}
+
+<section class="card">
+  <table class="acct-tbl">
+    <thead>
+      <tr>
+        <th class="acct-th" style="width:150px">일시</th>
+        <th class="acct-th">실행자</th>
+        <th class="acct-th">활동</th>
+        <th class="acct-th">대상</th>
+        <th class="acct-th">상세</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for log in logs %}
+      <tr class="acct-tr">
+        <td class="acct-td" style="white-space:nowrap;font-size:11px;color:#64748b">
+          {{ to_jst_datetime(log.created_at).strftime('%Y-%m-%d %H:%M') }}
+        </td>
+        <td class="acct-td">
+          <span class="acct-uname" style="font-size:12px">{{ log.user_name or '(시스템)' }}</span>
+        </td>
+        <td class="acct-td">
+          {% set label = action_labels.get(log.action, log.action) %}
+          {% if 'delete' in log.action %}
+            <span class="acct-pill acct-pill--red">{{ label }}</span>
+          {% elif 'deactivat' in log.action %}
+            <span class="acct-pill acct-pill--yellow">{{ label }}</span>
+          {% elif 'creat' in log.action %}
+            <span class="acct-pill acct-pill--green">{{ label }}</span>
+          {% elif 'reactivat' in log.action %}
+            <span class="acct-pill acct-pill--blue">{{ label }}</span>
+          {% else %}
+            <span class="acct-pill acct-pill--gray">{{ label }}</span>
+          {% endif %}
+        </td>
+        <td class="acct-td">
+          {% if log.details %}
+            <span style="font-size:12px">{{ log.details.get('target_name', '') or log.details.get('display_name', '') or log.details.get('email', '') }}</span>
+          {% endif %}
+        </td>
+        <td class="acct-td">
+          {% if log.details and log.details.get('changes') %}
+            {% for field, change in log.details['changes'].items() %}
+              <span style="font-size:11px;color:#64748b">{{ field }}: {{ change.get('from','') }} → {{ change.get('to','') }}</span>
+              {% if not loop.last %}<br/>{% endif %}
+            {% endfor %}
+          {% elif log.details and log.details.get('role') %}
+            <span style="font-size:11px;color:#64748b">권한: {{ log.details['role'] }}</span>
+          {% elif log.details and log.details.get('target_role') %}
+            <span style="font-size:11px;color:#64748b">권한: {{ log.details['target_role'] }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not logs %}
+      <tr><td colspan="5" class="acct-td" style="text-align:center;color:#94a3b8;padding:24px">활동 기록이 없습니다.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  <div style="display:flex;justify-content:center;gap:12px;margin-top:16px">
+    {% if page > 1 %}
+      <a class="btn btn-secondary" href="/staff/admin/activity-logs?page={{ page - 1 }}">이전</a>
+    {% endif %}
+    <span style="font-size:12px;color:#94a3b8;align-self:center">{{ page }} 페이지</span>
+    {% if has_next %}
+      <a class="btn btn-secondary" href="/staff/admin/activity-logs?page={{ page + 1 }}">다음</a>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
