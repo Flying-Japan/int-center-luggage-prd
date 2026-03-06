@@ -402,7 +402,7 @@ def build_staff_accounts_redirect(
     if err.strip():
         query["err"] = err.strip()
     if focus_staff_id is not None:
-        query["focus_staff_id"] = str(int(focus_staff_id))
+        query["focus_staff_id"] = str(focus_staff_id)
     if query:
         return f"/staff/admin/staff-accounts?{urlencode(query)}"
     return "/staff/admin/staff-accounts"
