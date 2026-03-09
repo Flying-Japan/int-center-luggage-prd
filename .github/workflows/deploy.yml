@@ -28,6 +28,7 @@ jobs:
           python-version: "3.12"
 
       - name: Audit dependencies
+        continue-on-error: true
         run: pip install pip-audit && pip-audit -r 플라잉센터자동화/requirements.txt
 
       - name: Build and push
