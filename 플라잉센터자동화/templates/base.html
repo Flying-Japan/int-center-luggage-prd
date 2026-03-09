@@ -10,6 +10,14 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
   <link rel="stylesheet" href="/static/app.css?v=20260312a" />
   <script src="/static/utils.js?v=20260302a"></script>
+  <!-- Google Analytics 4 -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-DLKGF3C7CS"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-DLKGF3C7CS');
+  </script>
   {% block head_extra %}{% endblock %}
 </head>
 {% set is_staff_site = request.url.path.startswith('/staff') %}
