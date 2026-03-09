@@ -20,8 +20,12 @@
   <header class="topbar">
     <div class="topbar-inner">
       <a class="brand" href="{{ '/staff/dashboard' if is_staff_site else '/customer' }}">
+        {% if is_staff_site %}
         <img class="brand-logo" src="/static/logo.png?v=2" alt="Flying Japan" width="40" height="40" />
-        <span>{{ 'Flying Japan Staff' if is_staff_site else (t.brand_name if t is defined and t else 'Flying Japan 짐 보관') }}</span>
+        <span>Flying Japan Staff</span>
+        {% else %}
+        <img class="brand-logo-horizontal" src="/static/logo-horizontal.png?v=1" alt="Flying Japan" height="36" />
+        {% endif %}
       </a>
       {% if is_staff_site %}
       <nav class="pill-nav">
@@ -52,5 +56,20 @@
   <main class="container">
     {% block content %}{% endblock %}
   </main>
+
+  {% if not is_staff_site and t is defined and t %}
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <img class="footer-logo" src="/static/logo-horizontal.png?v=1" alt="Flying Japan" height="28" />
+      <div class="footer-info">
+        <span>{{ t.footer_company }}</span>
+        <span>{{ t.footer_address }}</span>
+        <span>{{ t.footer_hours }}</span>
+        <span>{{ t.footer_phone }}</span>
+      </div>
+      <p class="footer-copy">{{ t.footer_copyright.format(year=2026) }}</p>
+    </div>
+  </footer>
+  {% endif %}
 </body>
 </html>

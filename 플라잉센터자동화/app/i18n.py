@@ -63,6 +63,11 @@ TRANSLATIONS: dict[str, dict[str, Any]] = {
         "reception_complete_badge": "접수 완료",
         "reception_complete_kicker": "접수 완료",
         "brand_name": "Flying Japan 짐 보관",
+        "footer_company": "주식회사 플라잉",
+        "footer_address": "大阪府大阪市中央区難波3-2-18 1F",
+        "footer_hours": "영업시간: 09:00 ~ 21:00 (JST)",
+        "footer_phone": "+81 80-4917-2163",
+        "footer_copyright": "© {year} Flying Japan. All rights reserved.",
     },
     "en": {
         "customer_title": "Luggage Storage",
@@ -122,6 +127,11 @@ TRANSLATIONS: dict[str, dict[str, Any]] = {
         "reception_complete_badge": "Completed",
         "reception_complete_kicker": "Reception Complete",
         "brand_name": "Flying Japan Luggage Storage",
+        "footer_company": "Flying Inc.",
+        "footer_address": "Namba 3-2-18 1F, Chuo-ku, Osaka, Japan",
+        "footer_hours": "Hours: 09:00 – 21:00 (JST)",
+        "footer_phone": "+81 80-4917-2163",
+        "footer_copyright": "© {year} Flying Japan. All rights reserved.",
     },
     "ja": {
         "customer_title": "荷物預かり受付",
@@ -181,6 +191,11 @@ TRANSLATIONS: dict[str, dict[str, Any]] = {
         "reception_complete_badge": "受付完了",
         "reception_complete_kicker": "受付完了",
         "brand_name": "Flying Japan 手荷物預かり",
+        "footer_company": "株式会社フライング",
+        "footer_address": "大阪府大阪市中央区難波3-2-18 1F",
+        "footer_hours": "営業時間: 09:00〜21:00 (JST)",
+        "footer_phone": "+81 80-4917-2163",
+        "footer_copyright": "© {year} Flying Japan. All rights reserved.",
     },
 }
 
