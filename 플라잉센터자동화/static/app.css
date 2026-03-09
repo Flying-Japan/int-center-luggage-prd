@@ -3387,7 +3387,10 @@ body.staff-site #staff-orders-table td {
   line-height: 1.3;
 }
 
-body.staff-site #staff-orders-table td[data-col-key="note"] {
+body.staff-site #staff-orders-table td[data-col-key="note"],
+body.staff-site #staff-orders-table th[data-col-key="note"] {
+  width: 100px;
+  max-width: 100px;
   white-space: normal;
   word-break: break-word;
 }
