@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero hero-row">
+  <div>
+    <p class="hero-kicker">Operations</p>
+    <h2 class="hero-title">버그 신고</h2>
+    <p class="hero-desc">{{ staff.name }}</p>
+  </div>
+  <form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="btn btn-secondary">로그아웃</button></form>
+</section>
+{% include "staff_menu.html" %}
+
+{% if success_msg %}
+<section class="card">
+  <div class="alert alert-positive">
+    <strong>등록 완료!</strong> {{ success_msg }}
+  </div>
+</section>
+{% endif %}
+
+{% if error_msg %}
+<section class="card">
+  <div class="alert alert-warning">
+    <strong>오류:</strong> {{ error_msg }}
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <h3 class="card-title">버그 리포트 작성</h3>
+  <p class="card-desc">시스템 오류나 개선이 필요한 사항을 신고해주세요. Asana에 자동으로 등록됩니다.</p>
+  <form action="/staff/bug-report" method="post" class="grid2">
+    <label class="field">
+      <span class="field-label">제목</span>
+      <input class="control" type="text" name="title" placeholder="예: 접수 화면에서 사진 업로드 실패" required />
+    </label>
+
+    <label class="field">
+      <span class="field-label">카테고리</span>
+      <select class="control" name="category">
+        <option value="bug">버그 (오류/장애)</option>
+        <option value="ui">UI/화면 문제</option>
+        <option value="feature">기능 개선 요청</option>
+        <option value="other">기타</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span class="field-label">우선순위</span>
+      <select class="control" name="priority">
+        <option value="low">낮음</option>
+        <option value="medium" selected>보통</option>
+        <option value="high">높음</option>
+        <option value="urgent">긴급</option>
+      </select>
+    </label>
+
+    <label class="field" style="grid-column: 1 / -1;">
+      <span class="field-label">상세 설명</span>
+      <textarea class="control" name="description" rows="5" placeholder="어떤 문제가 발생했나요? 재현 방법이나 스크린샷 설명을 포함해주세요." required></textarea>
+    </label>
+
+    <label class="button-wrap">
+      <span class="field-label sr-only">제출</span>
+      <button class="btn btn-primary" type="submit">버그 신고하기</button>
+    </label>
+  </form>
+</section>
+{% endblock %}

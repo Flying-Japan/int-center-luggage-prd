@@ -25,10 +25,17 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import get_current_staff
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
+
 from app.config import (
+    IS_PRODUCTION,
     JST,
     MAX_BAG_QTY,
     MAX_COMPANION_COUNT,
+    MAX_IMAGE_SIZE,
     SECRET_KEY,
     SESSION_HTTPS_ONLY,
     SESSION_MAX_AGE,
@@ -99,6 +106,29 @@ from app.utils import (
 
 
 app = FastAPI(title="Flying Japan Luggage Storage MVP")
+
+# --- Rate limiter ---
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
+
+
+# --- Security headers middleware ---
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,
@@ -114,76 +144,10 @@ templates.env.filters["yen"] = format_yen
 @app.exception_handler(Exception)
 async def _global_exception_handler(request: Request, exc: Exception):
     try:
-        tb = traceback.format_exc()
-        detail = str(exc)
-        exc_type = type(exc).__name__
-        logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, tb)
-        return JSONResponse(status_code=500, content={"detail": detail, "type": exc_type, "traceback": tb})
+        logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, traceback.format_exc())
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
     except Exception:
-        return JSONResponse(status_code=500, content={"detail": "exception handler itself failed"})
-
-
-@app.get("/debug/dashboard-diag")
-def debug_dashboard_diag(db: SupabaseDB = Depends(get_db)):
-    """No-auth diagnostic that exercises the dashboard code path."""
-    steps: list[dict] = []
-    try:
-        staff = db.query("user_profiles").filter(("is_active", "=", True)).first()
-        steps.append({"step": "get_staff", "ok": staff is not None, "name": getattr(staff, "name", None)})
-    except Exception as e:
-        steps.append({"step": "get_staff", "ok": False, "error": f"{type(e).__name__}: {e}"})
-        return JSONResponse(content={"steps": steps})
-
-    try:
-        menu = build_staff_menu(db, "dashboard", staff.is_admin)
-        steps.append({"step": "build_menu", "ok": True, "count": len(menu)})
-    except Exception as e:
-        steps.append({"step": "build_menu", "ok": False, "error": f"{type(e).__name__}: {e}"})
-
-    try:
-        orders = query_staff_orders(db, list(STAFF_STATUS_FILTERS), "", limit=10, show_all_picked_up=False)
-        steps.append({"step": "query_orders", "ok": True, "count": len(orders)})
-    except Exception as e:
-        steps.append({"step": "query_orders", "ok": False, "error": f"{type(e).__name__}: {e}"})
-
-    try:
-        from app.services.flying_pass import build_flying_pass_tiers_json
-        tiers = build_flying_pass_tiers_json()
-        steps.append({"step": "flying_pass_tiers", "ok": True, "count": len(tiers)})
-    except Exception as e:
-        steps.append({"step": "flying_pass_tiers", "ok": False, "error": f"{type(e).__name__}: {e}"})
-
-    try:
-        now_utc = utc_now()
-        now_jst = now_utc.astimezone(JST)
-        manual_default_pickup = next_pickup_default_jst(now_utc)
-        ctx = {
-            "request": None,
-            "orders": orders if 'orders' in dir() else [],
-            "selected_status_filters": list(STAFF_STATUS_FILTERS),
-            "q": "",
-            "show_all_picked_up": False,
-            "staff": staff,
-            "staff_menu_items": menu if 'menu' in dir() else [],
-            "now_jst": now_jst,
-            "manual_default_pickup_date": manual_default_pickup.strftime("%Y-%m-%d"),
-            "manual_default_pickup_time": manual_default_pickup.strftime("%H:%M"),
-            "JST": JST,
-            "max_bag_qty": MAX_BAG_QTY,
-            "display_payment_method": display_payment_method,
-            "display_flying_pass_tier": display_flying_pass_tier,
-            "to_jst_datetime": to_jst_datetime,
-            "flying_pass_tiers_json": json.dumps(tiers) if 'tiers' in dir() else "[]",
-            "retention_msg": "",
-            "retention_err": "",
-        }
-        template = templates.get_template("staff_dashboard.html")
-        html = template.render(ctx)
-        steps.append({"step": "render_template", "ok": True, "bytes": len(html)})
-    except Exception as e:
-        steps.append({"step": "render_template", "ok": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()})
-
-    return JSONResponse(content={"steps": steps})
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 DISCOUNT_TABLE = [
@@ -242,6 +206,9 @@ def save_image_file(upload: UploadFile, folder: str, order_id: str, label: str) 
     filename = f"{order_id}-{uuid.uuid4().hex}{extension}"
     storage_path = f"{folder}/{filename}"
     file_bytes = upload.file.read()
+
+    if len(file_bytes) > MAX_IMAGE_SIZE:
+        raise HTTPException(status_code=400, detail=f"{label} must be under 10 MB.")
 
     r2_upload(storage_path, file_bytes, upload.content_type)
 
@@ -973,6 +940,7 @@ def price_preview(
 
 
 @app.post("/customer/submit")
+@limiter.limit("10/minute")
 def customer_submit(
     request: Request,
     name: str = Form(...),
@@ -1085,7 +1053,8 @@ def customer_success(
 
 
 @app.get("/api/orders/{order_id}", response_model=OrderSummaryResponse)
-def api_order(order_id: str, db: SupabaseDB = Depends(get_db)) -> OrderSummaryResponse:
+def api_order(request: Request, order_id: str, db: SupabaseDB = Depends(get_db)) -> OrderSummaryResponse:
+    _ = ensure_staff(request, db)
     order = db.get("orders", "order_id", order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -1093,6 +1062,7 @@ def api_order(order_id: str, db: SupabaseDB = Depends(get_db)) -> OrderSummaryRe
 
 
 @app.get("/auth/google")
+@limiter.limit("10/minute")
 def auth_google(request: Request):
     code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     code_challenge = base64.urlsafe_b64encode(
@@ -1153,6 +1123,7 @@ def staff_login_page(request: Request, oauth_error: Optional[str] = None) -> HTM
 
 
 @app.post("/staff/login", response_class=HTMLResponse)
+@limiter.limit("5/minute")
 def staff_login(
     request: Request,
     email: str = Form(...),
@@ -1184,7 +1155,7 @@ def staff_login(
     return RedirectResponse(url="/staff/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.get("/staff/logout")
+@app.post("/staff/logout")
 def staff_logout(request: Request) -> RedirectResponse:
     request.session.clear()
     return RedirectResponse(url="/staff/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -2044,6 +2015,52 @@ def staff_schedule_update(
         staff.staff_id,
     )
     return RedirectResponse(url="/staff/schedule", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/staff/bug-report", response_class=HTMLResponse)
+def staff_bug_report_page(
+    request: Request,
+    success: str = "",
+    error: str = "",
+    db: SupabaseDB = Depends(get_db),
+) -> HTMLResponse:
+    staff = ensure_staff(request, db)
+    return templates.TemplateResponse(
+        "staff_bug_report.html",
+        {
+            "request": request,
+            "staff": staff,
+            "staff_menu_items": build_staff_menu(db, "bug_report", staff.is_admin),
+            "success_msg": success,
+            "error_msg": error,
+        },
+    )
+
+
+@app.post("/staff/bug-report")
+async def staff_bug_report_submit(
+    request: Request,
+    title: str = Form(...),
+    category: str = Form("bug"),
+    priority: str = Form("medium"),
+    description: str = Form(...),
+    db: SupabaseDB = Depends(get_db),
+) -> RedirectResponse:
+    staff = ensure_staff(request, db)
+    from app.asana_client import create_bug_task
+
+    full_desc = f"**Category:** {category}\n\n{description}"
+    task_gid = await create_bug_task(title, full_desc, staff.name, priority)
+
+    if task_gid:
+        return RedirectResponse(
+            url=f"/staff/bug-report?success=Asana 태스크가 등록되었습니다 (#{task_gid})",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url="/staff/bug-report?error=Asana 연동에 실패했습니다. 관리자에게 문의하세요.",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get("/staff/admin/sales", response_class=HTMLResponse)

@@ -91,7 +91,7 @@ class Row:
             if name == "is_admin":
                 return data.get("role") == "admin"
             if name == "name":
-                return data.get("username") or data.get("display_name", "")
+                return data.get("display_name") or data.get("username", "")
             if name == "is_active":
                 return data.get("is_active", True)
         raise AttributeError(f"Row '{table}' has no column '{name}'")

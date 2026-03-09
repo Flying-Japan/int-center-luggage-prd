@@ -3381,10 +3381,18 @@ body.staff-site tbody tr:hover { background: #f7f7f5; }
 /* ── Staff orders table specifics ── */
 body.staff-site #staff-orders-table th,
 body.staff-site #staff-orders-table td {
-  overflow: visible;
-  text-overflow: clip;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.3;
+}
+
+body.staff-site #staff-orders-table td[data-col-key="note"],
+body.staff-site #staff-orders-table th[data-col-key="note"] {
+  width: 100px;
+  max-width: 100px;
+  white-space: normal;
+  word-break: break-word;
 }
 
 body.staff-site #staff-orders-table th {
@@ -4207,4 +4215,79 @@ body.staff-site .flatpickr-input.form-control {
   body.customer-site .preview-value {
     font-size: 24px;
   }
+}
+
+/* ── Horizontal logo (customer header) ── */
+.brand-logo-horizontal {
+  height: 36px;
+  width: auto;
+  display: block;
+}
+
+/* ── Footer ── */
+.site-footer {
+  margin-top: 48px;
+  padding: 32px 16px 28px;
+  border-top: 1px solid var(--line);
+  background: var(--surface-soft);
+  text-align: center;
+}
+
+.footer-inner {
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.footer-logo {
+  height: 28px;
+  width: auto;
+  opacity: 0.8;
+}
+
+.footer-info {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 16px;
+  font-size: 13px;
+  color: var(--subtext);
+  line-height: 1.6;
+}
+
+.footer-copy {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ── Floating bug report button (staff) ── */
+.fab-bug-report {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(47, 128, 248, 0.4);
+  transition: background 0.15s, transform 0.15s;
+  text-decoration: none;
+}
+
+.fab-bug-report:hover {
+  background: var(--primary-strong);
+  transform: scale(1.08);
+}
+
+.fab-bug-report svg {
+  display: block;
 }

@@ -10,7 +10,7 @@
     <h2 class="hero-title">직원 대시보드</h2>
     <p class="hero-desc">{{ staff.name }} ({{ 'ADMIN' if staff.is_admin else 'STAFF' }}) · {{ now_jst.strftime('%Y-%m-%d %H:%M JST') }}</p>
   </div>
-  <a class="btn btn-secondary" href="/staff/logout">로그아웃</a>
+  <form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="btn btn-secondary">로그아웃</button></form>
 </section>
 {% include "staff_menu.html" %}
 
