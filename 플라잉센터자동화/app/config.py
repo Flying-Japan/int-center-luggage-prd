@@ -46,3 +46,6 @@ MAX_COMPANION_COUNT = 99
 R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
 R2_API_TOKEN = os.getenv("R2_API_TOKEN", os.getenv("CLOUDFLARE_API_TOKEN", ""))
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "luggage-images")
+
+ASANA_PAT = os.getenv("ASANA_PAT", "")
+ASANA_BUG_PROJECT_GID = os.getenv("ASANA_BUG_PROJECT_GID", "")

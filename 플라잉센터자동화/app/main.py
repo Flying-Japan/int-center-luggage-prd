@@ -184,6 +184,7 @@ STAFF_BASE_MENU_ITEMS = (
     ("handover", "안내/인계", "/staff/handover"),
     ("cash_closing", "시제정산", "/staff/cash-closing"),
     ("schedule", "근무표", "/staff/schedule"),
+    ("bug_report", "버그신고", "/staff/bug-report"),
 )
 ADMIN_MENU_ITEMS = (
     ("admin_sales", "매출", "/staff/admin/sales"),
@@ -2013,6 +2014,52 @@ def staff_schedule_update(
         staff.staff_id,
     )
     return RedirectResponse(url="/staff/schedule", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/staff/bug-report", response_class=HTMLResponse)
+def staff_bug_report_page(
+    request: Request,
+    success: str = "",
+    error: str = "",
+    db: SupabaseDB = Depends(get_db),
+) -> HTMLResponse:
+    staff = ensure_staff(request, db)
+    return templates.TemplateResponse(
+        "staff_bug_report.html",
+        {
+            "request": request,
+            "staff": staff,
+            "staff_menu_items": build_staff_menu(db, "bug_report", staff.is_admin),
+            "success_msg": success,
+            "error_msg": error,
+        },
+    )
+
+
+@app.post("/staff/bug-report")
+async def staff_bug_report_submit(
+    request: Request,
+    title: str = Form(...),
+    category: str = Form("bug"),
+    priority: str = Form("medium"),
+    description: str = Form(...),
+    db: SupabaseDB = Depends(get_db),
+) -> RedirectResponse:
+    staff = ensure_staff(request, db)
+    from app.asana_client import create_bug_task
+
+    full_desc = f"**Category:** {category}\n\n{description}"
+    task_gid = await create_bug_task(title, full_desc, staff.name, priority)
+
+    if task_gid:
+        return RedirectResponse(
+            url=f"/staff/bug-report?success=Asana 태스크가 등록되었습니다 (#{task_gid})",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url="/staff/bug-report?error=Asana 연동에 실패했습니다. 관리자에게 문의하세요.",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get("/staff/admin/sales", response_class=HTMLResponse)
