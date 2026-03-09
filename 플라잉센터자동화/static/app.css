@@ -3381,10 +3381,15 @@ body.staff-site tbody tr:hover { background: #f7f7f5; }
 /* ── Staff orders table specifics ── */
 body.staff-site #staff-orders-table th,
 body.staff-site #staff-orders-table td {
-  overflow: visible;
-  text-overflow: clip;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.3;
+}
+
+body.staff-site #staff-orders-table td[data-col-key="note"] {
+  white-space: normal;
+  word-break: break-word;
 }
 
 body.staff-site #staff-orders-table th {
