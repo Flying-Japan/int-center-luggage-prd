@@ -22,6 +22,14 @@ def utc_now() -> datetime:
 def ensure_utc_datetime(dt) -> datetime:
     # Supabase REST API returns TIMESTAMPTZ columns as ISO 8601 strings
     if isinstance(dt, str):
+        # Python <3.11 requires exactly 0, 3, or 6 fractional digits.
+        # Supabase may return 5 digits — pad to 6 for compatibility.
+        import re
+        dt = re.sub(
+            r"(\.\d{1,5})(?=[+-Z])",
+            lambda m: m.group(1).ljust(7, "0"),
+            dt,
+        )
         dt = datetime.fromisoformat(dt)
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
