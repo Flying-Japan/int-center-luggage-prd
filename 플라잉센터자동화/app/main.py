@@ -1976,10 +1976,12 @@ def staff_cash_closing_detail(
 @app.get("/staff/api/cash-closing/auto-sales")
 def staff_cash_closing_auto_sales(
     request: Request,
-    business_date: str,
+    business_date: Optional[str] = None,
     db: SupabaseDB = Depends(get_db),
 ) -> JSONResponse:
     _ = ensure_staff(request, db)
+    if not business_date:
+        raise HTTPException(status_code=422, detail="business_date is required")
     sales = summarize_order_sales_for_date(db, business_date)
     return JSONResponse(sales)
 
