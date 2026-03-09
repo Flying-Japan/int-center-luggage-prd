@@ -22,6 +22,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Audit dependencies
+        run: pip install pip-audit && pip-audit -r 플라잉센터자동화/requirements.txt
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:

@@ -7,3 +7,4 @@ qrcode==8.0
 Pillow==11.1.0
 itsdangerous==2.2.0
 supabase==2.15.2
+slowapi==0.1.9
