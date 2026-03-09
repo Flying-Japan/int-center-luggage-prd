@@ -37,3 +37,12 @@ jobs:
           context: ./플라잉센터자동화
           push: true
           tags: ghcr.io/flying-japan/int-center-luggage-prd:latest
+
+      - name: Make package public for Watchtower
+        continue-on-error: true
+        run: |
+          curl -sf -X PATCH \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/orgs/Flying-Japan/packages/container/int-center-luggage-prd \
+            -d '{"visibility":"public"}'
