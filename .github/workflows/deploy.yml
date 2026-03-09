@@ -1,4 +1,4 @@
-name: Build & Push
+name: Build & Deploy
 
 on:
   push:
@@ -38,11 +38,21 @@ jobs:
           push: true
           tags: ghcr.io/flying-japan/int-center-luggage-prd:latest
 
-      - name: Make package public for Watchtower
-        continue-on-error: true
-        run: |
-          curl -sf -X PATCH \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/orgs/Flying-Japan/packages/container/int-center-luggage-prd \
-            -d '{"visibility":"public"}'
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script_stop: false
+          script: |
+            cd ~/projects/Flying-Japan/int-center-luggage-prd
+            git pull origin main --quiet
+            cd 플라잉센터자동화
+            docker compose -p flying-japan build app
+            docker compose -p flying-japan up -d app
+            echo "Deployed $(git rev-parse --short HEAD) at $(date)"
