@@ -184,7 +184,6 @@ STAFF_BASE_MENU_ITEMS = (
     ("handover", "안내/인계", "/staff/handover"),
     ("cash_closing", "시제정산", "/staff/cash-closing"),
     ("schedule", "근무표", "/staff/schedule"),
-    ("bug_report", "버그신고", "/staff/bug-report"),
 )
 ADMIN_MENU_ITEMS = (
     ("admin_sales", "매출", "/staff/admin/sales"),

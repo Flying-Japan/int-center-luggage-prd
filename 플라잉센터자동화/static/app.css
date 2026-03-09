@@ -4263,3 +4263,31 @@ body.staff-site .flatpickr-input.form-control {
   font-size: 12px;
   color: var(--muted);
 }
+
+/* ── Floating bug report button (staff) ── */
+.fab-bug-report {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(47, 128, 248, 0.4);
+  transition: background 0.15s, transform 0.15s;
+  text-decoration: none;
+}
+
+.fab-bug-report:hover {
+  background: var(--primary-strong);
+  transform: scale(1.08);
+}
+
+.fab-bug-report svg {
+  display: block;
+}
