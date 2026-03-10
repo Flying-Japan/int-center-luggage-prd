@@ -41,7 +41,7 @@ echo "$(date): New commits detected, deploying..."
 git pull origin main --quiet
 
 cd "$COMPOSE_DIR"
-docker compose -p flying-japan build app
+docker compose -p flying-japan build --build-arg CACHE_BUST="$(git rev-parse --short HEAD)" app
 docker compose -p flying-japan up -d
 
 echo "$(date): Deploy complete ($(git rev-parse --short HEAD))"

@@ -54,6 +54,6 @@ jobs:
             cd ~/projects/Flying-Japan/int-center-luggage-prd
             git pull origin main --quiet
             cd 플라잉센터자동화
-            docker compose -p flying-japan build app
+            docker compose -p flying-japan build --build-arg CACHE_BUST="$(git rev-parse --short HEAD)" app
             docker compose -p flying-japan up -d
             echo "Deployed $(git rev-parse --short HEAD) at $(date)"
