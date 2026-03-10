@@ -39,6 +39,8 @@ fi
 echo "$(date): New commits detected, deploying..."
 
 git pull origin main --quiet
+# Force-checkout to fix macOS NFC/NFD unicode path issues
+git checkout HEAD -- .
 
 cd "$COMPOSE_DIR"
 docker compose -p flying-japan build --build-arg CACHE_BUST="$(git rev-parse --short HEAD)" app
