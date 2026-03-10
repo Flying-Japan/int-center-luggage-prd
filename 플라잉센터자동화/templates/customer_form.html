@@ -14,6 +14,7 @@
     action="/customer/submit"
     method="post"
     enctype="multipart/form-data"
+    autocomplete="off"
     data-preview-meta-empty="{{ t.preview_meta_empty }}"
     data-preview-invalid-title="{{ t.preview_invalid_title }}"
     data-preview-invalid-meta="{{ t.preview_invalid_meta }}"
@@ -31,12 +32,12 @@
 
     <label class="field">
       <span class="field-label">{{ t.name }}</span>
-      <input class="control" type="text" name="name" required maxlength="120" />
+      <input class="control" type="text" name="name" required maxlength="120" autocomplete="off" />
     </label>
 
     <label class="field">
       <span class="field-label">{{ t.phone }}</span>
-      <input class="control" type="text" name="phone" required maxlength="40" />
+      <input class="control" type="text" name="phone" required maxlength="40" autocomplete="off" />
     </label>
 
     <div class="grid2">
