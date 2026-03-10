@@ -9,8 +9,3 @@ services:
   tunnel:
     profiles:
       - disabled
-
-  # Do not run auto-updater in local dev
-  watchtower:
-    profiles:
-      - disabled

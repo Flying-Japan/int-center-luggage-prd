@@ -42,6 +42,6 @@ git pull origin main --quiet
 
 cd "$COMPOSE_DIR"
 docker compose -p flying-japan build app
-docker compose -p flying-japan up -d app
+docker compose -p flying-japan up -d
 
 echo "$(date): Deploy complete ($(git rev-parse --short HEAD))"
