@@ -278,12 +278,12 @@ a {
 
 body.staff-site .topbar-inner {
   width: 100%;
-  max-width: 1480px;
+  max-width: 100%;
 }
 
 body.staff-site .container {
   width: 100%;
-  max-width: 1480px;
+  max-width: 100%;
 }
 
 body.staff-site .grid2 {
