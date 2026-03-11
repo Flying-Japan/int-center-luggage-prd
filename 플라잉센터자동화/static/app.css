@@ -3169,7 +3169,7 @@ body.staff-site .card {
   border: none;
   border-radius: 0;
   box-shadow: none;
-  padding: 16px 24px;
+  padding: 16px 0;
   animation: none;
 }
 
@@ -4134,7 +4134,7 @@ body.staff-site .flatpickr-input.form-control {
   }
 
   body.staff-site .hero { padding: 16px 16px 4px; }
-  body.staff-site .card { padding: 12px 16px; }
+  body.staff-site .card { padding: 12px 0; }
   body.staff-site .staff-menu { padding: 4px 16px 8px; }
   body.staff-site .bulk-action-bar { padding: 8px 16px; }
   body.staff-site .topbar-inner { padding: 8px 16px; }
