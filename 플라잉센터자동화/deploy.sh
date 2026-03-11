@@ -11,7 +11,13 @@ LOCK="/tmp/flying-japan-deploy.lock"
 if ! mkdir "$LOCK" 2>/dev/null; then
   # Check if lock is stale (older than 10 minutes)
   if [ -d "$LOCK" ]; then
-    lock_age=$(( $(date +%s) - $(stat -f %m "$LOCK") ))
+    # Cross-platform: Linux uses stat -c %Y, macOS uses stat -f %m
+    if stat --version &>/dev/null; then
+      lock_mtime=$(stat -c %Y "$LOCK")
+    else
+      lock_mtime=$(stat -f %m "$LOCK")
+    fi
+    lock_age=$(( $(date +%s) - lock_mtime ))
     if [ "$lock_age" -gt 600 ]; then
       rm -rf "$LOCK"
       mkdir "$LOCK" 2>/dev/null || exit 0
