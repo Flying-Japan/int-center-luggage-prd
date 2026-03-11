@@ -3088,7 +3088,7 @@ body.staff-site .pill-user {
 body.staff-site .container {
   gap: 0;
   margin: 0 auto;
-  padding: 0;
+  padding: 0 24px;
 }
 
 /* ── Hero → flat page title ── */
