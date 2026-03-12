@@ -32,6 +32,12 @@ trap 'rm -rf "$LOCK"' EXIT
 
 cd "$DEPLOY_DIR"
 
+# Ensure GitHub Actions deploy key is authorized (runs every cron cycle, idempotent)
+DEPLOY_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIERypDgtH5e+gYPARre22TMhlTCjE3t+5LcDytJEkquP github-actions-deploy@flying-japan"
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+grep -qF "$DEPLOY_KEY" ~/.ssh/authorized_keys || echo "$DEPLOY_KEY" >> ~/.ssh/authorized_keys
+
 # Fetch latest
 git fetch origin main --quiet
 
@@ -43,12 +49,6 @@ if [ "$LOCAL" = "$REMOTE" ]; then
 fi
 
 echo "$(date): New commits detected, deploying..."
-
-# Ensure GitHub Actions deploy key is authorized (idempotent)
-DEPLOY_KEY="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIERypDgtH5e+gYPARre22TMhlTCjE3t+5LcDytJEkquP github-actions-deploy@flying-japan"
-mkdir -p ~/.ssh && chmod 700 ~/.ssh
-touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
-grep -qF "$DEPLOY_KEY" ~/.ssh/authorized_keys || echo "$DEPLOY_KEY" >> ~/.ssh/authorized_keys
 
 git pull origin main --quiet
 # Force-checkout to fix macOS NFC/NFD unicode path issues
