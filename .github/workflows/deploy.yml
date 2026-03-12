@@ -3,6 +3,7 @@ name: Build & Deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -54,5 +55,5 @@ jobs:
             git checkout HEAD -- .
             cd 플라잉센터자동화
             docker compose -p flying-japan build --build-arg CACHE_BUST="$(git rev-parse --short HEAD)" app
-            docker compose -p flying-japan up -d --no-deps --wait app
+            docker compose -p flying-japan up -d --wait
             echo "Deployed $(git rev-parse --short HEAD) at $(date)"
