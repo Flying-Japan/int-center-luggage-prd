@@ -53,5 +53,5 @@ jobs:
             git pull origin main --quiet
             cd 플라잉센터자동화
             docker compose -p flying-japan build --build-arg CACHE_BUST="$(git rev-parse --short HEAD)" app
-            docker compose -p flying-japan up -d
+            docker compose -p flying-japan up -d --no-deps --wait app
             echo "Deployed $(git rev-parse --short HEAD) at $(date)"
