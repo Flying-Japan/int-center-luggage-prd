@@ -9,6 +9,7 @@ import adminRoutes from "./routes/admin";
 import staticRoutes from "./routes/static";
 import { securityHeaders, errorHandler, notFoundHandler, createRateLimiter } from "./middleware/security";
 import { staffAuth, getStaff } from "./middleware/auth";
+import { displayOrderStatus } from "./lib/display";
 import { runRetentionCleanup } from "./services/retention";
 
 const app = new Hono<AppType>();
@@ -222,7 +223,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       <td data-col-key="created_time">{o.created_at ? new Date(o.created_at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
                       <td data-col-key="price">{`¥${o.prepaid_amount}`}</td>
                       <td data-col-key="pickup_time">{o.expected_pickup_at ? new Date(o.expected_pickup_at).toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
-                      <td data-col-key="status">{o.status}</td>
+                      <td data-col-key="status"><span class={`status-pill status-${o.status.toLowerCase()}`}>{displayOrderStatus(o.status)}</span></td>
                       <td data-col-key="note">{o.note || ""}</td>
                       <td data-col-key="detail"><a class="btn btn-secondary btn-sm" href={`/staff/orders/${o.order_id}`}>상세</a></td>
                     </tr>
