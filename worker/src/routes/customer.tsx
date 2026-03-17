@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppType } from "../types";
 import { t, normalizeLang } from "../lib/i18n";
 import { FLYING_PASS_TIERS, type FlyingPassTier } from "../services/pricing";
+import { loadCompletionMessages, applyAmountTemplate } from "../services/completionMessages";
 import { uploadImage, buildImageKey, extFromContentType, validateImageUpload } from "../lib/r2";
 import {
   calculatePricePerDay,
@@ -1294,87 +1295,325 @@ customer.get("/customer/orders/:id", async (c) => {
 
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(order.order_id)}`;
 
+  const completionMsgs = await loadCompletionMessages(c.env.DB);
+  const finalAmountFormatted = `¥${order.final_amount.toLocaleString()}`;
+  const primaryMsg = applyAmountTemplate(completionMsgs.primary[lang] ?? completionMsgs.primary["ko"], finalAmountFormatted);
+  const secondaryMsg = completionMsgs.secondary[lang] ?? completionMsgs.secondary["ko"];
+
+  const pickupAtDisplay = order.expected_pickup_at
+    ? new Date(order.expected_pickup_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
+    : "-";
+
+  const footerHours: Record<string, string> = {
+    ko: "영업시간: 09:00~21:00", en: "Hours: 09:00-21:00", ja: "営業時間: 09:00〜21:00",
+  };
+  const footerCopyright = "© 2026 Flying Japan Inc. All rights reserved.";
+
+  const summaryLabel: Record<string, string> = {
+    ko: "접수 정보", en: "Order Summary", ja: "受付情報",
+  };
+  const finalAmountLabel: Record<string, string> = {
+    ko: "최종금액", en: "Final Amount", ja: "最終金額",
+  };
+  const fpDiscountLabel: Record<string, string> = {
+    ko: "플라잉패스 할인", en: "Flying Pass Discount", ja: "フライングパス割引",
+  };
+
   return c.html(
     <html lang={lang}>
       <head>
         <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{t("success_title", lang)} — {t("brand_name", lang)}</title>
-        <link rel="stylesheet" href="/static/styles.css" />
+        <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
+        <style dangerouslySetInnerHTML={{__html: `
+:root {
+  --bg: #eef3fb;
+  --surface: #ffffff;
+  --line: #dbe4f2;
+  --line-strong: #cedaee;
+  --text: #191f28;
+  --subtext: #4a5668;
+  --muted: #7d8794;
+  --primary: #2f80f8;
+  --primary-strong: #1e63da;
+  --positive: #12b886;
+  --warning: #ef7d22;
+  --radius-xl: 26px;
+  --radius-lg: 20px;
+  --radius-md: 12px;
+  --shadow-sm: 0 10px 30px rgba(16,31,60,0.07);
+  --shadow-lg: 0 22px 52px rgba(39,103,209,0.18);
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; width: 100%; }
+body {
+  position: relative;
+  font-family: "Pretendard", "Noto Sans KR", "Noto Sans JP", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(1200px 560px at -10% -8%, rgba(141,190,255,0.42) 0%, rgba(141,190,255,0) 68%),
+    radial-gradient(980px 520px at 106% -14%, rgba(138,220,255,0.34) 0%, rgba(138,220,255,0) 70%),
+    linear-gradient(180deg, #f2f6ff 0%, #edf3fc 100%);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: -2;
+  pointer-events: none;
+  background-image: radial-gradient(circle at 1px 1px, rgba(87,111,150,0.08) 1px, transparent 0);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(180deg, rgba(0,0,0,0.22), transparent 68%);
+}
+a { color: inherit; text-decoration: none; }
+.bg-orb { position: fixed; z-index: -1; width: 560px; height: 560px; border-radius: 50%; filter: blur(72px); opacity: 0.48; pointer-events: none; }
+.bg-orb-left { left: -200px; top: -190px; background: #95bdff; }
+.bg-orb-right { right: -220px; top: -70px; background: #8fdfff; }
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(136,158,195,0.22);
+  background: linear-gradient(180deg, rgba(246,250,255,0.93) 0%, rgba(241,247,255,0.84) 100%);
+  box-shadow: 0 8px 24px rgba(17,34,68,0.08);
+}
+.topbar-inner {
+  width: 100%; max-width: 560px; margin-inline: auto;
+  padding: 13px 18px; display: flex; align-items: center;
+  justify-content: space-between; gap: 12px;
+}
+.brand {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 18px; font-weight: 800; letter-spacing: -0.02em;
+}
+.lang-switcher {
+  display: inline-flex; background: rgba(231,240,252,0.88);
+  border-radius: 999px; padding: 3px; border: 1px solid #d4dfef;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.75);
+}
+.lang-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 6px 12px; font-size: 12px; font-weight: 700; color: #3d4d66;
+  border-radius: 999px; text-decoration: none;
+  transition: background 0.2s ease, color 0.2s ease; line-height: 1;
+}
+.lang-btn:hover { background: rgba(220,232,251,0.8); }
+.lang-btn-active { background: var(--primary); color: #fff; box-shadow: 0 2px 8px rgba(47,128,248,0.3); }
+.lang-btn-active:hover { background: var(--primary-strong); color: #fff; }
+.page-wrap {
+  width: 100%; max-width: 520px; margin: 28px auto 48px;
+  padding: 0 16px; display: grid; gap: 16px;
+}
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(252,254,255,0.99) 100%);
+  border: 1px solid var(--line); border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,0.78);
+  padding: 24px;
+  animation: riseIn 0.42s ease both;
+}
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.success-header {
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; gap: 14px; padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.check-badge {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: linear-gradient(135deg, #22c87a 0%, #0fa966 100%);
+  box-shadow: 0 8px 24px rgba(18,184,134,0.36);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.success-title {
+  margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.03em; color: var(--text);
+}
+.order-id-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: #eaf2ff; border: 1px solid #c5d9f8;
+  border-radius: 999px; padding: 6px 16px;
+}
+.order-id-label { font-size: 12px; font-weight: 600; color: var(--subtext); }
+.order-id-value { font-size: 18px; font-weight: 900; color: var(--primary); letter-spacing: 0.02em; }
+.summary-title {
+  margin: 0 0 14px; font-size: 14px; font-weight: 700; color: var(--subtext);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.summary-list { display: grid; gap: 0; }
+.summary-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 11px 0; border-bottom: 1px solid var(--line); gap: 12px;
+}
+.summary-row:last-child { border-bottom: none; }
+.summary-key { font-size: 13px; color: var(--muted); font-weight: 500; flex-shrink: 0; }
+.summary-val { font-size: 14px; font-weight: 700; color: var(--text); text-align: right; }
+.summary-val-final { font-size: 18px; font-weight: 900; color: var(--primary); }
+.notice-row { display: flex; align-items: flex-start; gap: 8px; }
+.notice-muted { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.5; }
+.notice-warning { font-size: 13px; color: var(--warning); margin: 0; font-weight: 600; line-height: 1.5; }
+.notice-icon { font-size: 15px; flex-shrink: 0; line-height: 1.5; }
+.qr-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.qr-img-wrap {
+  border: 2px solid var(--line); border-radius: 16px; padding: 12px;
+  background: #fff; box-shadow: var(--shadow-sm);
+}
+.qr-order-id { font-size: 13px; color: var(--subtext); font-weight: 600; letter-spacing: 0.04em; }
+.completion-msg {
+  font-size: 14px; line-height: 1.7; color: var(--text);
+  white-space: pre-line; text-align: center;
+}
+.secondary-msg {
+  font-size: 13px; line-height: 1.7; color: var(--subtext);
+  white-space: pre-line; text-align: center;
+}
+.site-footer {
+  padding: 28px 16px 24px; text-align: center;
+}
+.footer-inner { max-width: 400px; margin: 0 auto; }
+.footer-logo { display: block; margin: 0 auto 12px; }
+.footer-info { display: grid; gap: 3px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.footer-copy { margin-top: 10px; font-size: 11px; color: var(--muted); }
+        `}} />
       </head>
       <body>
-        <div class="lang-switcher" style="text-align:right;margin-bottom:12px;">
-          <a href={`/customer/orders/${orderId}?lang=ko`}>한국어</a>
-          <a href={`/customer/orders/${orderId}?lang=en`} style="margin-left:8px;">EN</a>
-          <a href={`/customer/orders/${orderId}?lang=ja`} style="margin-left:8px;">日本語</a>
-        </div>
+        <div class="bg-orb bg-orb-left" />
+        <div class="bg-orb bg-orb-right" />
 
-        <span class="badge">{t("reception_complete_badge", lang)}</span>
-        <h1>{t("success_title", lang)}</h1>
+        <header class="topbar">
+          <div class="topbar-inner">
+            <a href={`/customer?lang=${lang}`} class="brand">
+              <img src="/static/logo-horizontal.png?v=2" alt={t("brand_name", lang)} height="26" style="mix-blend-mode:multiply" />
+            </a>
+            <nav class="lang-switcher">
+              <a href={`/customer/orders/${orderId}?lang=ko`} class={`lang-btn${lang === "ko" ? " lang-btn-active" : ""}`}>한국어</a>
+              <a href={`/customer/orders/${orderId}?lang=en`} class={`lang-btn${lang === "en" ? " lang-btn-active" : ""}`}>EN</a>
+              <a href={`/customer/orders/${orderId}?lang=ja`} class={`lang-btn${lang === "ja" ? " lang-btn-active" : ""}`}>日本語</a>
+            </nav>
+          </div>
+        </header>
 
-        <table>
-          <tr>
-            <td>{t("order_id_label", lang)}</td>
-            <td><strong>{order.order_id}</strong></td>
-          </tr>
-          <tr>
-            <td>{t("name", lang)}</td>
-            <td>{order.name}</td>
-          </tr>
-          <tr>
-            <td>{t("suitcase_qty", lang)}</td>
-            <td>{order.suitcase_qty}</td>
-          </tr>
-          <tr>
-            <td>{t("backpack_qty", lang)}</td>
-            <td>{order.backpack_qty}</td>
-          </tr>
-          <tr>
-            <td>{t("expected_pickup", lang)}</td>
-            <td>{order.expected_pickup_at ? new Date(order.expected_pickup_at).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) : "-"}</td>
-          </tr>
-          <tr>
-            <td>{t("expected_storage_days", lang)}</td>
-            <td>{order.expected_storage_days}</td>
-          </tr>
-          <tr>
-            <td>{t("price_per_day", lang)}</td>
-            <td>¥{order.price_per_day}</td>
-          </tr>
-          <tr>
-            <td>{t("discount_rate", lang)}</td>
-            <td>{(order.discount_rate * 100).toFixed(0)}%</td>
-          </tr>
-          <tr>
-            <td>{t("prepaid_amount", lang)}</td>
-            <td>¥{order.prepaid_amount}</td>
-          </tr>
-          <tr>
-            <td>{t("flying_pass_label", lang)}</td>
-            <td>{order.flying_pass_tier}</td>
-          </tr>
-          <tr>
-            <td>Flying Pass {t("discount_rate", lang)}</td>
-            <td>¥{order.flying_pass_discount_amount}</td>
-          </tr>
-          <tr>
-            <td><strong>{t("prepaid_amount", lang)} (Final)</strong></td>
-            <td><strong>¥{order.final_amount}</strong></td>
-          </tr>
-        </table>
+        <main class="page-wrap">
 
-        <p style="color:#888;font-size:13px;margin-top:12px;">{t("pickup_note", lang)}</p>
-        <p style="color:#e65100;font-size:13px;">{t("pickup_late_warning", lang)}</p>
+          {/* Success header card */}
+          <div class="card">
+            <div class="success-header">
+              <div class="check-badge">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M7 16.5L13 22.5L25 10" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <h1 class="success-title">{t("success_title", lang)}</h1>
+              <div class="order-id-chip">
+                <span class="order-id-label">{t("order_id_label", lang)}</span>
+                <span class="order-id-value">{order.order_id}</span>
+              </div>
+            </div>
+          </div>
 
-        <div class="qr">
-          <img src={qrUrl} alt={`QR: ${order.order_id}`} width="200" height="200" />
-          <p style="font-size:13px;color:#666;">{order.order_id}</p>
-        </div>
+          {/* Order summary card */}
+          <div class="card">
+            <p class="summary-title">{summaryLabel[lang] || summaryLabel.ko}</p>
+            <div class="summary-list">
+              <div class="summary-row">
+                <span class="summary-key">{t("order_id_label", lang)}</span>
+                <span class="summary-val">{order.order_id}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-key">{t("name", lang)}</span>
+                <span class="summary-val">{order.name}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-key">{t("suitcase_qty", lang)}</span>
+                <span class="summary-val">{order.suitcase_qty}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-key">{t("backpack_qty", lang)}</span>
+                <span class="summary-val">{order.backpack_qty}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-key">{t("expected_pickup", lang)}</span>
+                <span class="summary-val">{pickupAtDisplay}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-key">{t("expected_storage_days", lang)}</span>
+                <span class="summary-val">{order.expected_storage_days}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-key">{t("price_per_day", lang)}</span>
+                <span class="summary-val">¥{order.price_per_day.toLocaleString()}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-key">{t("discount_rate", lang)}</span>
+                <span class="summary-val">{(order.discount_rate * 100).toFixed(0)}%</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-key">{t("prepaid_amount", lang)}</span>
+                <span class="summary-val">¥{order.prepaid_amount.toLocaleString()}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-key">{t("flying_pass_label", lang)}</span>
+                <span class="summary-val">{order.flying_pass_tier || t("flying_pass_none", lang)}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-key">{fpDiscountLabel[lang] || fpDiscountLabel.ko}</span>
+                <span class="summary-val">¥{order.flying_pass_discount_amount.toLocaleString()}</span>
+              </div>
+              <div class="summary-row">
+                <span class="summary-key">{finalAmountLabel[lang] || finalAmountLabel.ko}</span>
+                <span class="summary-val summary-val-final">{finalAmountFormatted}</span>
+              </div>
+            </div>
+          </div>
 
-        <footer>
-          <p>{t("footer_company", lang)} | {t("footer_address", lang)}</p>
-          <p>{t("footer_phone", lang)}</p>
-          <p>{t("copyright", lang)}</p>
+          {/* Notices */}
+          <div class="card" style="padding: 16px 20px; display: grid; gap: 10px;">
+            <div class="notice-row">
+              <span class="notice-icon">🕐</span>
+              <p class="notice-muted">{t("pickup_note", lang)}</p>
+            </div>
+            <div class="notice-row">
+              <span class="notice-icon">⚠️</span>
+              <p class="notice-warning">{t("pickup_late_warning", lang)}</p>
+            </div>
+          </div>
+
+          {/* QR Code */}
+          <div class="card">
+            <div class="qr-wrap">
+              <div class="qr-img-wrap">
+                <img src={qrUrl} alt={`QR: ${order.order_id}`} width="200" height="200" style="display:block;border-radius:8px;" />
+              </div>
+              <span class="qr-order-id">{order.order_id}</span>
+            </div>
+          </div>
+
+          {/* Completion message */}
+          <div class="card" style="text-align:center; display: grid; gap: 16px;">
+            <p class="completion-msg">{primaryMsg}</p>
+            <hr style="border:none;border-top:1px solid var(--line);margin:0;" />
+            <p class="secondary-msg">{secondaryMsg}</p>
+          </div>
+
+        </main>
+
+        <footer class="site-footer">
+          <div class="footer-inner">
+            <img class="footer-logo" src="/static/logo-horizontal.png?v=2" alt={t("brand_name", lang)} height="28" style="mix-blend-mode:multiply" />
+            <div class="footer-info">
+              <span>{t("footer_company", lang)}</span>
+              <span>{t("footer_address", lang)}</span>
+              <span>{footerHours[lang] || footerHours.ko}</span>
+              <span>{t("footer_phone", lang)}</span>
+            </div>
+            <p class="footer-copy">{footerCopyright}</p>
+          </div>
         </footer>
       </body>
     </html>
