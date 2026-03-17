@@ -1,0 +1,24 @@
+{
+  "name": "int-center-luggage-api",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 execute center-luggage-db --local --file=src/schema.sql",
+    "db:migrate:prod": "wrangler d1 execute center-luggage-db --remote --file=src/schema.sql",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.7.0",
+    "@supabase/supabase-js": "^2.49.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250305.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "sharp", "workerd"]
+  }
+}

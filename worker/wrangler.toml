@@ -1,0 +1,26 @@
+name = "int-center-luggage-api"
+main = "src/index.tsx"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[vars]
+APP_ENV = "production"
+BUSINESS_OPEN_HOUR = "9"
+BUSINESS_CLOSE_HOUR = "21"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "center-luggage-db"
+database_id = "dfae11bb-0dd9-4e7c-be27-d6e98c7c3b77"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "luggage-images"
+
+[[routes]]
+pattern = "luggage.flyingjp.com/*"
+zone_name = "flyingjp.com"
+
+[triggers]
+crons = ["0 18 * * *"]
