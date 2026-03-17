@@ -80,9 +80,23 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
   sql += " ORDER BY created_at ASC LIMIT 100";
 
-  const orders = await c.env.DB.prepare(sql)
-    .bind(...params)
-    .all<{ order_id: string; name: string | null; tag_no: string | null; status: string; prepaid_amount: number; created_at: string; expected_pickup_at: string | null; note: string | null }>();
+  // Run order list and counts in parallel
+  const [orders, countsResult] = await Promise.all([
+    c.env.DB.prepare(sql)
+      .bind(...params)
+      .all<{ order_id: string; name: string | null; tag_no: string | null; status: string; prepaid_amount: number; created_at: string; expected_pickup_at: string | null; note: string | null }>(),
+    c.env.DB.prepare(
+      `SELECT
+        SUM(CASE WHEN status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
+        SUM(CASE WHEN status = 'PAID' THEN 1 ELSE 0 END) as paid_count,
+        SUM(CASE WHEN status = 'PICKED_UP' THEN 1 ELSE 0 END) as picked_up_count,
+        SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) as cancelled_count,
+        COUNT(*) as total_count
+      FROM luggage_orders`
+    ).first<{ pending_count: number; paid_count: number; picked_up_count: number; cancelled_count: number; total_count: number }>(),
+  ]);
+
+  const counts = countsResult || { pending_count: 0, paid_count: 0, picked_up_count: 0, cancelled_count: 0, total_count: 0 };
 
   return c.html(
     <html lang="ko">
@@ -117,7 +131,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             <div>
               <p class="hero-kicker">Operations</p>
               <h2 class="hero-title">직원 대시보드</h2>
-              <p class="hero-desc">{staff.display_name || staff.username} ({staff.role === "admin" ? "ADMIN" : "STAFF"})</p>
+              <p class="hero-desc">{staff.display_name || staff.username} ({staff.role === "admin" ? "ADMIN" : "STAFF"}) · 전체 {counts.total_count}건</p>
             </div>
           </section>
 
@@ -145,19 +159,19 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 <div class="status-filter-buttons" id="status-filter-buttons">
                   <label class="status-filter-chip">
                     <input class="status-filter-input" type="checkbox" name="status_filter" value="PAYMENT_PENDING" checked={statusFilters.includes("PAYMENT_PENDING")} />
-                    <span>결제대기</span>
+                    <span>결제대기 ({counts.pending_count})</span>
                   </label>
                   <label class="status-filter-chip">
                     <input class="status-filter-input" type="checkbox" name="status_filter" value="PAID" checked={statusFilters.includes("PAID")} />
-                    <span>결제완료</span>
+                    <span>결제완료 ({counts.paid_count})</span>
                   </label>
                   <label class="status-filter-chip">
                     <input class="status-filter-input" type="checkbox" name="status_filter" value="PICKED_UP" checked={statusFilters.includes("PICKED_UP")} />
-                    <span>수령완료</span>
+                    <span>수령완료 ({counts.picked_up_count})</span>
                   </label>
                   <label class="status-filter-chip">
                     <input class="status-filter-input" type="checkbox" name="status_filter" value="CANCELLED" checked={statusFilters.includes("CANCELLED")} />
-                    <span>취소</span>
+                    <span>취소 ({counts.cancelled_count})</span>
                   </label>
                 </div>
               </div>
