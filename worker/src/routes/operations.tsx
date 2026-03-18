@@ -534,7 +534,12 @@ ops.post("/staff/handover/:id/comments", async (c) => {
 // POST /staff/handover/:id/update — Update note
 ops.post("/staff/handover/:id/update", async (c) => {
   const noteId = c.req.param("id");
+  const staff = getStaff(c);
   const body = await c.req.parseBody();
+
+  // Only the author can update their own note
+  const note = await c.env.DB.prepare("SELECT staff_id FROM luggage_handover_notes WHERE note_id = ?").bind(noteId).first<{ staff_id: string }>();
+  if (!note || note.staff_id !== staff.id) return c.redirect("/staff/handover");
 
   await c.env.DB.prepare(
     "UPDATE luggage_handover_notes SET title = ?, content = ?, category = ?, is_pinned = ? WHERE note_id = ?"
