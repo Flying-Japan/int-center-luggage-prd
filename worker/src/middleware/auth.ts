@@ -45,6 +45,7 @@ async function hmacVerify(payload: string, signature: string, secret: string): P
  * Set session cookie with user_id after successful login (HMAC-signed).
  */
 export async function setSession(c: AppContext, userId: string) {
+  if (!c.env.APP_SECRET_KEY) throw new Error("APP_SECRET_KEY is not configured");
   const payload = btoa(JSON.stringify({ user_id: userId, exp: Date.now() + SESSION_MAX_AGE * 1000 }));
   const sig = await hmacSign(payload, c.env.APP_SECRET_KEY);
   setCookie(c, SESSION_COOKIE, `${payload}.${sig}`, {

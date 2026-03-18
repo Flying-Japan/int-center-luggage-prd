@@ -124,18 +124,3 @@ export function calculateExtraAmount(pricePerDay: number, extraDays: number): nu
   return pricePerDay * extraDays;
 }
 
-/**
- * Build Flying Pass tiers list for frontend dropdown.
- */
-export function buildFlyingPassTiersJson(): { value: string; label: string; discount: string }[] {
-  return FLYING_PASS_TIERS.map((tier) => ({
-    value: tier,
-    label: tier === "NONE" ? "없음" : tier,
-    discount:
-      tier === "NONE"
-        ? ""
-        : tier === "BLACK"
-          ? "무료"
-          : `¥${FLYING_PASS_FIXED_DISCOUNTS[tier]} 할인`,
-  }));
-}

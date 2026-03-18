@@ -10,7 +10,7 @@ import {
   normalizeFlyingPassTier,
   flyingPassDiscountAmount,
 } from "../services/pricing";
-import { calculateStorageDays, validatePickupTimeWindow } from "../services/storage";
+import { calculateStorageDays } from "../services/storage";
 import { buildOrderId, buildTagNo } from "../services/orderNumber";
 
 const customer = new Hono<AppType>();
@@ -1155,7 +1155,7 @@ customer.post("/customer/submit", async (c) => {
 
   // --- Validation ---
   if (!name) return redirect(t("required", lang) + ": " + t("name", lang));
-  if (!phone) return redirect(t("required", lang) + ": " + t("phone", lang));
+  if (!phone || !/^[\d\s\-+()]{6,20}$/.test(phone)) return redirect(t("required", lang) + ": " + t("phone", lang));
   if (suitcaseQty <= 0 && backpackQty <= 0) {
     return redirect(t("required", lang) + ": " + t("suitcase_qty", lang) + "/" + t("backpack_qty", lang));
   }
