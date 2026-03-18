@@ -1,6 +1,0 @@
-tunnel: 5fcd4ae1-44a7-4532-9011-ff8203d849f4
-
-ingress:
-  - hostname: luggage.flyingjp.com
-    service: http://app:8000
-  - service: http_status:404
