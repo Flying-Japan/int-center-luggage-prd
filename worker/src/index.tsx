@@ -257,7 +257,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       <td data-col-key="tag_no"><span class={`editable tag-pill ${tagColorClass(o.tag_no)}`} data-field="tag_no" data-order-id={o.order_id}>{o.tag_no || "-"}</span></td>
                       <td data-col-key="created_time">{o.created_at ? new Date(o.created_at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
                       <td data-col-key="price" class="price-cell" data-order-id={o.order_id} data-tier={o.flying_pass_tier || "NONE"} data-method={o.payment_method || "CASH"} style="cursor:pointer;position:relative"><span class="price-display">{`¥${o.prepaid_amount}`}</span></td>
-                      <td data-col-key="pickup_time"><span class="editable" data-field="expected_pickup_at" data-order-id={o.order_id} data-type="datetime-local">{o.expected_pickup_at ? new Date(o.expected_pickup_at).toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</span></td>
+                      <td data-col-key="pickup_time"><span class="editable" data-field="expected_pickup_at" data-order-id={o.order_id} data-type="datetime-local" data-raw-value={o.expected_pickup_at ? o.expected_pickup_at.slice(0, 16) : ""}>{o.expected_pickup_at ? new Date(o.expected_pickup_at).toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</span></td>
                       <td data-col-key="pay_status"><span class={`status-pill ${o.status === "PAID" || o.status === "PICKED_UP" ? "status-paid" : o.status === "CANCELLED" ? "status-cancelled" : "status-payment_pending"}`}>{o.status === "PAID" || o.status === "PICKED_UP" ? "결제완료" : o.status === "CANCELLED" ? "취소" : "결제대기"}</span></td>
                       <td data-col-key="pickup_status"><span class={`status-pill ${o.status === "PICKED_UP" ? "status-picked_up" : o.status === "CANCELLED" ? "status-cancelled" : "status-payment_pending"}`}>{o.status === "PICKED_UP" ? "수령완료" : o.status === "CANCELLED" ? "취소" : "미수령"}</span></td>
                       <td data-col-key="actions">
@@ -325,26 +325,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 <input class="control" type="number" name="backpack_qty" value="0" min="0" />
               </label>
               <label class="field">
-                <span class="field-label">예정 픽업일</span>
-                <input class="control" type="date" name="expected_pickup_date" />
-              </label>
-              <label class="field">
-                <span class="field-label">예정 픽업 시간</span>
-                <select class="control" name="expected_pickup_time">
-                  <option value="09:00">09:00</option><option value="09:30">09:30</option>
-                  <option value="10:00">10:00</option><option value="10:30">10:30</option>
-                  <option value="11:00">11:00</option><option value="11:30">11:30</option>
-                  <option value="12:00">12:00</option><option value="12:30">12:30</option>
-                  <option value="13:00">13:00</option><option value="13:30">13:30</option>
-                  <option value="14:00">14:00</option><option value="14:30">14:30</option>
-                  <option value="15:00">15:00</option><option value="15:30">15:30</option>
-                  <option value="16:00">16:00</option><option value="16:30">16:30</option>
-                  <option value="17:00">17:00</option><option value="17:30">17:30</option>
-                  <option value="18:00" selected>18:00</option><option value="18:30">18:30</option>
-                  <option value="19:00">19:00</option><option value="19:30">19:30</option>
-                  <option value="20:00">20:00</option><option value="20:30">20:30</option>
-                  <option value="21:00">21:00</option>
-                </select>
+                <span class="field-label">예정 픽업 일시</span>
+                <input class="control" type="datetime-local" name="expected_pickup_at" />
               </label>
               <label class="button-wrap">
                 <span class="field-label sr-only">접수</span>

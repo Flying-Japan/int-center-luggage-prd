@@ -159,17 +159,25 @@ admin.post("/staff/admin/sales/rental", async (c) => {
   const body = await c.req.parseBody();
   const staff = getStaff(c);
 
-  await c.env.DB.prepare(
-    "INSERT INTO luggage_rental_daily_sales (business_date, revenue_amount, customer_count, note, staff_id) VALUES (?, ?, ?, ?, ?)"
-  )
-    .bind(
-      String(body.business_date),
-      parseInt(String(body.revenue_amount || "0"), 10),
-      parseInt(String(body.customer_count || "0"), 10),
-      String(body.note || "") || null,
-      staff.id
-    )
-    .run();
+  const bizDate = String(body.business_date);
+  const revenueAmount = parseInt(String(body.revenue_amount || "0"), 10);
+  const customerCount = parseInt(String(body.customer_count || "0"), 10);
+  const note = String(body.note || "") || null;
+
+  // Check if entry exists for this date — update instead of creating duplicate
+  const existing = await c.env.DB.prepare(
+    "SELECT rental_id FROM luggage_rental_daily_sales WHERE business_date = ?"
+  ).bind(bizDate).first<{ rental_id: number }>();
+
+  if (existing) {
+    await c.env.DB.prepare(
+      "UPDATE luggage_rental_daily_sales SET revenue_amount = ?, customer_count = ?, note = ?, staff_id = ?, updated_at = datetime('now') WHERE rental_id = ?"
+    ).bind(revenueAmount, customerCount, note, staff.id, existing.rental_id).run();
+  } else {
+    await c.env.DB.prepare(
+      "INSERT INTO luggage_rental_daily_sales (business_date, revenue_amount, customer_count, note, staff_id) VALUES (?, ?, ?, ?, ?)"
+    ).bind(bizDate, revenueAmount, customerCount, note, staff.id).run();
+  }
 
   return c.redirect("/staff/admin/sales");
 });
@@ -181,6 +189,8 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
   ).all();
 
   const staff = getStaff(c);
+  const errorMsg = c.req.query("error");
+  const successMsg = c.req.query("success");
   return c.html(
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>직원 계정</title></head>
@@ -199,6 +209,8 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
             <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
           </nav>
         <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
+        {errorMsg && <div class="card" style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;margin-bottom:12px">{decodeURIComponent(errorMsg)}</div>}
+        {successMsg && <div class="card" style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:10px 16px;margin-bottom:12px">{successMsg}</div>}
         <h2 class="hero-title">직원 계정 관리</h2>
         <p class="card-desc">{accounts.results.length}명 · 활성 {accounts.results.filter((a: Record<string, unknown>) => (a.is_active as number)).length}명 · 관리자 {accounts.results.filter((a: Record<string, unknown>) => (a.role as string) === "admin").length}명</p>
 
@@ -290,7 +302,7 @@ admin.post("/staff/admin/staff-accounts", async (c) => {
     .bind(data.user.id, displayName, email.split("@")[0], role)
     .run();
 
-  return c.redirect("/staff/admin/staff-accounts");
+  return c.redirect("/staff/admin/staff-accounts?success=계정이 생성되었습니다");
 });
 
 // POST /staff/admin/staff-accounts/:id/toggle-active

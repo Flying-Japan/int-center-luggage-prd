@@ -125,12 +125,12 @@ ops.post("/staff/cash-closing", async (c) => {
   const closingType = String(body.closing_type || "FINAL_CLOSE");
   const actualAmount = totalAmount + actualQrAmount;
 
-  // Auto-calculate expected amount from today's PAID/PICKED_UP orders
+  // Auto-calculate expected amount from today's PAID/PICKED_UP orders (includes extra_amount)
   const autoSales = await c.env.DB.prepare(
     `SELECT
-       SUM(CASE WHEN payment_method = 'CASH' OR payment_method IS NULL THEN prepaid_amount ELSE 0 END) as auto_cash,
-       SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount ELSE 0 END) as auto_qr,
-       SUM(prepaid_amount) as auto_total
+       SUM(CASE WHEN payment_method = 'CASH' OR payment_method IS NULL THEN prepaid_amount + extra_amount ELSE 0 END) as auto_cash,
+       SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as auto_qr,
+       SUM(prepaid_amount + extra_amount) as auto_total
      FROM luggage_orders
      WHERE date(created_at) = ? AND status IN ('PAID', 'PICKED_UP')`
   ).bind(businessDate).first<{ auto_cash: number; auto_qr: number; auto_total: number }>();
@@ -171,6 +171,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
     .first();
 
   if (!closing) return c.html(<p>Not found</p>, 404);
+  const staff = getStaff(c);
 
   const audits = await c.env.DB.prepare(
     "SELECT * FROM luggage_cash_closing_audits WHERE closing_id = ? ORDER BY created_at DESC"
@@ -228,6 +229,17 @@ ops.get("/staff/cash-closing/:id", async (c) => {
               <form method="post" action={`/staff/cash-closing/${closingId}/submit`} style="margin-top:12px">
                 <button class="btn btn-primary" type="submit">제출</button>
               </form>
+            )}
+            {cl.workflow_status === "SUBMITTED" && staff.role === "admin" && (
+              <form method="post" action={`/staff/cash-closing/${closingId}/verify-lock`} style="margin-top:12px" onsubmit="return confirm('정산을 확인/잠금 처리하시겠습니까?')">
+                <button class="btn btn-primary" type="submit">확인 및 잠금</button>
+              </form>
+            )}
+            {cl.workflow_status === "SUBMITTED" && staff.role !== "admin" && (
+              <p class="card-desc" style="margin-top:12px;color:#b45309">제출 완료 — 관리자 확인 대기 중</p>
+            )}
+            {cl.workflow_status === "LOCKED" && (
+              <p class="card-desc" style="margin-top:12px;color:#166534">확인 완료 (잠금)</p>
             )}
           </section>
 
@@ -374,6 +386,8 @@ ops.get("/staff/handover", async (c) => {
                   <select class="control" name="category">
                     <option value="HANDOVER">인수인계</option>
                     <option value="NOTICE">안내사항</option>
+                    <option value="URGENT">긴급</option>
+                    <option value="OTHER">기타</option>
                   </select>
                 </label>
                 <label class="field">
@@ -436,6 +450,15 @@ ops.get("/staff/handover", async (c) => {
                     <input class="control" type="text" name="content" placeholder="댓글 입력..." required style="flex:1;font-size:12px;padding:4px 8px" />
                     <button class="btn btn-sm btn-secondary" type="submit">댓글</button>
                   </form>
+
+                  {/* Edit/Delete (only for author) */}
+                  {(note.staff_id as string) === staff.id && (
+                    <div style="margin-top:8px;display:flex;gap:6px">
+                      <form method="post" action={`/staff/handover/${noteId}/delete`} style="display:inline" onsubmit="return confirm('이 노트를 삭제하시겠습니까?')">
+                        <button class="btn btn-sm" style="color:#991b1b;font-size:11px" type="submit">삭제</button>
+                      </form>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -636,6 +659,16 @@ ops.get("/staff/lost-found", async (c) => {
                             <input type="hidden" name="status" value="CLAIMED" />
                             <input class="control" type="text" name="claimed_by" placeholder="인수자" style="width:80px;font-size:12px" />
                             <button class="btn btn-sm" type="submit">인계</button>
+                          </form>
+                        )}
+                        {(e.status === "UNCLAIMED" || e.status === "CLAIMED") && (
+                          <form method="post" action={`/staff/lost-found/${e.entry_id}/update`} style="display:inline;margin-left:4px">
+                            <select name="status" class="control" style="font-size:11px;padding:2px 4px;width:auto">
+                              <option value="">상태변경</option>
+                              <option value="DISPOSED">폐기</option>
+                              <option value="RETURNED">반환</option>
+                            </select>
+                            <button class="btn btn-sm" type="submit">변경</button>
                           </form>
                         )}
                         <form method="post" action={`/staff/lost-found/${e.entry_id}/delete`} style="display:inline;margin-left:4px" onsubmit="return confirm('삭제하시겠습니까?')">
