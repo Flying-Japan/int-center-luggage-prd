@@ -101,11 +101,7 @@ auth.post("/staff/logout", (c) => {
   return c.redirect("/staff/login");
 });
 
-// Also support GET logout for convenience
-auth.get("/staff/logout", (c) => {
-  clearSession(c);
-  return c.redirect("/staff/login");
-});
+// GET /staff/logout removed — POST-only to prevent CSRF via image/link navigation
 
 // Google OAuth: initiate PKCE flow (matching original FastAPI implementation)
 auth.get("/auth/google", async (c) => {

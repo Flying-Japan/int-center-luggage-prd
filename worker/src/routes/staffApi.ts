@@ -179,9 +179,16 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
     return c.json({ error: "Invalid action" }, 400);
   }
 
+  // Status guards: mark_paid only from PAYMENT_PENDING, cancel only non-PICKED_UP
+  const statusGuard = body.action === "mark_paid"
+    ? " AND status = 'PAYMENT_PENDING'"
+    : body.action === "cancel"
+      ? " AND status != 'PICKED_UP'"
+      : "";
+
   const placeholders = body.order_ids.map(() => "?").join(",");
   await c.env.DB.prepare(
-    `UPDATE luggage_orders SET status = ?, updated_at = datetime('now') WHERE order_id IN (${placeholders})`
+    `UPDATE luggage_orders SET status = ?, updated_at = datetime('now') WHERE order_id IN (${placeholders})${statusGuard}`
   )
     .bind(newStatus, ...body.order_ids)
     .run();

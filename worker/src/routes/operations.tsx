@@ -276,7 +276,7 @@ ops.post("/staff/cash-closing/:id/submit", async (c) => {
   const staff = getStaff(c);
 
   await c.env.DB.prepare(
-    "UPDATE luggage_cash_closings SET workflow_status = 'SUBMITTED', submitted_by_staff_id = ?, submitted_at = datetime('now'), updated_at = datetime('now') WHERE closing_id = ?"
+    "UPDATE luggage_cash_closings SET workflow_status = 'SUBMITTED', submitted_by_staff_id = ?, submitted_at = datetime('now'), updated_at = datetime('now') WHERE closing_id = ? AND workflow_status = 'DRAFT'"
   )
     .bind(staff.id, closingId)
     .run();
@@ -568,9 +568,14 @@ ops.post("/staff/handover/:id/delete", async (c) => {
   return c.redirect("/staff/handover");
 });
 
-// POST /staff/handover/comments/:id/delete — Delete comment
+// POST /staff/handover/comments/:id/delete — Delete comment (author only)
 ops.post("/staff/handover/comments/:id/delete", async (c) => {
   const commentId = c.req.param("id");
+  const staff = getStaff(c);
+
+  const comment = await c.env.DB.prepare("SELECT staff_id FROM luggage_handover_comments WHERE comment_id = ?").bind(commentId).first<{ staff_id: string }>();
+  if (!comment || comment.staff_id !== staff.id) return c.redirect("/staff/handover");
+
   await c.env.DB.prepare("DELETE FROM luggage_handover_comments WHERE comment_id = ?").bind(commentId).run();
   return c.redirect("/staff/handover");
 });

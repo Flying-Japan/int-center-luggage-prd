@@ -442,7 +442,7 @@ admin.get("/staff/admin/activity-logs", async (c) => {
 // GET /staff/admin/completion-message — Completion message editor
 admin.get("/staff/admin/completion-message", async (c) => {
   const setting = await c.env.DB.prepare(
-    "SELECT setting_value FROM luggage_app_settings WHERE setting_key = 'completion_message_ko'"
+    "SELECT setting_value FROM luggage_app_settings WHERE setting_key = 'customer_success_primary_message_ko'"
   ).first<{ setting_value: string }>();
 
   const staff = getStaff(c);
@@ -487,7 +487,7 @@ admin.post("/staff/admin/completion-message", async (c) => {
 
   await c.env.DB.prepare(
     `INSERT INTO luggage_app_settings (setting_key, setting_value, staff_id, updated_at)
-     VALUES ('completion_message_ko', ?, ?, datetime('now'))
+     VALUES ('customer_success_primary_message_ko', ?, ?, datetime('now'))
      ON CONFLICT(setting_key) DO UPDATE SET setting_value = ?, staff_id = ?, updated_at = datetime('now')`
   )
     .bind(messageKo, staff.id, messageKo, staff.id)
