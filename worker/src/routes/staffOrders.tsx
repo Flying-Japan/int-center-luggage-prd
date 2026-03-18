@@ -4,14 +4,14 @@
  */
 import { Hono } from "hono";
 import type { AppType } from "../types";
-import { staffAuth, getStaff, insertAuditLog, type StaffUser } from "../middleware/auth";
+import { staffAuth, getStaff, insertAuditLog } from "../middleware/auth";
 import { downloadImage, logImageView } from "../lib/r2";
 import { buildOrderId, buildTagNo } from "../services/orderNumber";
-import { calculatePricePerDay, calculatePrepaidAmount, normalizeFlyingPassTier, flyingPassDiscountAmount } from "../services/pricing";
+import { calculatePricePerDay, calculatePrepaidAmount, normalizeFlyingPassTier, flyingPassDiscountAmount, calculateExtraAmount } from "../services/pricing";
 import { calculateStorageDays, calculateExtraDays } from "../services/storage";
-import { calculateExtraAmount } from "../services/pricing";
 import { createBugTask } from "../lib/asana";
 import { displayOrderStatus, displayPaymentMethod, displayFlyingPassTier } from "../lib/display";
+import { fmtJST } from "../lib/dateFormat";
 
 type Order = {
   order_id: string;
@@ -79,10 +79,6 @@ staffOrders.get("/staff/orders/:id", async (c) => {
   ]);
 
   const staff = getStaff(c);
-
-  // Format dates to JST
-  const fmtJST = (iso: string | null, fmt: Intl.DateTimeFormatOptions = { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) =>
-    iso ? new Date(iso).toLocaleString("ja-JP", fmt) + " JST" : "-";
 
   const fmtDatetimeLocal = (iso: string | null) => {
     if (!iso) return "";

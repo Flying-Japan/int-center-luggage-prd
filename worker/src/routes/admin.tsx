@@ -4,7 +4,7 @@
  */
 import { Hono } from "hono";
 import type { AppType } from "../types";
-import { adminAuth, getStaff, type StaffUser } from "../middleware/auth";
+import { adminAuth, getStaff } from "../middleware/auth";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { formatDateJST, nowJST } from "../services/storage";
 

@@ -4,7 +4,7 @@
  */
 import { Hono } from "hono";
 import type { AppType } from "../types";
-import { staffAuth, adminAuth, getStaff, type StaffUser } from "../middleware/auth";
+import { staffAuth, adminAuth, getStaff } from "../middleware/auth";
 import { formatDateJST, nowJST } from "../services/storage";
 
 const ops = new Hono<AppType>();
@@ -541,6 +541,10 @@ ops.post("/staff/handover/comments/:id/delete", async (c) => {
 // LOST & FOUND (US-011)
 // ============================================================
 
+const LOST_FOUND_STATUS_LABELS: Record<string, string> = {
+  UNCLAIMED: "미확인", CLAIMED: "인수완료", DISPOSED: "폐기", RETURNED: "반환",
+};
+
 // GET /staff/lost-found — Lost & found list
 ops.get("/staff/lost-found", async (c) => {
   const statusFilter = c.req.query("status") || "";
@@ -618,13 +622,12 @@ ops.get("/staff/lost-found", async (c) => {
                 </thead>
                 <tbody>
                   {entries.results.map((e: Record<string, unknown>) => {
-                    const statusLabels: Record<string, string> = { UNCLAIMED: "미확인", CLAIMED: "인수완료", DISPOSED: "폐기", RETURNED: "반환" };
                     return (
                     <tr>
                       <td>{e.item_name as string}</td>
                       <td>{e.quantity as number}</td>
                       <td>{(e.found_location as string) || "-"}</td>
-                      <td><span class="status-pill" style="font-size:10px">{statusLabels[e.status as string] || (e.status as string)}</span></td>
+                      <td><span class="status-pill" style="font-size:10px">{LOST_FOUND_STATUS_LABELS[e.status as string] || (e.status as string)}</span></td>
                       <td style="font-size:12px;color:#666">{(e.note as string) || "-"}</td>
                       <td style="white-space:nowrap">{e.created_at ? new Date(e.created_at as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
                       <td>
