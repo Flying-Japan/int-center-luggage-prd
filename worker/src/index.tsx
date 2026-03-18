@@ -9,24 +9,8 @@ import adminRoutes from "./routes/admin";
 import staticRoutes from "./routes/static";
 import { securityHeaders, errorHandler, notFoundHandler, createRateLimiter } from "./middleware/security";
 import { staffAuth, getStaff } from "./middleware/auth";
-// displayOrderStatus no longer needed — status split into pay/pickup columns
 import { runRetentionCleanup } from "./services/retention";
-
-/** Map tag_no to a color class (1-10 orange, 11-20 blue, etc.) */
-function tagColorClass(tagNo: string | null): string {
-  if (!tagNo) return "";
-  const num = parseInt(String(tagNo).replace(/^[A-Za-z]+/, ""), 10);
-  if (!Number.isFinite(num) || num < 1) return "";
-  const map: [number, number, string][] = [
-    [1, 10, "tag-color-orange"], [11, 20, "tag-color-blue"], [21, 30, "tag-color-yellow"],
-    [31, 40, "tag-color-green"], [41, 50, "tag-color-purple"], [51, 60, "tag-color-black"],
-    [61, 70, "tag-color-gray"], [71, 80, "tag-color-pink"], [81, 90, "tag-color-brown"],
-  ];
-  for (const [min, max, cls] of map) {
-    if (num >= min && num <= max) return cls;
-  }
-  return "";
-}
+import { tagColorClass, TAG_COLOR_RANGES } from "./lib/tagColors";
 
 const app = new Hono<AppType>();
 
@@ -81,10 +65,20 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   const q = c.req.query("q") || "";
   const statusFilters = c.req.queries("status_filter") || [];
 
-  let sql = `SELECT o.order_id, o.name, o.tag_no, o.status, o.prepaid_amount, o.created_at, o.expected_pickup_at, o.note, o.payment_method, o.in_warehouse, o.parent_order_id, o.flying_pass_tier,
-    (SELECT COALESCE(u.display_name, u.username, a.staff_id) FROM luggage_audit_logs a LEFT JOIN user_profiles u ON a.staff_id = u.id WHERE a.order_id = o.order_id AND a.action = 'INLINE_UPDATE' AND a.details LIKE '%비고%' ORDER BY a.timestamp DESC LIMIT 1) as note_author,
-    (SELECT a.timestamp FROM luggage_audit_logs a WHERE a.order_id = o.order_id AND a.action = 'INLINE_UPDATE' AND a.details LIKE '%비고%' ORDER BY a.timestamp DESC LIMIT 1) as note_updated_at
-    FROM luggage_orders o WHERE 1=1`;
+  let sql = `WITH note_edits AS (
+      SELECT a.order_id,
+             COALESCE(u.display_name, u.username, a.staff_id) as note_author,
+             a.timestamp as note_updated_at,
+             ROW_NUMBER() OVER (PARTITION BY a.order_id ORDER BY a.timestamp DESC) as rn
+      FROM luggage_audit_logs a
+      LEFT JOIN user_profiles u ON a.staff_id = u.id
+      WHERE a.action = 'INLINE_UPDATE' AND a.details LIKE '%비고%'
+    )
+    SELECT o.order_id, o.name, o.tag_no, o.status, o.prepaid_amount, o.created_at, o.expected_pickup_at, o.note, o.payment_method, o.in_warehouse, o.parent_order_id, o.flying_pass_tier,
+           ne.note_author, ne.note_updated_at
+    FROM luggage_orders o
+    LEFT JOIN note_edits ne ON ne.order_id = o.order_id AND ne.rn = 1
+    WHERE 1=1`;
   const params: string[] = [];
 
   if (statusFilters.length > 0) {
@@ -303,7 +297,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
         <script dangerouslySetInnerHTML={{ __html: `
           (function(){
             var FIELD_LABELS={name:'이름',tag_no:'짐번호',expected_pickup_at:'짐 찾는 시각',note:'비고'};
-            var TAG_COLORS=[[1,10,'tag-color-orange'],[11,20,'tag-color-blue'],[21,30,'tag-color-yellow'],[31,40,'tag-color-green'],[41,50,'tag-color-purple'],[51,60,'tag-color-black'],[61,70,'tag-color-gray'],[71,80,'tag-color-pink'],[81,90,'tag-color-brown']];
+            var TAG_COLORS=${JSON.stringify(TAG_COLOR_RANGES)};
 
             /* ── Inline edit (click-to-edit for name, tag, pickup, note) ── */
             document.querySelectorAll('.editable').forEach(function(el){

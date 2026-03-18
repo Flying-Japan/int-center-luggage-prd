@@ -1175,9 +1175,11 @@ customer.post("/customer/submit", async (c) => {
     return redirect("영업시간 09:00~21:00 내에서 수령 가능합니다.");
   }
 
-  // --- Generate order ID and tag number ---
-  const orderId = await buildOrderId(c.env.DB);
-  const tagNo = await buildTagNo(c.env.DB);
+  // --- Generate order ID and tag number (parallel) ---
+  const [orderId, tagNo] = await Promise.all([
+    buildOrderId(c.env.DB),
+    buildTagNo(c.env.DB),
+  ]);
 
   // --- Upload images ---
   let idImageUrl: string | null = null;

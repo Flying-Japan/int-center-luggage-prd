@@ -46,6 +46,7 @@ type Order = {
   in_warehouse: number;
   companion_count: number;
   consent_checked: number;
+  updated_at: string;
 };
 
 const staffOrders = new Hono<AppType>();
@@ -193,7 +194,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
               <p><strong>상태</strong><span class={`status-pill status-${order.status.toLowerCase()}`}>{displayOrderStatus(order.status)}</span></p>
               <p><strong>수기접수 여부</strong><span>{order.manual_entry ? "예" : "아니오"}</span></p>
               <p><strong>생성</strong><span>{fmtJST(order.created_at)}</span></p>
-              <p><strong>최종 수정시각</strong><span>{fmtJST(order.created_at)}</span></p>
+              <p><strong>최종 수정시각</strong><span>{fmtJST(order.updated_at)}</span></p>
               <p><strong>예정 픽업</strong><span>{fmtJST(order.expected_pickup_at)}</span></p>
               <p><strong>실제 픽업</strong><span>{fmtJST(order.actual_pickup_at)}</span></p>
               <p><strong>짐번호</strong><span>{order.tag_no || "-"}</span></p>
@@ -486,8 +487,7 @@ staffOrders.post("/staff/orders/manual", async (c) => {
     return c.redirect("/staff/dashboard?error=Name and at least one bag required");
   }
 
-  const orderId = await buildOrderId(c.env.DB);
-  const tagNo = await buildTagNo(c.env.DB);
+  const [orderId, tagNo] = await Promise.all([buildOrderId(c.env.DB), buildTagNo(c.env.DB)]);
   const { setQty, pricePerDay } = calculatePricePerDay(suitcaseQty, backpackQty);
 
   let expectedStorageDays = 1;
