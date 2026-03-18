@@ -1147,8 +1147,8 @@ customer.post("/customer/submit", async (c) => {
   const name = String(body.name || "").trim();
   const phone = String(body.phone || "").trim();
   const companionCount = parseInt(String(body.companion_count || "0"), 10) || 0;
-  const suitcaseQty = parseInt(String(body.suitcase_qty || "0"), 10) || 0;
-  const backpackQty = parseInt(String(body.backpack_qty || "0"), 10) || 0;
+  const suitcaseQty = Math.min(99, parseInt(String(body.suitcase_qty || "0"), 10) || 0);
+  const backpackQty = Math.min(99, parseInt(String(body.backpack_qty || "0"), 10) || 0);
   const expectedPickupAt = String(body.expected_pickup_at || "").trim();
   const flyingPassTier = normalizeFlyingPassTier(String(body.flying_pass_tier || ""));
   const consentChecked = String(body.consent_checked || "") === "1";
@@ -1169,9 +1169,10 @@ customer.post("/customer/submit", async (c) => {
 
   // Validate business hours using the raw form value (already in JST)
   // Extract hour from "YYYY-MM-DDTHH:MM" string directly
-  const pickupHourMatch = String(expectedPickupAt).match(/T(\d{2}):/);
-  const pickupHour = pickupHourMatch ? parseInt(pickupHourMatch[1], 10) : -1;
-  if (pickupHour < 9 || pickupHour > 21) {
+  const pickupTimeMatch = String(expectedPickupAt).match(/T(\d{2}):(\d{2})/);
+  const pickupHour = pickupTimeMatch ? parseInt(pickupTimeMatch[1], 10) : -1;
+  const pickupMin = pickupTimeMatch ? parseInt(pickupTimeMatch[2], 10) : 0;
+  if (pickupHour < 9 || pickupHour > 21 || (pickupHour === 21 && pickupMin > 0)) {
     return redirect("영업시간 09:00~21:00 내에서 수령 가능합니다.");
   }
 

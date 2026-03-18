@@ -87,7 +87,10 @@ staffApi.post("/staff/api/orders/:id/inline-update", async (c) => {
       updates.push(`${key} = ?`);
       // Convert JST datetime-local to UTC ISO for storage
       if (key === "expected_pickup_at" && val && typeof val === "string" && !val.endsWith("Z")) {
-        values.push(new Date(val + ":00+09:00").toISOString());
+        const normalized = String(val).replace(/:\d{2}$/, "").slice(0, 16);
+        values.push(new Date(normalized + ":00+09:00").toISOString());
+      } else if (key === "flying_pass_tier" && typeof val === "string") {
+        values.push(normalizeFlyingPassTier(val));
       } else {
         values.push(val);
       }

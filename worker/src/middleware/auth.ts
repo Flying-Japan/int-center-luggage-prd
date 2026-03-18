@@ -17,12 +17,37 @@ type AppContext = Context<{ Bindings: Env; Variables: { staff: StaffUser } }>;
 const SESSION_COOKIE = "luggage_session";
 const SESSION_MAX_AGE = 60 * 60 * 12; // 12 hours
 
+/** Compute HMAC-SHA256 hex signature for a payload string. */
+async function hmacSign(payload: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Verify HMAC-SHA256 signature using constant-time comparison. */
+async function hmacVerify(payload: string, signature: string, secret: string): Promise<boolean> {
+  const expected = await hmacSign(payload, secret);
+  if (expected.length !== signature.length) return false;
+  let result = 0;
+  for (let i = 0; i < expected.length; i++) {
+    result |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+  }
+  return result === 0;
+}
+
 /**
- * Set session cookie with user_id after successful login.
+ * Set session cookie with user_id after successful login (HMAC-signed).
  */
-export function setSession(c: AppContext, userId: string) {
+export async function setSession(c: AppContext, userId: string) {
   const payload = btoa(JSON.stringify({ user_id: userId, exp: Date.now() + SESSION_MAX_AGE * 1000 }));
-  setCookie(c, SESSION_COOKIE, payload, {
+  const sig = await hmacSign(payload, c.env.APP_SECRET_KEY);
+  setCookie(c, SESSION_COOKIE, `${payload}.${sig}`, {
     httpOnly: true,
     secure: c.env.APP_ENV === "production",
     sameSite: "Lax",
@@ -39,13 +64,18 @@ export function clearSession(c: AppContext) {
 }
 
 /**
- * Read user_id from session cookie. Returns null if expired or invalid.
+ * Read user_id from session cookie. Returns null if expired, invalid, or tampered.
  */
-function readSession(c: AppContext): string | null {
+async function readSession(c: AppContext): Promise<string | null> {
   const raw = getCookie(c, SESSION_COOKIE);
   if (!raw) return null;
   try {
-    const data = JSON.parse(atob(raw)) as { user_id: string; exp: number };
+    const dotIdx = raw.lastIndexOf(".");
+    if (dotIdx === -1) return null; // unsigned cookie (legacy) → reject
+    const payload = raw.slice(0, dotIdx);
+    const sig = raw.slice(dotIdx + 1);
+    if (!await hmacVerify(payload, sig, c.env.APP_SECRET_KEY)) return null;
+    const data = JSON.parse(atob(payload)) as { user_id: string; exp: number };
     if (data.exp < Date.now()) return null;
     return data.user_id;
   } catch {
@@ -58,7 +88,7 @@ function readSession(c: AppContext): string | null {
  * Returns null if not authenticated.
  */
 export async function getCurrentStaff(c: AppContext): Promise<StaffUser | null> {
-  const userId = readSession(c);
+  const userId = await readSession(c);
   if (!userId) return null;
 
   const staff = await c.env.DB.prepare(

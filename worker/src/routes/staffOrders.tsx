@@ -362,7 +362,8 @@ staffOrders.post("/staff/orders/:id/update", async (c) => {
       let val = String(body[field]);
       // Convert JST datetime-local to UTC ISO for storage
       if (field === "expected_pickup_at" && val && !val.endsWith("Z")) {
-        val = new Date(val + ":00+09:00").toISOString();
+        const normalized = val.replace(/:\d{2}$/, "").slice(0, 16);
+        val = new Date(normalized + ":00+09:00").toISOString();
       }
       values.push(val);
     }
@@ -480,8 +481,8 @@ staffOrders.post("/staff/orders/manual", async (c) => {
 
   const name = String(body.name || "").trim();
   const phone = String(body.phone || "").trim();
-  const suitcaseQty = parseInt(String(body.suitcase_qty || "0"), 10);
-  const backpackQty = parseInt(String(body.backpack_qty || "0"), 10);
+  const suitcaseQty = Math.min(99, parseInt(String(body.suitcase_qty || "0"), 10));
+  const backpackQty = Math.min(99, parseInt(String(body.backpack_qty || "0"), 10));
   const companionCount = parseInt(String(body.companion_count || "0"), 10);
   const flyingPassTier = normalizeFlyingPassTier(String(body.flying_pass_tier || ""));
   const expectedPickupAt = String(body.expected_pickup_at || "");

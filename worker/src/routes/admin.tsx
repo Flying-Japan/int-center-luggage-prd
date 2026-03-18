@@ -303,7 +303,9 @@ admin.post("/staff/admin/staff-accounts", async (c) => {
       .bind(data.user.id, displayName, email.split("@")[0], role)
       .run();
   } catch (e) {
-    await supabaseAdmin.auth.admin.deleteUser(data.user.id);
+    try {
+      await supabaseAdmin.auth.admin.deleteUser(data.user.id);
+    } catch { /* rollback best-effort */ }
     return c.redirect(`/staff/admin/staff-accounts?error=${encodeURIComponent("프로필 생성 실패 — 계정이 롤백되었습니다")}`);
   }
 

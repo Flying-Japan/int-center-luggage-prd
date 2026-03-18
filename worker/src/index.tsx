@@ -257,7 +257,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       <td data-col-key="tag_no"><span class={`editable tag-pill ${tagColorClass(o.tag_no)}`} data-field="tag_no" data-order-id={o.order_id}>{o.tag_no || "-"}</span></td>
                       <td data-col-key="created_time">{o.created_at ? new Date(o.created_at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
                       <td data-col-key="price" class="price-cell" data-order-id={o.order_id} data-tier={o.flying_pass_tier || "NONE"} data-method={o.payment_method || "CASH"} style="cursor:pointer;position:relative"><span class="price-display">{`¥${o.prepaid_amount}`}</span></td>
-                      <td data-col-key="pickup_time"><span class="editable" data-field="expected_pickup_at" data-order-id={o.order_id} data-type="datetime-local" data-raw-value={o.expected_pickup_at ? o.expected_pickup_at.slice(0, 16) : ""}>{o.expected_pickup_at ? new Date(o.expected_pickup_at).toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</span></td>
+                      <td data-col-key="pickup_time"><span class="editable" data-field="expected_pickup_at" data-order-id={o.order_id} data-type="datetime-local" data-raw-value={o.expected_pickup_at ? new Date(new Date(o.expected_pickup_at).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16) : ""}>{o.expected_pickup_at ? new Date(o.expected_pickup_at).toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</span></td>
                       <td data-col-key="pay_status"><span class={`status-pill ${o.status === "PAID" || o.status === "PICKED_UP" ? "status-paid" : o.status === "CANCELLED" ? "status-cancelled" : "status-payment_pending"}`}>{o.status === "PAID" || o.status === "PICKED_UP" ? "결제완료" : o.status === "CANCELLED" ? "취소" : "결제대기"}</span></td>
                       <td data-col-key="pickup_status"><span class={`status-pill ${o.status === "PICKED_UP" ? "status-picked_up" : o.status === "CANCELLED" ? "status-cancelled" : "status-payment_pending"}`}>{o.status === "PICKED_UP" ? "수령완료" : o.status === "CANCELLED" ? "취소" : "미수령"}</span></td>
                       <td data-col-key="actions">
@@ -417,7 +417,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 row.dataset.status=d.status;
                 var payPill=row.querySelector('[data-col-key="pay_status"] .status-pill');
                 if(payPill){payPill.className='status-pill '+(isPaid?'status-paid':'status-payment_pending');payPill.textContent=isPaid?'결제완료':'결제대기';}
-              });
+              }).catch(function(){alert('네트워크 오류');});
             }
 
             function doPickup(oid){

@@ -80,6 +80,10 @@ export function validateImageUpload(
   if (!contentType || !contentType.startsWith("image/")) {
     return { valid: false, error: "파일은 이미지 형식이어야 합니다." };
   }
+  const blocked = ["image/svg+xml", "image/svg"];
+  if (blocked.includes(contentType.toLowerCase())) {
+    return { valid: false, error: "SVG 파일은 업로드할 수 없습니다." };
+  }
   if (size > MAX_IMAGE_SIZE) {
     return { valid: false, error: "이미지 크기는 10MB 이하여야 합니다." };
   }

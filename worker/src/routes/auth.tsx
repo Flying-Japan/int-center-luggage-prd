@@ -91,7 +91,7 @@ auth.post("/staff/login", async (c) => {
     return c.redirect("/staff/login?error=Account not active");
   }
 
-  setSession(c, data.user.id);
+  await setSession(c, data.user.id);
   return c.redirect("/staff/dashboard");
 });
 
@@ -191,7 +191,7 @@ auth.get("/auth/callback", async (c) => {
     return c.redirect("/staff/login?error=access_denied");
   }
 
-  setSession(c, String(userId));
+  await setSession(c, String(userId));
   return c.redirect("/staff/dashboard");
 });
 
