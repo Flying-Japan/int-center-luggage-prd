@@ -123,6 +123,22 @@ ops.post("/staff/cash-closing", async (c) => {
   const paypayAmount = parseInt(String(body.paypay_amount || "0"), 10);
   const actualQrAmount = parseInt(String(body.actual_qr_amount || "0"), 10);
   const closingType = String(body.closing_type || "FINAL_CLOSE");
+  const actualAmount = totalAmount + actualQrAmount;
+
+  // Auto-calculate expected amount from today's PAID/PICKED_UP orders
+  const autoSales = await c.env.DB.prepare(
+    `SELECT
+       SUM(CASE WHEN payment_method = 'CASH' OR payment_method IS NULL THEN prepaid_amount ELSE 0 END) as auto_cash,
+       SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount ELSE 0 END) as auto_qr,
+       SUM(prepaid_amount) as auto_total
+     FROM luggage_orders
+     WHERE date(created_at) = ? AND status IN ('PAID', 'PICKED_UP')`
+  ).bind(businessDate).first<{ auto_cash: number; auto_qr: number; auto_total: number }>();
+
+  const checkAutoAmount = autoSales?.auto_total ?? 0;
+  const expectedAmount = checkAutoAmount;
+  const differenceAmount = actualAmount - expectedAmount;
+  const qrDifferenceAmount = actualQrAmount - (autoSales?.auto_qr ?? 0);
 
   await c.env.DB.prepare(
     `INSERT INTO luggage_cash_closings (
@@ -130,13 +146,17 @@ ops.post("/staff/cash-closing", async (c) => {
        count_10000, count_5000, count_2000, count_1000, count_500,
        count_100, count_50, count_10, count_5, count_1,
        total_amount, paypay_amount, actual_qr_amount,
-       actual_amount, staff_id, note
-     ) VALUES (?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       actual_amount, check_auto_amount, expected_amount,
+       difference_amount, qr_difference_amount,
+       staff_id, note
+     ) VALUES (?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       businessDate, closingType,
       ...denomValues, totalAmount, paypayAmount, actualQrAmount,
-      totalAmount + paypayAmount, staff.id, String(body.note || "") || null
+      actualAmount, checkAutoAmount, expectedAmount,
+      differenceAmount, qrDifferenceAmount,
+      staff.id, String(body.note || "") || null
     )
     .run();
 
@@ -176,15 +196,36 @@ ops.get("/staff/cash-closing/:id", async (c) => {
 
           <section class="card">
             <h3 class="card-title">정산 상세: {cl.business_date as string}</h3>
-            <p>유형: {cl.closing_type as string} | 상태: {cl.workflow_status as string}</p>
-            <p>현금 합계: ¥{cl.total_amount as number}</p>
-            <p>PayPay: ¥{cl.paypay_amount as number}</p>
-            <p>QR 실제: ¥{cl.actual_qr_amount as number}</p>
-            <p>총 합계: ¥{cl.actual_amount as number}</p>
-            <p>메모: {(cl.note as string) || "-"}</p>
+            <p style="margin-bottom:12px">유형: {cl.closing_type as string} | 상태: <span class="status-pill">{cl.workflow_status as string}</span></p>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px">
+              <div class="card" style="padding:12px;text-align:center">
+                <p style="font-size:11px;color:#787774;margin:0">현금 합계</p>
+                <p style="font-size:20px;font-weight:700;margin:4px 0 0">¥{cl.total_amount as number}</p>
+              </div>
+              <div class="card" style="padding:12px;text-align:center">
+                <p style="font-size:11px;color:#787774;margin:0">QR 실제</p>
+                <p style="font-size:20px;font-weight:700;margin:4px 0 0">¥{cl.actual_qr_amount as number}</p>
+              </div>
+              <div class="card" style="padding:12px;text-align:center">
+                <p style="font-size:11px;color:#787774;margin:0">자동매출</p>
+                <p style="font-size:20px;font-weight:700;margin:4px 0 0">¥{cl.check_auto_amount as number}</p>
+              </div>
+              <div class="card" style="padding:12px;text-align:center">
+                <p style="font-size:11px;color:#787774;margin:0">차액</p>
+                <p style={`font-size:20px;font-weight:700;margin:4px 0 0;color:${(cl.difference_amount as number) === 0 ? '#166534' : '#dc2626'}`}>¥{cl.difference_amount as number}</p>
+              </div>
+            </div>
+
+            <div class="summary-grid" style="font-size:13px">
+              <p><strong>PayPay</strong><span>¥{cl.paypay_amount as number}</span></p>
+              <p><strong>총 실제액</strong><span>¥{cl.actual_amount as number}</span></p>
+              <p><strong>QR 차액</strong><span style={`color:${(cl.qr_difference_amount as number) === 0 ? '#166534' : '#dc2626'}`}>¥{cl.qr_difference_amount as number}</span></p>
+              <p><strong>메모</strong><span>{(cl.note as string) || "-"}</span></p>
+            </div>
 
             {cl.workflow_status === "DRAFT" && (
-              <form method="post" action={`/staff/cash-closing/${closingId}/submit`}>
+              <form method="post" action={`/staff/cash-closing/${closingId}/submit`} style="margin-top:12px">
                 <button class="btn btn-primary" type="submit">제출</button>
               </form>
             )}
@@ -275,20 +316,39 @@ ops.get("/staff/api/cash-closing/auto-sales", async (c) => {
 // HANDOVER NOTES (US-010)
 // ============================================================
 
+const NOTE_CATEGORY_LABELS: Record<string, string> = {
+  HANDOVER: "인수인계", NOTICE: "안내사항", URGENT: "긴급", OTHER: "기타",
+};
+
 // GET /staff/handover — Handover notes list
 ops.get("/staff/handover", async (c) => {
   const staff = getStaff(c);
-  const notes = await c.env.DB.prepare(
-    "SELECT * FROM luggage_handover_notes ORDER BY is_pinned DESC, created_at DESC LIMIT 50"
-  ).all();
 
-  // Get read status for current staff
-  const reads = await c.env.DB.prepare(
-    "SELECT note_id FROM luggage_handover_reads WHERE staff_id = ?"
-  )
-    .bind(staff.id)
-    .all<{ note_id: number }>();
+  // Fetch notes with author names, read status, and comments in parallel
+  const [notes, reads, comments] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT n.*, COALESCE(u.display_name, u.username) as author_name
+       FROM luggage_handover_notes n
+       LEFT JOIN user_profiles u ON n.staff_id = u.id
+       ORDER BY n.is_pinned DESC, n.created_at DESC LIMIT 50`
+    ).all(),
+    c.env.DB.prepare(
+      "SELECT note_id FROM luggage_handover_reads WHERE staff_id = ?"
+    ).bind(staff.id).all<{ note_id: number }>(),
+    c.env.DB.prepare(
+      `SELECT c.*, COALESCE(u.display_name, u.username) as author_name
+       FROM luggage_handover_comments c
+       LEFT JOIN user_profiles u ON c.staff_id = u.id
+       ORDER BY c.created_at ASC`
+    ).all(),
+  ]);
   const readNoteIds = new Set(reads.results.map((r) => r.note_id));
+  const commentsByNote = new Map<number, Record<string, unknown>[]>();
+  for (const cm of comments.results as Record<string, unknown>[]) {
+    const nid = cm.note_id as number;
+    if (!commentsByNote.has(nid)) commentsByNote.set(nid, []);
+    commentsByNote.get(nid)!.push(cm);
+  }
 
   return c.html(
     <html lang="ko">
@@ -337,19 +397,45 @@ ops.get("/staff/handover", async (c) => {
             {notes.results.map((note: Record<string, unknown>) => {
               const noteId = note.note_id as number;
               const isRead = readNoteIds.has(noteId);
+              const noteComments = commentsByNote.get(noteId) || [];
+              const catLabel = NOTE_CATEGORY_LABELS[note.category as string] || (note.category as string);
               return (
-                <div class="ops-item">
+                <div class={`ops-item ${isRead ? "" : "ops-item-unread"}`} style={isRead ? "" : "border-left:3px solid #2383e2"}>
                   <div class="ops-item-header">
                     <strong>{(note.is_pinned as number) ? "📌 " : ""}{note.title as string}</strong>
-                    <span class="ops-item-meta">[{note.category as string}] {isRead ? "✓읽음" : "⬤새글"}</span>
+                    <span class="ops-item-meta">
+                      <span class="status-pill" style="font-size:10px">{catLabel}</span>
+                      {isRead ? " ✓읽음" : " ⬤새글"}
+                    </span>
                   </div>
                   <p class="ops-item-content">{note.content as string}</p>
-                  <small class="ops-item-date">{note.created_at as string}</small>
+                  <small class="ops-item-date">
+                    {(note.author_name as string) || "알수없음"} · {note.created_at ? new Date(note.created_at as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}
+                  </small>
                   {!isRead && (
-                    <form method="post" action={`/staff/handover/${noteId}/read`} style="display:inline">
+                    <form method="post" action={`/staff/handover/${noteId}/read`} style="display:inline;margin-left:8px">
                       <button class="btn btn-sm" type="submit">읽음 표시</button>
                     </form>
                   )}
+
+                  {/* Comments */}
+                  {noteComments.length > 0 && (
+                    <div style="margin-top:8px;padding-left:12px;border-left:2px solid #e5e5e5">
+                      {noteComments.map((cm) => (
+                        <div style="margin-bottom:6px;font-size:12px">
+                          <strong style="color:#37352f">{(cm.author_name as string) || "알수없음"}</strong>
+                          <span style="color:#999;margin-left:6px">{cm.created_at ? new Date(cm.created_at as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}</span>
+                          <p style="margin:2px 0 0;color:#555">{cm.content as string}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Comment form */}
+                  <form method="post" action={`/staff/handover/${noteId}/comments`} style="display:flex;gap:6px;margin-top:8px">
+                    <input class="control" type="text" name="content" placeholder="댓글 입력..." required style="flex:1;font-size:12px;padding:4px 8px" />
+                    <button class="btn btn-sm btn-secondary" type="submit">댓글</button>
+                  </form>
                 </div>
               );
             })}
@@ -468,8 +554,9 @@ ops.get("/staff/lost-found", async (c) => {
     params.push(statusFilter);
   }
   if (search) {
-    sql += " AND item_name LIKE ?";
-    params.push(`%${search}%`);
+    sql += " AND (item_name LIKE ? OR found_location LIKE ? OR claimed_by LIKE ? OR note LIKE ?)";
+    const like = `%${search}%`;
+    params.push(like, like, like, like);
   }
   sql += " ORDER BY created_at DESC LIMIT 100";
 
@@ -527,27 +614,34 @@ ops.get("/staff/lost-found", async (c) => {
             <div class="table-wrap">
               <table>
                 <thead>
-                  <tr><th>물품</th><th>수량</th><th>장소</th><th>상태</th><th>등록일</th><th>액션</th></tr>
+                  <tr><th>물품</th><th>수량</th><th>장소</th><th>상태</th><th>메모</th><th>등록일</th><th>액션</th></tr>
                 </thead>
                 <tbody>
-                  {entries.results.map((e: Record<string, unknown>) => (
+                  {entries.results.map((e: Record<string, unknown>) => {
+                    const statusLabels: Record<string, string> = { UNCLAIMED: "미확인", CLAIMED: "인수완료", DISPOSED: "폐기", RETURNED: "반환" };
+                    return (
                     <tr>
                       <td>{e.item_name as string}</td>
                       <td>{e.quantity as number}</td>
                       <td>{(e.found_location as string) || "-"}</td>
-                      <td>{e.status as string}</td>
-                      <td>{e.created_at as string}</td>
+                      <td><span class="status-pill" style="font-size:10px">{statusLabels[e.status as string] || (e.status as string)}</span></td>
+                      <td style="font-size:12px;color:#666">{(e.note as string) || "-"}</td>
+                      <td style="white-space:nowrap">{e.created_at ? new Date(e.created_at as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
                       <td>
                         {e.status === "UNCLAIMED" && (
                           <form method="post" action={`/staff/lost-found/${e.entry_id}/update`} style="display:inline">
                             <input type="hidden" name="status" value="CLAIMED" />
-                            <input class="control" type="text" name="claimed_by" placeholder="인수자" />
+                            <input class="control" type="text" name="claimed_by" placeholder="인수자" style="width:80px;font-size:12px" />
                             <button class="btn btn-sm" type="submit">인계</button>
                           </form>
                         )}
+                        <form method="post" action={`/staff/lost-found/${e.entry_id}/delete`} style="display:inline;margin-left:4px" onsubmit="return confirm('삭제하시겠습니까?')">
+                          <button class="btn btn-sm" style="color:#991b1b" type="submit">삭제</button>
+                        </form>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -615,6 +709,47 @@ ops.post("/staff/lost-found/:id/delete", async (c) => {
   const entryId = c.req.param("id");
   await c.env.DB.prepare("DELETE FROM luggage_lost_found_entries WHERE entry_id = ?").bind(entryId).run();
   return c.redirect("/staff/lost-found");
+});
+
+// ============================================================
+// SCHEDULE (moved from admin — accessible to all staff)
+// ============================================================
+
+// GET /staff/schedule — Work schedule (all staff can view)
+ops.get("/staff/schedule", async (c) => {
+  const calendarUrl = await c.env.DB.prepare(
+    "SELECT setting_value FROM luggage_app_settings WHERE setting_key = 'calendar_embed_url'"
+  ).first<{ setting_value: string }>();
+
+  const staff = getStaff(c);
+  return c.html(
+    <html lang="ko">
+      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>근무 스케줄</title></head>
+      <body class="staff-site">
+        <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
+        <main class="container">
+          <nav class="staff-menu" aria-label="직원 메뉴">
+            <a class="staff-menu-link" href="/staff/dashboard">대시보드</a>
+            <a class="staff-menu-link" href="/staff/cash-closing">정산마감</a>
+            <a class="staff-menu-link" href="/staff/handover">인수인계</a>
+            <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
+            <a class="staff-menu-link is-active" href="/staff/schedule">스케줄</a>
+            <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
+          </nav>
+        <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
+        <h2 class="hero-title">근무 스케줄</h2>
+        {calendarUrl?.setting_value ? (
+          <>
+            <iframe src={calendarUrl.setting_value} style="width:100%;height:600px;border:none" />
+            <p style="margin-top:8px"><a href={calendarUrl.setting_value} target="_blank" style="color:var(--primary)">새 창에서 열기 ↗</a></p>
+          </>
+        ) : (
+          <p class="muted">캘린더 URL이 설정되지 않았습니다. 관리자에게 문의하세요.</p>
+        )}
+        </main>
+      </body>
+    </html>
+  );
 });
 
 export default ops;

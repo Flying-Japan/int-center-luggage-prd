@@ -64,6 +64,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   // Parse query params for search/filter
   const q = c.req.query("q") || "";
   const statusFilters = c.req.queries("status_filter") || [];
+  const showAllPickedUp = c.req.query("show_all_picked_up") === "true";
 
   let sql = `WITH note_edits AS (
       SELECT a.order_id,
@@ -87,12 +88,17 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   }
 
   if (q) {
-    sql += " AND (name LIKE ? OR order_id LIKE ? OR tag_no LIKE ? OR phone LIKE ?)";
+    sql += " AND (o.name LIKE ? OR o.order_id LIKE ? OR o.tag_no LIKE ? OR o.phone LIKE ?)";
     const like = `%${q}%`;
     params.push(like, like, like, like);
   }
 
-  sql += " ORDER BY created_at ASC LIMIT 100";
+  // Hide old PICKED_UP orders (>2 days) unless show_all_picked_up is checked
+  if (!showAllPickedUp) {
+    sql += " AND (o.status != 'PICKED_UP' OR o.created_at >= datetime('now', '-2 days'))";
+  }
+
+  sql += " ORDER BY o.created_at ASC LIMIT 100";
 
   // Run order list and counts in parallel
   const [orders, countsResult] = await Promise.all([
@@ -188,6 +194,10 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     <span>취소 ({counts.cancelled_count})</span>
                   </label>
                 </div>
+                <label class="status-filter-chip" style="margin-left:8px">
+                  <input class="status-filter-input" type="checkbox" name="show_all_picked_up" value="true" checked={showAllPickedUp} />
+                  <span>수령완료 전체보기</span>
+                </label>
               </div>
 
               <div class="staff-search-row">
@@ -293,6 +303,55 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               </table>
             </div>
           </section>
+
+          {/* Manual order form */}
+          <details class="card" style="margin-top:16px">
+            <summary class="card-title" style="cursor:pointer">수기 접수</summary>
+            <form action="/staff/orders/manual" method="post" class="grid2" style="margin-top:12px">
+              <label class="field">
+                <span class="field-label">이름 *</span>
+                <input class="control" type="text" name="name" required />
+              </label>
+              <label class="field">
+                <span class="field-label">전화번호 *</span>
+                <input class="control" type="text" name="phone" required />
+              </label>
+              <label class="field">
+                <span class="field-label">캐리어</span>
+                <input class="control" type="number" name="suitcase_qty" value="1" min="0" />
+              </label>
+              <label class="field">
+                <span class="field-label">백팩</span>
+                <input class="control" type="number" name="backpack_qty" value="0" min="0" />
+              </label>
+              <label class="field">
+                <span class="field-label">예정 픽업일</span>
+                <input class="control" type="date" name="expected_pickup_date" />
+              </label>
+              <label class="field">
+                <span class="field-label">예정 픽업 시간</span>
+                <select class="control" name="expected_pickup_time">
+                  <option value="09:00">09:00</option><option value="09:30">09:30</option>
+                  <option value="10:00">10:00</option><option value="10:30">10:30</option>
+                  <option value="11:00">11:00</option><option value="11:30">11:30</option>
+                  <option value="12:00">12:00</option><option value="12:30">12:30</option>
+                  <option value="13:00">13:00</option><option value="13:30">13:30</option>
+                  <option value="14:00">14:00</option><option value="14:30">14:30</option>
+                  <option value="15:00">15:00</option><option value="15:30">15:30</option>
+                  <option value="16:00">16:00</option><option value="16:30">16:30</option>
+                  <option value="17:00">17:00</option><option value="17:30">17:30</option>
+                  <option value="18:00" selected>18:00</option><option value="18:30">18:30</option>
+                  <option value="19:00">19:00</option><option value="19:30">19:30</option>
+                  <option value="20:00">20:00</option><option value="20:30">20:30</option>
+                  <option value="21:00">21:00</option>
+                </select>
+              </label>
+              <label class="button-wrap">
+                <span class="field-label sr-only">접수</span>
+                <button class="btn btn-primary" type="submit">수기 접수</button>
+              </label>
+            </form>
+          </details>
         </main>
         <script dangerouslySetInnerHTML={{ __html: `
           (function(){

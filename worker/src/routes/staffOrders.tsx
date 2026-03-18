@@ -564,6 +564,8 @@ staffOrders.get("/staff/orders/:id/luggage-image", async (c) => {
 // GET /staff/bug-report — Bug report form
 staffOrders.get("/staff/bug-report", (c) => {
   const staff = getStaff(c);
+  const success = c.req.query("success") === "1";
+  const error = c.req.query("error");
   return c.html(
     <html lang="ko">
       <head>
@@ -598,6 +600,8 @@ staffOrders.get("/staff/bug-report", (c) => {
             <a class="staff-menu-link is-active" href="/staff/bug-report">버그신고</a>
           </nav>
           <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
+          {success && <div class="card" style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:10px 16px;margin-bottom:12px">버그 신고가 접수되었습니다. 감사합니다!</div>}
+          {error && <div class="card" style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;margin-bottom:12px">신고 중 오류가 발생했습니다. 다시 시도해주세요.</div>}
           <section class="card">
             <h3 class="card-title">버그 신고</h3>
             <form method="post" action="/staff/bug-report" class="grid2">
