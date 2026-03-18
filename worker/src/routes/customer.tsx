@@ -11,7 +11,7 @@ import {
   flyingPassDiscountAmount,
 } from "../services/pricing";
 import { calculateStorageDays, validatePickupTimeWindow } from "../services/storage";
-import { buildOrderId } from "../services/orderNumber";
+import { buildOrderId, buildTagNo } from "../services/orderNumber";
 
 const customer = new Hono<AppType>();
 
@@ -1175,8 +1175,9 @@ customer.post("/customer/submit", async (c) => {
     return redirect("영업시간 09:00~21:00 내에서 수령 가능합니다.");
   }
 
-  // --- Generate order ID ---
+  // --- Generate order ID and tag number ---
   const orderId = await buildOrderId(c.env.DB);
+  const tagNo = await buildTagNo(c.env.DB);
 
   // --- Upload images ---
   let idImageUrl: string | null = null;
@@ -1215,17 +1216,18 @@ customer.post("/customer/submit", async (c) => {
   // --- Insert order ---
   await c.env.DB.prepare(
     `INSERT INTO luggage_orders (
-      order_id, name, phone, companion_count,
+      order_id, tag_no, name, phone, companion_count,
       suitcase_qty, backpack_qty, set_qty,
       expected_pickup_at, expected_storage_days,
       price_per_day, discount_rate, prepaid_amount,
       flying_pass_tier, flying_pass_discount_amount, final_amount,
       id_image_url, luggage_image_url,
       consent_checked, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING')`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING')`
   )
     .bind(
       orderId,
+      tagNo,
       name,
       phone,
       companionCount,

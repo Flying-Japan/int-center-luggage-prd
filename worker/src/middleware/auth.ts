@@ -104,13 +104,14 @@ export async function insertAuditLog(
   db: D1Database,
   orderId: string,
   staffId: string,
-  action: string
+  action: string,
+  details?: string
 ): Promise<void> {
   await db
     .prepare(
-      "INSERT INTO luggage_audit_logs (order_id, staff_id, action, timestamp) VALUES (?, ?, ?, datetime('now'))"
+      "INSERT INTO luggage_audit_logs (order_id, staff_id, action, details, timestamp) VALUES (?, ?, ?, ?, datetime('now'))"
     )
-    .bind(orderId, staffId, action)
+    .bind(orderId, staffId, action, details ?? null)
     .run();
 }
 

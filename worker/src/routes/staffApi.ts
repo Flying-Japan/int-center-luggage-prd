@@ -6,7 +6,8 @@ import { Hono } from "hono";
 import type { AppType } from "../types";
 import { staffAuth, getStaff, insertAuditLog } from "../middleware/auth";
 import { calculateStorageDays, calculateExtraDays } from "../services/storage";
-import { calculateExtraAmount } from "../services/pricing";
+import { calculateExtraAmount, recalculateOrderPrepaid, normalizeFlyingPassTier } from "../services/pricing";
+import type { FlyingPassTier } from "../services/pricing";
 
 const staffApi = new Hono<AppType>();
 
@@ -101,8 +102,13 @@ staffApi.post("/staff/api/orders/:id/inline-update", async (c) => {
     .bind(...values)
     .run();
 
-  // Log the update
-  await insertAuditLog(c.env.DB, orderId, staff.id, "INLINE_UPDATE");
+  // Log the update with field details
+  const FIELD_LABELS: Record<string, string> = { name: "이름", phone: "전화", tag_no: "짐번호", note: "비고", expected_pickup_at: "픽업시각", flying_pass_tier: "패스" };
+  const details = Object.entries(body)
+    .filter(([k]) => ALLOWED_FIELDS.includes(k))
+    .map(([k, v]) => `${FIELD_LABELS[k] || k}: ${v}`)
+    .join(", ");
+  await insertAuditLog(c.env.DB, orderId, staff.id, "INLINE_UPDATE", details);
 
   return c.json({ success: true });
 });
@@ -126,6 +132,7 @@ staffApi.post("/staff/api/orders/:id/toggle-warehouse", async (c) => {
     .bind(newVal, orderId)
     .run();
 
+  await insertAuditLog(c.env.DB, orderId, getStaff(c).id, "TOGGLE_WAREHOUSE", newVal ? "창고보관" : "창고해제");
   return c.json({ success: true, in_warehouse: !!newVal });
 });
 
@@ -223,7 +230,7 @@ staffApi.post("/staff/api/orders/:id/pickup", async (c) => {
     .bind(now, actualStorageDays, extraDays, extraAmount, orderId)
     .run();
 
-  await insertAuditLog(c.env.DB, orderId, staff.id, "PICKUP");
+  await insertAuditLog(c.env.DB, orderId, staff.id, "PICKUP", `실제보관 ${actualStorageDays}일, 초과 ${extraDays}일, 추가요금 ¥${extraAmount}`);
 
   return c.json({ success: true, extra_days: extraDays, extra_amount: extraAmount });
 });
@@ -249,6 +256,98 @@ staffApi.post("/staff/api/orders/:id/undo-pickup", async (c) => {
   await insertAuditLog(c.env.DB, orderId, staff.id, "UNDO_PICKUP");
 
   return c.json({ success: true });
+});
+
+// POST /staff/api/orders/:id/toggle-payment — Toggle PAYMENT_PENDING <-> PAID
+staffApi.post("/staff/api/orders/:id/toggle-payment", async (c) => {
+  const orderId = c.req.param("id");
+  const staff = getStaff(c);
+
+  const order = await c.env.DB.prepare(
+    "SELECT status FROM luggage_orders WHERE order_id = ?"
+  )
+    .bind(orderId)
+    .first<{ status: string }>();
+
+  if (!order) return c.json({ error: "Order not found" }, 404);
+  if (order.status !== "PAYMENT_PENDING" && order.status !== "PAID") {
+    return c.json({ error: "Cannot toggle payment for this status" }, 400);
+  }
+
+  const newStatus = order.status === "PAID" ? "PAYMENT_PENDING" : "PAID";
+  await c.env.DB.prepare(
+    "UPDATE luggage_orders SET status = ?, updated_at = datetime('now') WHERE order_id = ?"
+  )
+    .bind(newStatus, orderId)
+    .run();
+
+  await insertAuditLog(c.env.DB, orderId, staff.id, "TOGGLE_PAYMENT", `${order.status} → ${newStatus}`);
+
+  return c.json({ success: true, status: newStatus });
+});
+
+// POST /staff/api/orders/:id/update-price — Update payment method, tier, override amount
+staffApi.post("/staff/api/orders/:id/update-price", async (c) => {
+  const orderId = c.req.param("id");
+  const body = await c.req.json<{
+    payment_method?: string;
+    flying_pass_tier?: string;
+    staff_prepaid_override_amount?: number | null;
+  }>();
+  const staff = getStaff(c);
+
+  const order = await c.env.DB.prepare(
+    "SELECT price_per_day, expected_storage_days, prepaid_amount, flying_pass_tier, payment_method FROM luggage_orders WHERE order_id = ?"
+  )
+    .bind(orderId)
+    .first<{
+      price_per_day: number;
+      expected_storage_days: number;
+      prepaid_amount: number;
+      flying_pass_tier: string;
+      payment_method: string;
+    }>();
+
+  if (!order) return c.json({ error: "Order not found" }, 404);
+
+  const tier = normalizeFlyingPassTier(body.flying_pass_tier ?? order.flying_pass_tier);
+  const paymentMethod = body.payment_method ?? order.payment_method ?? "CASH";
+
+  const { finalPrepaid, flyingPassDiscountAmount: passDiscount } = recalculateOrderPrepaid(
+    order.price_per_day,
+    order.expected_storage_days,
+    tier
+  );
+
+  // If staff override is provided, use that; otherwise use calculated amount
+  const overrideAmount = body.staff_prepaid_override_amount;
+  if (overrideAmount != null && (overrideAmount < 0 || overrideAmount > 500000)) {
+    return c.json({ error: "Override amount out of range (0-500000)" }, 400);
+  }
+  const finalAmount = overrideAmount != null ? overrideAmount : finalPrepaid;
+
+  await c.env.DB.prepare(
+    `UPDATE luggage_orders
+     SET payment_method = ?, flying_pass_tier = ?, flying_pass_discount_amount = ?,
+         prepaid_amount = ?, final_amount = ?,
+         staff_prepaid_override_amount = ?,
+         updated_at = datetime('now')
+     WHERE order_id = ?`
+  )
+    .bind(
+      paymentMethod,
+      tier,
+      passDiscount,
+      finalAmount,
+      finalAmount,
+      overrideAmount ?? null,
+      orderId
+    )
+    .run();
+
+  await insertAuditLog(c.env.DB, orderId, staff.id, "UPDATE_PRICE", `패스: ${tier}, 결제수단: ${paymentMethod}, 금액: ¥${finalAmount}`);
+
+  return c.json({ success: true, prepaid_amount: finalAmount, flying_pass_tier: tier, payment_method: paymentMethod });
 });
 
 export default staffApi;

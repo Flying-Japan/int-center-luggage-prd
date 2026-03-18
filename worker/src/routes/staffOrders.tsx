@@ -63,7 +63,10 @@ staffOrders.get("/staff/orders/:id", async (c) => {
   // Run independent queries in parallel
   const [auditLogs, extensions] = await Promise.all([
     c.env.DB.prepare(
-      "SELECT * FROM luggage_audit_logs WHERE order_id = ? ORDER BY timestamp DESC LIMIT 50"
+      `SELECT a.*, u.display_name, u.username
+       FROM luggage_audit_logs a
+       LEFT JOIN user_profiles u ON a.staff_id = u.id
+       WHERE a.order_id = ? ORDER BY a.timestamp DESC LIMIT 50`
     )
       .bind(orderId)
       .all(),
@@ -292,6 +295,35 @@ staffOrders.get("/staff/orders/:id", async (c) => {
                 </section>
               )}
             </div>
+          </section>
+
+          {/* Audit log */}
+          <section class="card">
+            <h3 class="card-title">활동 이력</h3>
+            {auditLogs.results.length > 0 ? (
+              <table style="width:100%;border-collapse:collapse;font-size:12px">
+                <thead>
+                  <tr style="border-bottom:1px solid var(--line)">
+                    <th style="text-align:left;padding:5px 8px">시간</th>
+                    <th style="text-align:left;padding:5px 8px">직원</th>
+                    <th style="text-align:left;padding:5px 8px">행동</th>
+                    <th style="text-align:left;padding:5px 8px">상세</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditLogs.results.map((l: Record<string, unknown>) => (
+                    <tr style="border-bottom:1px solid var(--line)">
+                      <td style="padding:4px 8px;white-space:nowrap">{l.timestamp ? new Date(l.timestamp as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
+                      <td style="padding:4px 8px">{(l.display_name as string) || (l.username as string) || (l.staff_id as string) || "-"}</td>
+                      <td style="padding:4px 8px"><span class="status-pill" style="font-size:10px">{l.action as string}</span></td>
+                      <td style="padding:4px 8px;color:#666">{(l.details as string) || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p class="muted">이력 없음</p>
+            )}
           </section>
         </main>
       </body>

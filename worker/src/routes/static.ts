@@ -489,6 +489,16 @@ tbody tr:hover { background: #eef5ff; }
 
 /* ── Staff orders table ── */
 #staff-orders-table { table-layout: fixed; min-width: 100%; }
+#staff-orders-table col[data-col-key="name"] { width: 8%; }
+#staff-orders-table col[data-col-key="tag_no"] { width: 5%; }
+#staff-orders-table col[data-col-key="created_time"] { width: 8%; }
+#staff-orders-table col[data-col-key="price"] { width: 7%; }
+#staff-orders-table col[data-col-key="pickup_time"] { width: 7%; }
+#staff-orders-table col[data-col-key="pay_status"] { width: 6%; }
+#staff-orders-table col[data-col-key="pickup_status"] { width: 6%; }
+#staff-orders-table col[data-col-key="actions"] { width: 18%; }
+#staff-orders-table col[data-col-key="note"] { width: 32%; }
+#staff-orders-table col[data-col-key="detail"] { width: 3%; }
 
 #staff-orders-table th, #staff-orders-table td {
   padding: 6px 8px;
@@ -870,6 +880,54 @@ tbody tr:hover { background: #eef5ff; }
 .status-payment_pending { color: #8a4a15; background: #fff3e5; }
 .status-paid { color: #0f766e; background: #e6fcf5; }
 .status-picked_up { color: #1e3a8a; background: #e8efff; }
+.status-cancelled { color: #991b1b; background: #fef2f2; }
+
+/* ── Tag number cell colors (pill style on tag_no cell) ── */
+.tag-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; padding: 3px 10px; border-radius: 999px; font-weight: 800; font-size: 13px; }
+.tag-color-orange { color: #c2410c; background: #fff7ed; border: 1.5px solid #fb923c; }
+.tag-color-blue { color: #1e40af; background: #eff6ff; border: 1.5px solid #60a5fa; }
+.tag-color-yellow { color: #92400e; background: #fefce8; border: 1.5px solid #facc15; }
+.tag-color-green { color: #166534; background: #f0fdf4; border: 1.5px solid #4ade80; }
+.tag-color-purple { color: #6b21a8; background: #faf5ff; border: 1.5px solid #a78bfa; }
+.tag-color-black { color: #1a202c; background: #f1f5f9; border: 1.5px solid #64748b; }
+.tag-color-gray { color: #475569; background: #f8fafc; border: 1.5px solid #94a3b8; }
+.tag-color-pink { color: #9d174d; background: #fdf2f8; border: 1.5px solid #f472b6; }
+.tag-color-brown { color: #78350f; background: #fffbeb; border: 1.5px solid #d97706; }
+
+/* ── Click-to-edit cells ── */
+.editable { cursor: pointer; border-bottom: 1px dashed transparent; transition: border-color 0.15s; }
+.editable:hover { border-bottom-color: #cbd5e1; }
+.editable.editing { background: #f8faff; border-bottom: 2px solid var(--primary, #2383e2); outline: none; padding: 2px 4px; min-width: 30px; }
+.edit-input { font: inherit; color: inherit; border: 1px solid var(--primary, #2383e2); border-radius: 4px; padding: 3px 6px; background: #fff; outline: none; width: 100%; }
+
+/* ── Inline action buttons ── */
+.inline-actions { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.inline-actions button { font-size: 11px; padding: 3px 8px; border-radius: 4px; border: 1px solid #ddd; cursor: pointer; white-space: nowrap; font-weight: 600; }
+
+.payment-state-btn.is-paid { background: #f0faf4; color: #166534; border-color: #86efac; }
+.payment-state-btn.is-pending { background: #fffbeb; color: #b45309; border-color: #fcd34d; }
+.payment-state-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.pickup-complete-btn { background: #eff6ff; color: #1d4ed8; border-color: #93c5fd !important; }
+.pickup-undo-btn { background: #f5f5f4; color: #57534e; border-color: #d6d3d1 !important; }
+
+.cancel-btn { background: #fef2f2; color: #991b1b; border-color: #fca5a5 !important; }
+
+.warehouse-btn { background: #f8fafc; color: #64748b; border-color: #cbd5e1 !important; }
+.warehouse-btn.is-active { background: #f0f9ff; color: #0369a1; border-color: #7dd3fc !important; font-weight: 700; }
+
+/* ── Row states ── */
+tr.is-cancelled td { opacity: 0.45; text-decoration: line-through; }
+tr.is-in-warehouse { border-left: 3px solid #94a3b8; }
+
+/* ── Extension badge ── */
+.extension-badge { display: inline-block; background: #a78bfa; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
+
+/* ── Price popover ── */
+.price-popover { position: absolute; z-index: 50; background: #fff; border: 1px solid #dbe4f2; border-radius: 8px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); display: flex; flex-direction: column; gap: 8px; min-width: 220px; font-size: 13px; }
+.price-popover label { display: flex; flex-direction: column; gap: 2px; font-weight: 600; font-size: 12px; color: #787774; }
+.price-popover select, .price-popover input[type="number"] { padding: 5px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+.price-popover .btn-row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 
 /* ── Summary grid ── */
 .summary-grid {
@@ -1451,6 +1509,18 @@ body.staff-site #staff-orders-table tbody tr.is-in-warehouse:hover { background:
 
 body.staff-site #staff-orders-table tbody tr.is-extension { border-left-color: #a78bfa; background: rgba(167, 139, 250, 0.04); }
 body.staff-site .extension-badge { background: #a78bfa; border-radius: 3px; font-size: 9px; padding: 1px 4px; }
+
+/* ── Staff tag pill — preserve color borders (high specificity) ── */
+body.staff-site #staff-orders-table .tag-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; padding: 3px 10px; border-radius: 999px !important; font-weight: 800; font-size: 13px; border-bottom: none !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-orange { color: #c2410c !important; background: #fff7ed !important; border: 1.5px solid #fb923c !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-blue { color: #1e40af !important; background: #eff6ff !important; border: 1.5px solid #60a5fa !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-yellow { color: #92400e !important; background: #fefce8 !important; border: 1.5px solid #facc15 !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-green { color: #166534 !important; background: #f0fdf4 !important; border: 1.5px solid #4ade80 !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-purple { color: #6b21a8 !important; background: #faf5ff !important; border: 1.5px solid #a78bfa !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-black { color: #1a202c !important; background: #f1f5f9 !important; border: 1.5px solid #64748b !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-gray { color: #475569 !important; background: #f8fafc !important; border: 1.5px solid #94a3b8 !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-pink { color: #9d174d !important; background: #fdf2f8 !important; border: 1.5px solid #f472b6 !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-brown { color: #78350f !important; background: #fffbeb !important; border: 1.5px solid #d97706 !important; }
 
 body.staff-site .price-amount { color: #37352f; font-weight: 600; font-size: 13px; }
 

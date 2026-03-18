@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS luggage_audit_logs (
   staff_id TEXT,
   device_id TEXT,
   action TEXT NOT NULL,
+  details TEXT,
   timestamp TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
