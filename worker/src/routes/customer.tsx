@@ -1173,7 +1173,7 @@ customer.post("/customer/submit", async (c) => {
   const pickupHour = pickupTimeMatch ? parseInt(pickupTimeMatch[1], 10) : -1;
   const pickupMin = pickupTimeMatch ? parseInt(pickupTimeMatch[2], 10) : 0;
   if (pickupHour < 9 || pickupHour > 21 || (pickupHour === 21 && pickupMin > 0)) {
-    return redirect("영업시간 09:00~21:00 내에서 수령 가능합니다.");
+    return redirect(t("pickup_note", lang));
   }
 
   // --- Generate order ID and tag number (parallel) ---
@@ -1221,40 +1221,48 @@ customer.post("/customer/submit", async (c) => {
   const passDiscount = flyingPassDiscountAmount(prepaidAmount, flyingPassTier);
   const finalPrepaid = Math.max(0, prepaidAmount - passDiscount);
 
-  // --- Insert order ---
-  await c.env.DB.prepare(
-    `INSERT INTO luggage_orders (
-      order_id, tag_no, name, phone, companion_count,
-      suitcase_qty, backpack_qty, set_qty,
-      expected_pickup_at, expected_storage_days,
-      price_per_day, discount_rate, prepaid_amount,
-      flying_pass_tier, flying_pass_discount_amount, final_amount,
-      id_image_url, luggage_image_url,
-      consent_checked, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING')`
-  )
-    .bind(
-      orderId,
-      tagNo,
-      name,
-      phone,
-      companionCount,
-      suitcaseQty,
-      backpackQty,
-      setQty,
-      pickupDate.toISOString(),
-      storageDays,
-      pricePerDay,
-      discountRate,
-      prepaidAmount,
-      flyingPassTier,
-      passDiscount,
-      finalPrepaid,
-      idImageUrl,
-      luggageImageUrl,
-      1
+  // --- Insert order (clean up R2 on failure) ---
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO luggage_orders (
+        order_id, tag_no, name, phone, companion_count,
+        suitcase_qty, backpack_qty, set_qty,
+        expected_pickup_at, expected_storage_days,
+        price_per_day, discount_rate, prepaid_amount,
+        flying_pass_tier, flying_pass_discount_amount, final_amount,
+        id_image_url, luggage_image_url,
+        consent_checked, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING')`
     )
-    .run();
+      .bind(
+        orderId,
+        tagNo,
+        name,
+        phone,
+        companionCount,
+        suitcaseQty,
+        backpackQty,
+        setQty,
+        pickupDate.toISOString(),
+        storageDays,
+        pricePerDay,
+        discountRate,
+        prepaidAmount,
+        flyingPassTier,
+        passDiscount,
+        finalPrepaid,
+        idImageUrl,
+        luggageImageUrl,
+        1
+      )
+      .run();
+  } catch (e) {
+    // Clean up orphaned R2 objects
+    if (idImageUrl) try { await c.env.IMAGES.delete(idImageUrl); } catch { /* best-effort */ }
+    if (luggageImageUrl) try { await c.env.IMAGES.delete(luggageImageUrl); } catch { /* best-effort */ }
+    console.error("Order insert failed:", e);
+    return redirect(t("upload_error", lang));
+  }
 
   return c.redirect(`/customer/orders/${orderId}?lang=${lang}`);
 });

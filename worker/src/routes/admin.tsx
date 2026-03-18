@@ -21,23 +21,23 @@ admin.get("/staff/admin/sales", async (c) => {
   let dateFilter = "";
   const dateParams: string[] = [];
   if (startDate && endDate) {
-    dateFilter = " AND date(created_at) BETWEEN ? AND ?";
+    dateFilter = " AND date(created_at, '+9 hours') BETWEEN ? AND ?";
     dateParams.push(startDate, endDate);
   } else {
-    dateFilter = " AND date(created_at) >= date('now', '-30 days')";
+    dateFilter = " AND date(created_at, '+9 hours') >= date('now', '-30 days')";
   }
 
   // Daily sales + summary in parallel
   const [dailySales, summary, rentalSales] = await Promise.all([
     c.env.DB.prepare(
-      `SELECT date(created_at) as sale_date,
+      `SELECT date(created_at, '+9 hours') as sale_date,
          COUNT(*) as order_count,
          SUM(CASE WHEN payment_method = 'CASH' THEN prepaid_amount + extra_amount ELSE 0 END) as cash_total,
          SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as qr_total,
          SUM(prepaid_amount + extra_amount) as grand_total
        FROM luggage_orders
        WHERE status IN ('PAID', 'PICKED_UP')${dateFilter}
-       GROUP BY date(created_at)
+       GROUP BY date(created_at, '+9 hours')
        ORDER BY sale_date DESC`
     ).bind(...dateParams).all(),
     c.env.DB.prepare(
@@ -75,6 +75,7 @@ admin.get("/staff/admin/sales", async (c) => {
             <a class="staff-menu-link is-active" href="/staff/admin/sales">매출관리</a>
             <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
             <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
+            <a class="staff-menu-link" href="/staff/admin/completion-message">완료메시지</a>
           </nav>
         <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">매출 분석</h2>
@@ -207,6 +208,7 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
             <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
             <a class="staff-menu-link is-active" href="/staff/admin/staff-accounts">계정관리</a>
             <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
+            <a class="staff-menu-link" href="/staff/admin/completion-message">완료메시지</a>
           </nav>
         <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         {errorMsg && <div class="card" style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;margin-bottom:12px">{decodeURIComponent(errorMsg)}</div>}
@@ -460,6 +462,7 @@ admin.get("/staff/admin/completion-message", async (c) => {
             <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
             <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
             <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
+            <a class="staff-menu-link" href="/staff/admin/completion-message">완료메시지</a>
           </nav>
         <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">접수 완료 메시지 편집</h2>

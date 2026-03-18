@@ -138,7 +138,7 @@ ops.post("/staff/cash-closing", async (c) => {
        SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as auto_qr,
        SUM(prepaid_amount + extra_amount) as auto_total
      FROM luggage_orders
-     WHERE date(created_at) = ? AND status IN ('PAID', 'PICKED_UP')`
+     WHERE date(created_at, '+9 hours') = ? AND status IN ('PAID', 'PICKED_UP')`
   ).bind(businessDate).first<{ auto_cash: number; auto_qr: number; auto_total: number }>();
 
   const checkAutoAmount = autoSales?.auto_total ?? 0;
@@ -322,7 +322,7 @@ ops.get("/staff/api/cash-closing/auto-sales", async (c) => {
        SUM(prepaid_amount + extra_amount) as total_amount,
        COUNT(*) as order_count
      FROM luggage_orders
-     WHERE date(created_at) = ? AND status IN ('PAID', 'PICKED_UP')`
+     WHERE date(created_at, '+9 hours') = ? AND status IN ('PAID', 'PICKED_UP')`
   )
     .bind(businessDate)
     .first();
