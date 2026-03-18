@@ -85,7 +85,12 @@ staffApi.post("/staff/api/orders/:id/inline-update", async (c) => {
   for (const [key, val] of Object.entries(body)) {
     if (ALLOWED_FIELDS.includes(key)) {
       updates.push(`${key} = ?`);
-      values.push(val);
+      // Convert JST datetime-local to UTC ISO for storage
+      if (key === "expected_pickup_at" && val && typeof val === "string" && !val.endsWith("Z")) {
+        values.push(new Date(val + ":00+09:00").toISOString());
+      } else {
+        values.push(val);
+      }
     }
   }
 

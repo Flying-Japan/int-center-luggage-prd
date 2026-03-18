@@ -1185,26 +1185,31 @@ customer.post("/customer/submit", async (c) => {
   let idImageUrl: string | null = null;
   let luggageImageUrl: string | null = null;
 
-  const idImageFile = body.id_image;
-  if (idImageFile && idImageFile instanceof File && idImageFile.size > 0) {
-    const validation = validateImageUpload(idImageFile.size, idImageFile.type);
-    if (!validation.valid) return redirect(validation.error || t("upload_error", lang));
-    const ext = extFromContentType(idImageFile.type);
-    const key = buildImageKey("id", orderId, ext);
-    const buffer = await idImageFile.arrayBuffer();
-    await uploadImage(c.env.IMAGES, key, buffer, idImageFile.type);
-    idImageUrl = key;
-  }
+  try {
+    const idImageFile = body.id_image;
+    if (idImageFile && idImageFile instanceof File && idImageFile.size > 0) {
+      const validation = validateImageUpload(idImageFile.size, idImageFile.type);
+      if (!validation.valid) return redirect(validation.error || t("upload_error", lang));
+      const ext = extFromContentType(idImageFile.type);
+      const key = buildImageKey("id", orderId, ext);
+      const buffer = await idImageFile.arrayBuffer();
+      await uploadImage(c.env.IMAGES, key, buffer, idImageFile.type);
+      idImageUrl = key;
+    }
 
-  const luggageImageFile = body.luggage_image;
-  if (luggageImageFile && luggageImageFile instanceof File && luggageImageFile.size > 0) {
-    const validation = validateImageUpload(luggageImageFile.size, luggageImageFile.type);
-    if (!validation.valid) return redirect(validation.error || t("upload_error", lang));
-    const ext = extFromContentType(luggageImageFile.type);
-    const key = buildImageKey("luggage", orderId, ext);
-    const buffer = await luggageImageFile.arrayBuffer();
-    await uploadImage(c.env.IMAGES, key, buffer, luggageImageFile.type);
-    luggageImageUrl = key;
+    const luggageImageFile = body.luggage_image;
+    if (luggageImageFile && luggageImageFile instanceof File && luggageImageFile.size > 0) {
+      const validation = validateImageUpload(luggageImageFile.size, luggageImageFile.type);
+      if (!validation.valid) return redirect(validation.error || t("upload_error", lang));
+      const ext = extFromContentType(luggageImageFile.type);
+      const key = buildImageKey("luggage", orderId, ext);
+      const buffer = await luggageImageFile.arrayBuffer();
+      await uploadImage(c.env.IMAGES, key, buffer, luggageImageFile.type);
+      luggageImageUrl = key;
+    }
+  } catch (e) {
+    console.error("Image upload failed:", e);
+    return redirect(t("upload_error", lang));
   }
 
   // --- Pricing ---

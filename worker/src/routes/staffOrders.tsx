@@ -127,7 +127,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
 
           {/* Staff menu */}
           <nav class="staff-menu" aria-label="직원 메뉴">
-            <a class="staff-menu-link" href="/staff/dashboard">대시보드</a>
+            <a class="staff-menu-link is-active" href="/staff/dashboard">대시보드</a>
             <a class="staff-menu-link" href="/staff/cash-closing">정산마감</a>
             <a class="staff-menu-link" href="/staff/handover">인수인계</a>
             <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
@@ -359,7 +359,12 @@ staffOrders.post("/staff/orders/:id/update", async (c) => {
   for (const field of allowedFields) {
     if (field in body) {
       updates.push(`${field} = ?`);
-      values.push(String(body[field]));
+      let val = String(body[field]);
+      // Convert JST datetime-local to UTC ISO for storage
+      if (field === "expected_pickup_at" && val && !val.endsWith("Z")) {
+        val = new Date(val + ":00+09:00").toISOString();
+      }
+      values.push(val);
     }
   }
 
@@ -462,7 +467,8 @@ staffOrders.post("/staff/orders/:id/create-extension", async (c) => {
     )
     .run();
 
-  await insertAuditLog(c.env.DB, newOrderId, staff.id, "CREATE_EXTENSION");
+  await insertAuditLog(c.env.DB, newOrderId, staff.id, "CREATE_EXTENSION", `원본: ${parentOrderId}`);
+  await insertAuditLog(c.env.DB, parentOrderId, staff.id, "CREATE_EXTENSION", `연장접수 생성: ${newOrderId}`);
 
   return c.redirect(`/staff/orders/${newOrderId}`);
 });
@@ -481,8 +487,8 @@ staffOrders.post("/staff/orders/manual", async (c) => {
   const expectedPickupAt = String(body.expected_pickup_at || "");
   const note = String(body.note || "").trim();
 
-  if (!name || (suitcaseQty === 0 && backpackQty === 0)) {
-    return c.redirect("/staff/dashboard?error=Name and at least one bag required");
+  if (!name || !phone || (suitcaseQty === 0 && backpackQty === 0)) {
+    return c.redirect("/staff/dashboard?error=이름, 전화번호, 짐 수량이 필요합니다");
   }
 
   const [orderId, tagNo] = await Promise.all([buildOrderId(c.env.DB), buildTagNo(c.env.DB)]);

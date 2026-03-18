@@ -42,20 +42,22 @@ export async function runRetentionCleanup(
 
   const clearedOrderIds: string[] = [];
   for (const order of ordersWithImages.results) {
-    // Delete images from R2
+    // Delete images from R2 — only mark cleared if all deletes succeed
     const keysToDelete: string[] = [];
     if (order.id_image_url) keysToDelete.push(order.id_image_url);
     if (order.luggage_image_url) keysToDelete.push(order.luggage_image_url);
 
+    let allDeleted = true;
     for (const key of keysToDelete) {
       try {
         await images.delete(key);
       } catch (e) {
         console.error(`Failed to delete R2 object ${key}:`, e);
+        allDeleted = false;
       }
     }
 
-    clearedOrderIds.push(order.order_id);
+    if (allDeleted) clearedOrderIds.push(order.order_id);
   }
 
   // Bulk UPDATE all cleared orders in one statement

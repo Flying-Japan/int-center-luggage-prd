@@ -424,16 +424,16 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               if(!confirm('수령완료 처리하시겠습니까?')) return;
               apiPost('/staff/api/orders/'+oid+'/pickup').then(function(r){
                 if(r.ok) location.reload();
-                else alert('처리 실패');
-              });
+                else r.json().then(function(d){alert(d.error||'처리 실패');});
+              }).catch(function(){alert('네트워크 오류');});
             }
 
             function undoPickup(oid){
               if(!confirm('수령완료를 취소하시겠습니까?')) return;
               apiPost('/staff/api/orders/'+oid+'/undo-pickup').then(function(r){
                 if(r.ok) location.reload();
-                else alert('처리 실패');
-              });
+                else r.json().then(function(d){alert(d.error||'처리 실패');});
+              }).catch(function(){alert('네트워크 오류');});
             }
 
             function doCancel(btn,oid){
