@@ -198,17 +198,19 @@ staffApi.post("/staff/api/orders/:id/pickup", async (c) => {
   const now = new Date().toISOString();
 
   const order = await c.env.DB.prepare(
-    "SELECT * FROM luggage_orders WHERE order_id = ?"
+    "SELECT order_id, status, expected_pickup_at, price_per_day, created_at FROM luggage_orders WHERE order_id = ?"
   )
     .bind(orderId)
     .first<{
       order_id: string;
+      status: string;
       expected_pickup_at: string;
       price_per_day: number;
       created_at: string;
     }>();
 
   if (!order) return c.json({ error: "Order not found" }, 404);
+  if (order.status !== "PAID") return c.json({ error: "결제 완료된 주문만 수령 처리할 수 있습니다" }, 400);
 
   // Calculate actual storage days and extra days
   const actualStorageDays = calculateStorageDays(order.created_at, now);

@@ -385,12 +385,13 @@ staffOrders.post("/staff/orders/:id/mark-picked-up", async (c) => {
   const now = new Date().toISOString();
 
   const order = await c.env.DB.prepare(
-    "SELECT price_per_day, created_at, expected_pickup_at FROM luggage_orders WHERE order_id = ?"
+    "SELECT status, price_per_day, created_at, expected_pickup_at FROM luggage_orders WHERE order_id = ?"
   )
     .bind(orderId)
-    .first<{ price_per_day: number; created_at: string; expected_pickup_at: string | null }>();
+    .first<{ status: string; price_per_day: number; created_at: string; expected_pickup_at: string | null }>();
 
   if (!order) return c.redirect("/staff/dashboard");
+  if (order.status !== "PAID") return c.redirect(`/staff/orders/${orderId}?error=결제 완료된 주문만 수령 처리 가능`);
 
   const actualStorageDays = calculateStorageDays(order.created_at, now);
   const extraDays = order.expected_pickup_at ? calculateExtraDays(order.expected_pickup_at, now) : 0;
@@ -439,6 +440,7 @@ staffOrders.post("/staff/orders/:id/create-extension", async (c) => {
     .first<Order>();
 
   if (!parent) return c.redirect("/staff/dashboard");
+  if (parent.status === "CANCELLED" || parent.status === "PICKED_UP") return c.redirect(`/staff/orders/${parentOrderId}`);
 
   // Find root order (follow parent chain)
   const rootId = parent.parent_order_id || parentOrderId;

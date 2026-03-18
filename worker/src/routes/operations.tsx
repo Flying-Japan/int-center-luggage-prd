@@ -123,6 +123,12 @@ ops.post("/staff/cash-closing", async (c) => {
   const paypayAmount = parseInt(String(body.paypay_amount || "0"), 10);
   const actualQrAmount = parseInt(String(body.actual_qr_amount || "0"), 10);
   const closingType = String(body.closing_type || "FINAL_CLOSE");
+
+  // Prevent duplicate closings for same date + type
+  const existing = await c.env.DB.prepare(
+    "SELECT closing_id FROM luggage_cash_closings WHERE business_date = ? AND closing_type = ?"
+  ).bind(businessDate, closingType).first();
+  if (existing) return c.redirect("/staff/cash-closing?error=이미 해당 날짜/유형의 정산이 존재합니다");
   const actualAmount = totalAmount + actualQrAmount;
 
   // Auto-calculate expected amount from today's PAID/PICKED_UP orders (includes extra_amount)
@@ -512,11 +518,14 @@ ops.post("/staff/handover/:id/comments", async (c) => {
   const noteId = c.req.param("id");
   const body = await c.req.parseBody();
   const staff = getStaff(c);
+  const content = String(body.content || "").trim();
+
+  if (!content) return c.redirect("/staff/handover");
 
   await c.env.DB.prepare(
     "INSERT INTO luggage_handover_comments (note_id, staff_id, content) VALUES (?, ?, ?)"
   )
-    .bind(noteId, staff.id, String(body.content || ""))
+    .bind(noteId, staff.id, content)
     .run();
 
   return c.redirect("/staff/handover");
@@ -542,9 +551,15 @@ ops.post("/staff/handover/:id/update", async (c) => {
   return c.redirect("/staff/handover");
 });
 
-// POST /staff/handover/:id/delete — Delete note
+// POST /staff/handover/:id/delete — Delete note (author only)
 ops.post("/staff/handover/:id/delete", async (c) => {
   const noteId = c.req.param("id");
+  const staff = getStaff(c);
+
+  // Only the author can delete their own note
+  const note = await c.env.DB.prepare("SELECT staff_id FROM luggage_handover_notes WHERE note_id = ?").bind(noteId).first<{ staff_id: string }>();
+  if (!note || note.staff_id !== staff.id) return c.redirect("/staff/handover");
+
   await c.env.DB.batch([
     c.env.DB.prepare("DELETE FROM luggage_handover_notes WHERE note_id = ?").bind(noteId),
     c.env.DB.prepare("DELETE FROM luggage_handover_reads WHERE note_id = ?").bind(noteId),
@@ -714,12 +729,16 @@ ops.post("/staff/lost-found/:id/update", async (c) => {
   const entryId = c.req.param("id");
   const body = await c.req.parseBody();
 
+  const VALID_STATUSES = ["UNCLAIMED", "CLAIMED", "DISPOSED", "RETURNED"];
   const updates: string[] = [];
   const values: (string | number)[] = [];
 
   if (body.status) {
+    const status = String(body.status);
+    if (!VALID_STATUSES.includes(status)) return c.redirect("/staff/lost-found");
+    if (status === "CLAIMED" && !body.claimed_by) return c.redirect("/staff/lost-found");
     updates.push("status = ?");
-    values.push(String(body.status));
+    values.push(status);
   }
   if (body.claimed_by) {
     updates.push("claimed_by = ?");

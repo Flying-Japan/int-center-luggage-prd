@@ -295,12 +295,17 @@ admin.post("/staff/admin/staff-accounts", async (c) => {
     return c.redirect(`/staff/admin/staff-accounts?error=${encodeURIComponent(error?.message || "Failed")}`);
   }
 
-  // Create profile in D1
-  await c.env.DB.prepare(
-    "INSERT INTO user_profiles (id, display_name, username, role, is_active) VALUES (?, ?, ?, ?, 1)"
-  )
-    .bind(data.user.id, displayName, email.split("@")[0], role)
-    .run();
+  // Create profile in D1 — rollback Supabase user on failure
+  try {
+    await c.env.DB.prepare(
+      "INSERT INTO user_profiles (id, display_name, username, role, is_active) VALUES (?, ?, ?, ?, 1)"
+    )
+      .bind(data.user.id, displayName, email.split("@")[0], role)
+      .run();
+  } catch (e) {
+    await supabaseAdmin.auth.admin.deleteUser(data.user.id);
+    return c.redirect(`/staff/admin/staff-accounts?error=${encodeURIComponent("프로필 생성 실패 — 계정이 롤백되었습니다")}`);
+  }
 
   return c.redirect("/staff/admin/staff-accounts?success=계정이 생성되었습니다");
 });
@@ -308,6 +313,11 @@ admin.post("/staff/admin/staff-accounts", async (c) => {
 // POST /staff/admin/staff-accounts/:id/toggle-active
 admin.post("/staff/admin/staff-accounts/:id/toggle-active", async (c) => {
   const targetId = c.req.param("id");
+  const staff = getStaff(c);
+
+  if (targetId === staff.id) {
+    return c.redirect("/staff/admin/staff-accounts?error=자신의 계정은 비활성화할 수 없습니다");
+  }
 
   const profile = await c.env.DB.prepare("SELECT is_active FROM user_profiles WHERE id = ?")
     .bind(targetId)
@@ -363,6 +373,8 @@ const ACTION_LABELS: Record<string, string> = {
   UPDATE_PRICE: "요금변경", MARK_PAID: "결제완료", MARK_PICKED_UP: "수령완료",
   UNDO_PICKED_UP: "수령취소", MANUAL_CREATE: "수기접수", UPDATE: "수정",
   VIEW_ID_IMAGE: "신분증조회", VIEW_LUGGAGE_IMAGE: "짐사진조회",
+  VIEW_ID: "신분증조회", VIEW_LUGGAGE: "짐사진조회",
+  CREATE_EXTENSION: "연장접수",
   BULK_CANCEL: "일괄취소", BULK_MARK_PAID: "일괄결제",
 };
 
