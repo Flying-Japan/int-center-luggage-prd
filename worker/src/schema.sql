@@ -194,9 +194,11 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   id TEXT PRIMARY KEY,
   display_name TEXT,
   username TEXT,
+  email TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   role TEXT NOT NULL DEFAULT 'staff',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT
 );
 
 -- Indexes

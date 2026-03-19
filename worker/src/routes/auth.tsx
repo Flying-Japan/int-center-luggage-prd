@@ -1,8 +1,55 @@
 import { Hono } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { AppType } from "../types";
-import { createSupabaseClient } from "../lib/supabase";
+import { createSupabaseClient, createSupabaseAdmin } from "../lib/supabase";
+import type { Env } from "../types";
 import { setSession, clearSession } from "../middleware/auth";
+
+/**
+ * Auto-sync: if user authenticated via Supabase but has no D1 profile,
+ * pull from Supabase PG user_profiles and insert into D1.
+ */
+async function ensureD1Profile(
+  db: Env["DB"],
+  env: Env,
+  userId: string
+): Promise<{ id: string; is_active: number; role: string } | null> {
+  // Check D1 first
+  const existing = await db.prepare(
+    "SELECT id, is_active, role FROM user_profiles WHERE id = ?"
+  ).bind(userId).first<{ id: string; is_active: number; role: string }>();
+
+  if (existing) return existing;
+
+  // Not in D1 — try Supabase PG
+  const adminClient = createSupabaseAdmin(env);
+  const { data, error } = await adminClient
+    .from("user_profiles")
+    .select("id, username, email, display_name, role, is_active, created_at")
+    .eq("id", userId)
+    .single();
+
+  if (error || !data) return null;
+  // Map PG roles (admin/editor/viewer) to D1 roles (admin/staff)
+  const d1Role = data.role === "admin" ? "admin" : "staff";
+
+  if (!data.is_active) return { id: data.id, is_active: 0, role: d1Role };
+
+  // Insert into D1
+  await db.prepare(
+    "INSERT OR IGNORE INTO user_profiles (id, username, email, display_name, role, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).bind(
+    data.id,
+    data.username || "",
+    data.email || "",
+    data.display_name || data.username || "",
+    d1Role,
+    data.is_active ? 1 : 0,
+    data.created_at || new Date().toISOString()
+  ).run();
+
+  return { id: data.id, is_active: data.is_active ? 1 : 0, role: d1Role };
+}
 
 const auth = new Hono<AppType>();
 
@@ -80,12 +127,8 @@ auth.post("/staff/login", async (c) => {
     return c.redirect(`/staff/login?error=${encodeURIComponent(error?.message || "Login failed")}`);
   }
 
-  // Check user exists in D1 user_profiles and is active
-  const profile = await c.env.DB.prepare(
-    "SELECT id, is_active, role FROM user_profiles WHERE id = ?"
-  )
-    .bind(data.user.id)
-    .first<{ id: string; is_active: number; role: string }>();
+  // Check D1 profile, auto-sync from Supabase PG if missing
+  const profile = await ensureD1Profile(c.env.DB, c.env, data.user.id);
 
   if (!profile || !profile.is_active) {
     return c.redirect("/staff/login?error=Account not active");
@@ -176,12 +219,8 @@ auth.get("/auth/callback", async (c) => {
     return c.redirect("/staff/login?error=no_user");
   }
 
-  // Check user exists in D1 user_profiles and is active
-  const profile = await c.env.DB.prepare(
-    "SELECT id, is_active FROM user_profiles WHERE id = ?"
-  )
-    .bind(String(userId))
-    .first<{ id: string; is_active: number }>();
+  // Check D1 profile, auto-sync from Supabase PG if missing
+  const profile = await ensureD1Profile(c.env.DB, c.env, String(userId));
 
   if (!profile || !profile.is_active) {
     return c.redirect("/staff/login?error=access_denied");

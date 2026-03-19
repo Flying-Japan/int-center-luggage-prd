@@ -186,15 +186,136 @@ admin.post("/staff/admin/sales/rental", async (c) => {
 // GET /staff/admin/staff-accounts — Staff account management
 admin.get("/staff/admin/staff-accounts", async (c) => {
   const accounts = await c.env.DB.prepare(
-    "SELECT * FROM user_profiles ORDER BY created_at DESC"
+    "SELECT * FROM user_profiles ORDER BY is_active DESC, created_at DESC"
   ).all();
 
   const staff = getStaff(c);
+  const focusId = c.req.query("focus");
   const errorMsg = c.req.query("error");
   const successMsg = c.req.query("success");
+
+  const activeAccounts = accounts.results.filter((a: Record<string, unknown>) => a.is_active as number);
+  const inactiveAccounts = accounts.results.filter((a: Record<string, unknown>) => !(a.is_active as number));
+  const adminCount = accounts.results.filter((a: Record<string, unknown>) => (a.role as string) === "admin" && (a.is_active as number)).length;
+
+  const AccountRow = ({ a, isOpen }: { a: Record<string, unknown>; isOpen: boolean }) => {
+    const name = (a.display_name as string) || (a.username as string) || "?";
+    const initial = name[0].toUpperCase();
+    const isMe = a.id === staff.id;
+    const isActive = a.is_active as number;
+    const isAdmin = (a.role as string) === "admin";
+    const created = a.created_at ? new Date(a.created_at as string).toISOString().slice(0, 10) : "-";
+
+    return (<>
+      <tr class={`acct-row${!isActive ? " acct-row--dim" : ""}`}>
+        <td class="acct-td">
+          <div class="acct-name-cell">
+            <span class={`acct-avatar${isAdmin ? " acct-avatar--admin" : ""}`}>{initial}</span>
+            <div>
+              <span class="acct-name">{name}{isMe && <span class="acct-me">나</span>}</span>
+              <span class="acct-email">{(a.username as string) || (a.email as string) || ""}</span>
+            </div>
+          </div>
+        </td>
+        <td class="acct-td"><span class={`acct-badge${isAdmin ? " acct-badge--admin" : ""}`}>{isAdmin ? "관리자" : "직원"}</span></td>
+        <td class="acct-td"><span class={`acct-status${isActive ? " acct-status--on" : " acct-status--off"}`}>{isActive ? "활성" : "잠금"}</span></td>
+        <td class="acct-td acct-td--date">{created}</td>
+        <td class="acct-td acct-td--actions">
+          <div class="acct-menu-wrap">
+            <button class="acct-menu-btn" type="button" aria-label="메뉴">&#x22EF;</button>
+            <div class="acct-dropdown">
+              <button class="acct-dropdown-item acct-edit-toggle" type="button" data-panel={`acct-panel-${a.id}`}>수정</button>
+              <form method="post" action={`/staff/admin/staff-accounts/${a.id}/toggle-active`}>
+                <button class={`acct-dropdown-item${!isActive ? " acct-dropdown-item--green" : ""}`} type="submit">{isActive ? "잠금" : "복구"}</button>
+              </form>
+              {!isMe && (<>
+                <div class="acct-dropdown-divider" />
+                <form method="post" action={`/staff/admin/staff-accounts/${a.id}/delete`} onsubmit="return confirm('정말 삭제할까요? 되돌릴 수 없습니다.')">
+                  <button class="acct-dropdown-item acct-dropdown-item--danger" type="submit">삭제</button>
+                </form>
+              </>)}
+            </div>
+          </div>
+        </td>
+      </tr>
+      <tr class="acct-panel-row">
+        <td colspan={5} style="padding:0;border:none">
+          <div id={`acct-panel-${a.id}`} class={`acct-edit-panel${!isOpen ? " is-collapsed" : ""}`}>
+            <form method="post" action={`/staff/admin/staff-accounts/${a.id}/update`} class="acct-edit-form">
+              <label class="field"><span class="field-label">표시 이름</span><input class="control" type="text" name="display_name" value={(a.display_name as string) || ""} required /></label>
+              <label class="field"><span class="field-label">권한</span>
+                <select class="control" name="role">
+                  <option value="staff" selected={(a.role as string) === "staff"}>직원</option>
+                  <option value="admin" selected={(a.role as string) === "admin"}>관리자</option>
+                </select>
+              </label>
+              <div class="acct-edit-actions">
+                <button class="btn btn-primary btn-sm" type="submit">저장</button>
+                <button class="btn btn-sm acct-edit-cancel" type="button">취소</button>
+              </div>
+            </form>
+          </div>
+        </td>
+      </tr>
+    </>);
+  };
+
   return c.html(
     <html lang="ko">
-      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>직원 계정</title></head>
+      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>직원 계정</title>
+      <style>{`
+.acct-header{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
+.acct-count{font-size:12px;color:#a5a5a3}
+.acct-row{border-bottom:1px solid #f0f0ee}
+.acct-row--dim{opacity:.55}
+.acct-row:hover{background:#fafaf9}
+.acct-td{padding:6px 10px;font-size:13px;white-space:nowrap;vertical-align:middle}
+.acct-td--date{font-size:12px;color:#a5a5a3}
+.acct-td--actions{width:40px;text-align:right}
+.acct-name-cell{display:flex;align-items:center;gap:8px}
+.acct-avatar{width:28px;height:28px;border-radius:50%;background:#e8edf3;color:#5a6a7e;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.acct-avatar--admin{background:#fef2f2;color:#991b1b}
+.acct-name{font-size:13px;font-weight:500;color:#37352f;display:block;line-height:1.3}
+.acct-me{font-size:10px;color:#2383e2;margin-left:4px;font-weight:400}
+.acct-email{font-size:11px;color:#a5a5a3;display:block;line-height:1.2}
+.acct-badge{font-size:10px;padding:2px 7px;border-radius:3px;background:#f0f0ee;color:#6b6b69;font-weight:500}
+.acct-badge--admin{background:#fef2f2;color:#991b1b}
+.acct-status{font-size:11px;font-weight:500}
+.acct-status--on{color:#166534}
+.acct-status--off{color:#991b1b}
+.acct-menu-wrap{position:relative;display:inline-block}
+.acct-menu-btn{background:none;border:none;cursor:pointer;font-size:16px;color:#a5a5a3;padding:2px 6px;border-radius:4px;line-height:1}
+.acct-menu-btn:hover{background:#f0f0ee;color:#37352f}
+.acct-dropdown{display:none;position:absolute;right:0;top:100%;z-index:50;min-width:100px;background:#fff;border:1px solid #e5e5e5;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.08);padding:4px 0}
+.acct-menu-wrap.is-open .acct-dropdown{display:block}
+.acct-dropdown-item{display:block;width:100%;padding:6px 14px;font-size:12px;text-align:left;background:none;border:none;cursor:pointer;color:#37352f}
+.acct-dropdown-item:hover{background:#f7f7f5}
+.acct-dropdown-item--green{color:#166534}
+.acct-dropdown-item--danger{color:#dc2626}
+.acct-dropdown-divider{height:1px;background:#f0f0ee;margin:4px 0}
+.acct-edit-panel{padding:12px 10px 12px 46px;background:#fafaf9;border-bottom:1px solid #f0f0ee;overflow:hidden;transition:max-height .2s ease,opacity .2s ease;max-height:200px;opacity:1}
+.acct-edit-panel.is-collapsed{max-height:0;opacity:0;padding:0 10px 0 46px;border:none}
+.acct-edit-form{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
+.acct-edit-form .field{margin:0}
+.acct-edit-form .control{font-size:13px;padding:5px 8px;min-height:32px}
+.acct-edit-actions{display:flex;gap:6px;align-items:center}
+.acct-edit-cancel{color:#a5a5a3}
+.acct-tbl{width:100%;border-collapse:collapse}
+.acct-tbl thead th{text-align:left;padding:6px 10px;font-size:11px;font-weight:600;color:#a5a5a3;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid #e5e5e5}
+.acct-divider-row td{padding:16px 10px 6px;border:none}
+.acct-divider-label{font-size:11px;color:#a5a5a3;font-weight:600}
+.acct-create-section{padding:12px 16px}
+.acct-create-grid{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.acct-create-grid .field{margin:0;min-width:140px;flex:1}
+.acct-create-grid .control{font-size:13px;padding:5px 8px;min-height:32px}
+@media(max-width:768px){
+  .acct-create-grid{flex-direction:column}
+  .acct-create-grid .field{min-width:100%}
+  .acct-edit-panel{padding-left:10px}
+  .acct-edit-form{flex-direction:column;align-items:stretch}
+}
+      `}</style>
+      </head>
       <body class="staff-site">
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
@@ -205,69 +326,119 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
             <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
             <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
             <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
-            <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
-            <a class="staff-menu-link is-active" href="/staff/admin/staff-accounts">계정관리</a>
-            <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
-            <a class="staff-menu-link" href="/staff/admin/completion-message">완료메시지</a>
+            {staff.role === "admin" && (
+              <>
+                <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
+                <a class="staff-menu-link is-active" href="/staff/admin/staff-accounts">계정관리</a>
+                <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
+              </>
+            )}
           </nav>
-        <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
-        {errorMsg && <div class="card" style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;margin-bottom:12px">{decodeURIComponent(errorMsg)}</div>}
-        {successMsg && <div class="card" style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:10px 16px;margin-bottom:12px">{successMsg}</div>}
-        <h2 class="hero-title">직원 계정 관리</h2>
-        <p class="card-desc">{accounts.results.length}명 · 활성 {accounts.results.filter((a: Record<string, unknown>) => (a.is_active as number)).length}명 · 관리자 {accounts.results.filter((a: Record<string, unknown>) => (a.role as string) === "admin").length}명</p>
+
+        {errorMsg && <div style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{decodeURIComponent(errorMsg)}</div>}
+        {successMsg && <div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{successMsg}</div>}
 
         <section class="card">
-          <h3 class="card-title">새 계정</h3>
-          <form method="post" action="/staff/admin/staff-accounts" class="grid2">
-            <label class="field"><span class="field-label">이메일</span><input class="control" type="email" name="email" placeholder="example@flyingjp.com" required /></label>
-            <label class="field"><span class="field-label">비밀번호</span><input class="control" type="password" name="password" placeholder="비밀번호" required /></label>
-            <label class="field"><span class="field-label">표시 이름</span><input class="control" type="text" name="display_name" placeholder="홍길동" required /></label>
-            <label class="field"><span class="field-label">역할</span>
-              <select class="control" name="role">
-                <option value="staff">직원</option>
-                <option value="admin">관리자</option>
-              </select>
-            </label>
-            <label class="button-wrap"><span class="field-label sr-only">생성</span><button class="btn btn-primary" type="submit">생성</button></label>
-          </form>
+          <div class="acct-create-section">
+            <div class="acct-header">
+              <h3 class="card-title" style="margin:0;font-size:14px">새 계정</h3>
+            </div>
+            <form method="post" action="/staff/admin/staff-accounts" class="acct-create-grid" style="margin-top:8px">
+              <label class="field"><span class="field-label">이름</span><input class="control" type="text" id="create-name" name="display_name" placeholder="홍길동" required /></label>
+              <label class="field"><span class="field-label">이메일</span>
+                <div style="display:flex;align-items:center;gap:0">
+                  <input class="control" type="text" id="create-email" name="email" placeholder="이름 입력 시 자동 생성" style="border-radius:6px 0 0 6px;border-right:none" required />
+                  <span style="padding:5px 8px;font-size:12px;color:#a5a5a3;background:#f7f7f5;border:1px solid #e5e5e5;border-radius:0 6px 6px 0;white-space:nowrap">@center.local</span>
+                </div>
+              </label>
+              <label class="field"><span class="field-label">비밀번호</span>
+                <div style="display:flex;gap:6px">
+                  <input class="control" type="text" id="create-pw" name="password" style="flex:1" required />
+                  <button class="btn btn-sm btn-secondary" type="button" id="gen-pw-btn" style="white-space:nowrap">생성</button>
+                </div>
+              </label>
+              <label class="field"><span class="field-label">권한</span>
+                <select class="control" name="role">
+                  <option value="staff" selected>직원</option>
+                  <option value="admin">관리자</option>
+                </select>
+              </label>
+              <button class="btn btn-primary btn-sm" type="submit">계정 생성</button>
+            </form>
+          </div>
         </section>
 
         <section class="card">
-          <h3 class="card-title">계정 목록</h3>
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
-            <thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;padding:6px 8px">이름</th><th style="text-align:left;padding:6px 8px">역할</th><th style="text-align:left;padding:6px 8px">상태</th><th style="text-align:left;padding:6px 8px">수정</th><th style="text-align:left;padding:6px 8px">액션</th></tr></thead>
-            <tbody>
-            {accounts.results.map((a: Record<string, unknown>) => (
-              <tr style="border-bottom:1px solid var(--line)">
-                <td style="padding:5px 8px">{(a.display_name as string) || (a.username as string)} {a.id === staff.id ? <span style="color:#2383e2;font-size:10px">(나)</span> : null}</td>
-                <td style="padding:5px 8px"><span class="status-pill" style={`font-size:10px;${(a.role as string) === "admin" ? "background:#fef2f2;color:#991b1b" : ""}`}>{(a.role as string) === "admin" ? "관리자" : "직원"}</span></td>
-                <td style="padding:5px 8px">{(a.is_active as number) ? <span style="color:#166534">활성</span> : <span style="color:#991b1b">비활성</span>}</td>
-                <td style="padding:5px 8px">
-                  <form method="post" action={`/staff/admin/staff-accounts/${a.id}/update`} style="display:flex;gap:4px;align-items:center">
-                    <input class="control" type="text" name="display_name" value={(a.display_name as string) || ""} placeholder="이름" style="width:80px;font-size:12px;padding:3px 6px" />
-                    <select class="control" name="role" style="width:70px;font-size:12px;padding:3px 6px">
-                      <option value="staff" selected={(a.role as string) === "staff"}>직원</option>
-                      <option value="admin" selected={(a.role as string) === "admin"}>관리자</option>
-                    </select>
-                    <button class="btn btn-sm btn-secondary" type="submit">저장</button>
-                  </form>
-                </td>
-                <td style="padding:5px 8px">
-                  <form method="post" action={`/staff/admin/staff-accounts/${a.id}/toggle-active`} style="display:inline">
-                    <button class="btn btn-sm" type="submit">{(a.is_active as number) ? "비활성화" : "활성화"}</button>
-                  </form>
-                  {a.id !== staff.id && (
-                    <form method="post" action={`/staff/admin/staff-accounts/${a.id}/delete`} style="display:inline;margin-left:4px" onsubmit="return confirm('정말 삭제하시겠습니까?')">
-                      <button class="btn btn-sm" style="color:#991b1b" type="submit">삭제</button>
-                    </form>
-                  )}
-                </td>
+          <div style="padding:10px 16px 0">
+            <div class="acct-header">
+              <h3 class="card-title" style="margin:0;font-size:14px">계정 목록</h3>
+              <span class="acct-count">{accounts.results.length}명 · 활성 {activeAccounts.length}명 · 관리자 {adminCount}명</span>
+            </div>
+          </div>
+          <table class="acct-tbl">
+            <thead>
+              <tr>
+                <th>이름</th>
+                <th>권한</th>
+                <th>상태</th>
+                <th>생성일</th>
+                <th></th>
               </tr>
-            ))}
+            </thead>
+            <tbody>
+              {activeAccounts.map((a: Record<string, unknown>) => (
+                <AccountRow a={a} isOpen={String(a.id) === focusId} />
+              ))}
+              {inactiveAccounts.length > 0 && (<>
+                <tr class="acct-divider-row"><td colspan={5}><span class="acct-divider-label">잠금 계정 ({inactiveAccounts.length})</span></td></tr>
+                {inactiveAccounts.map((a: Record<string, unknown>) => (
+                  <AccountRow a={a} isOpen={String(a.id) === focusId} />
+                ))}
+              </>)}
             </tbody>
           </table>
         </section>
         </main>
+        <script dangerouslySetInnerHTML={{__html: `(function(){
+  document.querySelectorAll(".acct-menu-btn").forEach(function(b){
+    b.addEventListener("click",function(e){
+      e.stopPropagation();
+      var w=b.closest(".acct-menu-wrap"),o=w.classList.contains("is-open");
+      document.querySelectorAll(".acct-menu-wrap.is-open").forEach(function(x){x.classList.remove("is-open")});
+      if(!o)w.classList.add("is-open");
+    });
+  });
+  document.addEventListener("click",function(){document.querySelectorAll(".acct-menu-wrap.is-open").forEach(function(x){x.classList.remove("is-open")})});
+  document.querySelectorAll(".acct-edit-toggle").forEach(function(b){
+    b.addEventListener("click",function(){
+      var p=document.getElementById(b.dataset.panel);if(!p)return;
+      p.classList.toggle("is-collapsed");
+      var w=b.closest(".acct-menu-wrap");if(w)w.classList.remove("is-open");
+    });
+  });
+  document.querySelectorAll(".acct-edit-cancel").forEach(function(b){
+    b.addEventListener("click",function(){
+      var p=b.closest(".acct-edit-panel");if(p)p.classList.add("is-collapsed");
+    });
+  });
+  var I=['g','kk','n','d','tt','r','m','b','pp','s','ss','','j','jj','ch','k','t','p','h'];
+  var M=['a','ae','ya','yae','eo','e','yeo','ye','o','wa','wae','oe','yo','u','wo','we','wi','yu','eu','ui','i'];
+  var F=['','k','k','ks','n','nj','nh','t','l','lk','lm','lp','ls','lt','lp','lh','m','p','ps','t','t','ng','t','t','k','t','p','h'];
+  function rom(s){var r='';for(var i=0;i<s.length;i++){var c=s.charCodeAt(i);if(c>=0xAC00&&c<=0xD7A3){var o=c-0xAC00;r+=I[Math.floor(o/588)]+M[Math.floor((o%588)/28)]+F[o%28];}else{r+=s[i];}}return r;}
+  var nm=document.getElementById('create-name'),em=document.getElementById('create-email'),edited=false;
+  if(em){em.addEventListener('input',function(){edited=true;});}
+  if(nm){nm.addEventListener('input',function(){
+    if(edited)return;var n=nm.value.trim();if(n.length<2){em.value='';return;}
+    em.value=rom(n.slice(1))+'.'+rom(n.charAt(0));
+  });}
+  var pb=document.getElementById('gen-pw-btn');
+  if(pb){pb.addEventListener('click',function(e){
+    e.preventDefault();e.stopPropagation();
+    var ch='abcdefghijklmnopqrstuvwxyz0123456789',pw='';
+    for(var i=0;i<10;i++){pw+=ch[Math.floor(Math.random()*ch.length)];}
+    document.getElementById('create-pw').value=pw;
+  });}
+})()`}} />
       </body>
     </html>
   );
@@ -276,13 +447,17 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
 // POST /staff/admin/staff-accounts — Create staff account
 admin.post("/staff/admin/staff-accounts", async (c) => {
   const body = await c.req.parseBody();
-  const email = String(body.email || "").trim();
-  const password = String(body.password || "");
+  const rawEmail = String(body.email || "").trim();
+  const email = rawEmail.includes("@") ? rawEmail : `${rawEmail}@center.local`;
+  const password = String(body.password || "").trim();
   const displayName = String(body.display_name || "").trim();
   const role = String(body.role || "staff");
 
-  if (!email || !password || !displayName) {
-    return c.redirect("/staff/admin/staff-accounts?error=All fields required");
+  if (!rawEmail || !password || !displayName) {
+    return c.redirect("/staff/admin/staff-accounts?error=" + encodeURIComponent("모든 항목을 입력해주세요."));
+  }
+  if (password.length < 6) {
+    return c.redirect("/staff/admin/staff-accounts?error=" + encodeURIComponent("비밀번호는 6자리 이상 입력해주세요."));
   }
 
   // Create user in Supabase Auth
@@ -300,9 +475,9 @@ admin.post("/staff/admin/staff-accounts", async (c) => {
   // Create profile in D1 — rollback Supabase user on failure
   try {
     await c.env.DB.prepare(
-      "INSERT INTO user_profiles (id, display_name, username, role, is_active) VALUES (?, ?, ?, ?, 1)"
+      "INSERT INTO user_profiles (id, display_name, username, email, role, is_active) VALUES (?, ?, ?, ?, ?, 1)"
     )
-      .bind(data.user.id, displayName, email.split("@")[0], role)
+      .bind(data.user.id, displayName, email.split("@")[0], email, role)
       .run();
   } catch (e) {
     try {

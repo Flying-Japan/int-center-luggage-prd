@@ -133,6 +133,13 @@ staffOrders.get("/staff/orders/:id", async (c) => {
             <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
             <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
             <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
+            {staff.role === "admin" && (
+              <>
+                <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
+                <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
+                <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
+              </>
+            )}
           </nav>
 
           {/* Edit card */}

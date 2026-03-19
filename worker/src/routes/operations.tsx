@@ -36,6 +36,13 @@ ops.get("/staff/cash-closing", async (c) => {
             <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
             <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
             <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
+            {staff.role === "admin" && (
+              <>
+                <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
+                <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
+                <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
+              </>
+            )}
           </nav>
 
           <section class="card">
@@ -199,6 +206,13 @@ ops.get("/staff/cash-closing/:id", async (c) => {
             <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
             <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
             <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
+            {staff.role === "admin" && (
+              <>
+                <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
+                <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
+                <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
+              </>
+            )}
           </nav>
 
           <section class="card">
@@ -381,6 +395,13 @@ ops.get("/staff/handover", async (c) => {
             <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
             <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
             <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
+            {staff.role === "admin" && (
+              <>
+                <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
+                <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
+                <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
+              </>
+            )}
           </nav>
 
           <section class="card">
@@ -628,6 +649,13 @@ ops.get("/staff/lost-found", async (c) => {
             <a class="staff-menu-link is-active" href="/staff/lost-found">분실물</a>
             <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
             <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
+            {staff.role === "admin" && (
+              <>
+                <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
+                <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
+                <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
+              </>
+            )}
           </nav>
 
           <section class="card">
@@ -800,6 +828,13 @@ ops.get("/staff/schedule", async (c) => {
             <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
             <a class="staff-menu-link is-active" href="/staff/schedule">스케줄</a>
             <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
+            {staff.role === "admin" && (
+              <>
+                <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
+                <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
+                <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
+              </>
+            )}
           </nav>
         <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">근무 스케줄</h2>
