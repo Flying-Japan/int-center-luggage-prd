@@ -1,34 +1,23 @@
 services:
   app:
-    image: ghcr.io/flying-japan/int-center-luggage-prd:latest
+    build: .
+    image: flying-japan-app:latest
     container_name: flying-japan-app
     restart: unless-stopped
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   tunnel:
     image: cloudflare/cloudflared:2026.2.0
     container_name: flying-japan-tunnel
     restart: unless-stopped
-    # --config forces local ingress rules (http://app:8000) regardless of remote API config
-    command: tunnel --no-autoupdate --config /etc/cloudflared/ingress.yml run --token ${TUNNEL_TOKEN}
-    volumes:
-      - ../.cloudflared/docker-ingress.yml:/etc/cloudflared/ingress.yml:ro
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
     depends_on:
-      - app
-
-  # Auto-updates app when a new image is pushed to GHCR.
-  # Polls every 30 seconds. Requires GHCR_USER + GHCR_TOKEN in .env.
-  # Create token at: https://github.com/settings/tokens (read:packages scope)
-  watchtower:
-    image: containrrr/watchtower
-    container_name: flying-japan-watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ${HOME}/.docker/config.json:/config.json:ro
-    environment:
-      DOCKER_CONFIG: /
-      WATCHTOWER_POLL_INTERVAL: "300"
-      WATCHTOWER_CLEANUP: "true"
-      DOCKER_API_VERSION: "1.44"
+      app:
+        condition: service_healthy

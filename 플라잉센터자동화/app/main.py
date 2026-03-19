@@ -25,10 +25,17 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import get_current_staff
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
+
 from app.config import (
+    IS_PRODUCTION,
     JST,
     MAX_BAG_QTY,
     MAX_COMPANION_COUNT,
+    MAX_IMAGE_SIZE,
     SECRET_KEY,
     SESSION_HTTPS_ONLY,
     SESSION_MAX_AGE,
@@ -99,6 +106,29 @@ from app.utils import (
 
 
 app = FastAPI(title="Flying Japan Luggage Storage MVP")
+
+# --- Rate limiter ---
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(status_code=429, content={"detail": "Too many requests. Please try again later."})
+
+
+# --- Security headers middleware ---
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,
@@ -114,76 +144,10 @@ templates.env.filters["yen"] = format_yen
 @app.exception_handler(Exception)
 async def _global_exception_handler(request: Request, exc: Exception):
     try:
-        tb = traceback.format_exc()
-        detail = str(exc)
-        exc_type = type(exc).__name__
-        logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, tb)
-        return JSONResponse(status_code=500, content={"detail": detail, "type": exc_type, "traceback": tb})
+        logger.error("Unhandled exception on %s %s:\n%s", request.method, request.url.path, traceback.format_exc())
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
     except Exception:
-        return JSONResponse(status_code=500, content={"detail": "exception handler itself failed"})
-
-
-@app.get("/debug/dashboard-diag")
-def debug_dashboard_diag(db: SupabaseDB = Depends(get_db)):
-    """No-auth diagnostic that exercises the dashboard code path."""
-    steps: list[dict] = []
-    try:
-        staff = db.query("user_profiles").filter(("is_active", "=", True)).first()
-        steps.append({"step": "get_staff", "ok": staff is not None, "name": getattr(staff, "name", None)})
-    except Exception as e:
-        steps.append({"step": "get_staff", "ok": False, "error": f"{type(e).__name__}: {e}"})
-        return JSONResponse(content={"steps": steps})
-
-    try:
-        menu = build_staff_menu(db, "dashboard", staff.is_admin)
-        steps.append({"step": "build_menu", "ok": True, "count": len(menu)})
-    except Exception as e:
-        steps.append({"step": "build_menu", "ok": False, "error": f"{type(e).__name__}: {e}"})
-
-    try:
-        orders = query_staff_orders(db, list(STAFF_STATUS_FILTERS), "", limit=10, show_all_picked_up=False)
-        steps.append({"step": "query_orders", "ok": True, "count": len(orders)})
-    except Exception as e:
-        steps.append({"step": "query_orders", "ok": False, "error": f"{type(e).__name__}: {e}"})
-
-    try:
-        from app.services.flying_pass import build_flying_pass_tiers_json
-        tiers = build_flying_pass_tiers_json()
-        steps.append({"step": "flying_pass_tiers", "ok": True, "count": len(tiers)})
-    except Exception as e:
-        steps.append({"step": "flying_pass_tiers", "ok": False, "error": f"{type(e).__name__}: {e}"})
-
-    try:
-        now_utc = utc_now()
-        now_jst = now_utc.astimezone(JST)
-        manual_default_pickup = next_pickup_default_jst(now_utc)
-        ctx = {
-            "request": None,
-            "orders": orders if 'orders' in dir() else [],
-            "selected_status_filters": list(STAFF_STATUS_FILTERS),
-            "q": "",
-            "show_all_picked_up": False,
-            "staff": staff,
-            "staff_menu_items": menu if 'menu' in dir() else [],
-            "now_jst": now_jst,
-            "manual_default_pickup_date": manual_default_pickup.strftime("%Y-%m-%d"),
-            "manual_default_pickup_time": manual_default_pickup.strftime("%H:%M"),
-            "JST": JST,
-            "max_bag_qty": MAX_BAG_QTY,
-            "display_payment_method": display_payment_method,
-            "display_flying_pass_tier": display_flying_pass_tier,
-            "to_jst_datetime": to_jst_datetime,
-            "flying_pass_tiers_json": json.dumps(tiers) if 'tiers' in dir() else "[]",
-            "retention_msg": "",
-            "retention_err": "",
-        }
-        template = templates.get_template("staff_dashboard.html")
-        html = template.render(ctx)
-        steps.append({"step": "render_template", "ok": True, "bytes": len(html)})
-    except Exception as e:
-        steps.append({"step": "render_template", "ok": False, "error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc()})
-
-    return JSONResponse(content={"steps": steps})
+        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 DISCOUNT_TABLE = [
@@ -225,6 +189,7 @@ ADMIN_MENU_ITEMS = (
     ("admin_sales", "매출", "/staff/admin/sales"),
     ("completion_message", "완료문구", "/staff/admin/completion-message"),
     ("staff_accounts", "계정관리", "/staff/admin/staff-accounts"),
+    ("activity_logs", "활동로그", "/staff/admin/activity-logs"),
 )
 SCHEDULE_GOOGLE_EMBED_URL_KEY = "schedule_google_embed_url"
 SCHEDULE_FEATURE_ENABLED_KEY = "schedule_feature_enabled"
@@ -241,6 +206,9 @@ def save_image_file(upload: UploadFile, folder: str, order_id: str, label: str) 
     filename = f"{order_id}-{uuid.uuid4().hex}{extension}"
     storage_path = f"{folder}/{filename}"
     file_bytes = upload.file.read()
+
+    if len(file_bytes) > MAX_IMAGE_SIZE:
+        raise HTTPException(status_code=400, detail=f"{label} must be under 10 MB.")
 
     r2_upload(storage_path, file_bytes, upload.content_type)
 
@@ -390,6 +358,25 @@ def build_admin_sales_redirect(
     return f"/staff/admin/sales?{urlencode(query)}"
 
 
+def log_activity(
+    db: SupabaseDB,
+    actor,
+    action: str,
+    target_type: str,
+    target_id: str | None = None,
+    details: dict | None = None,
+) -> None:
+    """Insert a row into activity_logs for ISO 27001 audit trail."""
+    db.insert("activity_logs", {
+        "user_id": str(actor.id),
+        "user_name": actor.display_name or actor.username,
+        "action": action,
+        "target_type": target_type,
+        "target_id": target_id,
+        "details": details,
+    })
+
+
 def build_staff_accounts_redirect(
     *,
     msg: str = "",
@@ -402,7 +389,7 @@ def build_staff_accounts_redirect(
     if err.strip():
         query["err"] = err.strip()
     if focus_staff_id is not None:
-        query["focus_staff_id"] = str(int(focus_staff_id))
+        query["focus_staff_id"] = str(focus_staff_id)
     if query:
         return f"/staff/admin/staff-accounts?{urlencode(query)}"
     return "/staff/admin/staff-accounts"
@@ -953,6 +940,7 @@ def price_preview(
 
 
 @app.post("/customer/submit")
+@limiter.limit("10/minute")
 def customer_submit(
     request: Request,
     name: str = Form(...),
@@ -1065,7 +1053,8 @@ def customer_success(
 
 
 @app.get("/api/orders/{order_id}", response_model=OrderSummaryResponse)
-def api_order(order_id: str, db: SupabaseDB = Depends(get_db)) -> OrderSummaryResponse:
+def api_order(request: Request, order_id: str, db: SupabaseDB = Depends(get_db)) -> OrderSummaryResponse:
+    _ = ensure_staff(request, db)
     order = db.get("orders", "order_id", order_id)
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -1073,6 +1062,7 @@ def api_order(order_id: str, db: SupabaseDB = Depends(get_db)) -> OrderSummaryRe
 
 
 @app.get("/auth/google")
+@limiter.limit("10/minute")
 def auth_google(request: Request):
     code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
     code_challenge = base64.urlsafe_b64encode(
@@ -1133,6 +1123,7 @@ def staff_login_page(request: Request, oauth_error: Optional[str] = None) -> HTM
 
 
 @app.post("/staff/login", response_class=HTMLResponse)
+@limiter.limit("5/minute")
 def staff_login(
     request: Request,
     email: str = Form(...),
@@ -1164,7 +1155,7 @@ def staff_login(
     return RedirectResponse(url="/staff/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.get("/staff/logout")
+@app.post("/staff/logout")
 def staff_logout(request: Request) -> RedirectResponse:
     request.session.clear()
     return RedirectResponse(url="/staff/login", status_code=status.HTTP_303_SEE_OTHER)
@@ -1956,10 +1947,12 @@ def staff_cash_closing_detail(
 @app.get("/staff/api/cash-closing/auto-sales")
 def staff_cash_closing_auto_sales(
     request: Request,
-    business_date: str,
+    business_date: Optional[str] = None,
     db: SupabaseDB = Depends(get_db),
 ) -> JSONResponse:
     _ = ensure_staff(request, db)
+    if not business_date:
+        raise HTTPException(status_code=422, detail="business_date is required")
     sales = summarize_order_sales_for_date(db, business_date)
     return JSONResponse(sales)
 
@@ -2022,6 +2015,52 @@ def staff_schedule_update(
         staff.staff_id,
     )
     return RedirectResponse(url="/staff/schedule", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/staff/bug-report", response_class=HTMLResponse)
+def staff_bug_report_page(
+    request: Request,
+    success: str = "",
+    error: str = "",
+    db: SupabaseDB = Depends(get_db),
+) -> HTMLResponse:
+    staff = ensure_staff(request, db)
+    return templates.TemplateResponse(
+        "staff_bug_report.html",
+        {
+            "request": request,
+            "staff": staff,
+            "staff_menu_items": build_staff_menu(db, "bug_report", staff.is_admin),
+            "success_msg": success,
+            "error_msg": error,
+        },
+    )
+
+
+@app.post("/staff/bug-report")
+async def staff_bug_report_submit(
+    request: Request,
+    title: str = Form(...),
+    category: str = Form("bug"),
+    priority: str = Form("medium"),
+    description: str = Form(...),
+    db: SupabaseDB = Depends(get_db),
+) -> RedirectResponse:
+    staff = ensure_staff(request, db)
+    from app.asana_client import create_bug_task
+
+    full_desc = f"**Category:** {category}\n\n{description}"
+    task_gid = await create_bug_task(title, full_desc, staff.name, priority)
+
+    if task_gid:
+        return RedirectResponse(
+            url=f"/staff/bug-report?success=Asana 태스크가 등록되었습니다 (#{task_gid})",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url="/staff/bug-report?error=Asana 연동에 실패했습니다. 관리자에게 문의하세요.",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 @app.get("/staff/admin/sales", response_class=HTMLResponse)
@@ -2311,6 +2350,30 @@ def admin_staff_accounts_page(
     except Exception:
         pass
 
+    # Fetch audit dates from activity_logs for display
+    deleted_at: dict[str, str] = {}
+    last_role_change: dict[str, str] = {}
+    try:
+        audit_logs = (
+            db.query("activity_logs")
+            .filter(("target_type", "=", "user"))
+            .order_by("created_at DESC")
+            .all()
+        )
+        for log in audit_logs:
+            tid = log.target_id
+            if not tid:
+                continue
+            if log.action == "account_deleted" and tid not in deleted_at:
+                deleted_at[tid] = log.created_at
+            if log.action == "account_updated" and tid not in last_role_change:
+                details = log.details or {}
+                changes = details.get("changes", {})
+                if "role" in changes:
+                    last_role_change[tid] = log.created_at
+    except Exception:
+        pass
+
     return templates.TemplateResponse(
         "staff_admin_accounts.html",
         {
@@ -2320,6 +2383,8 @@ def admin_staff_accounts_page(
             "staff_rows": staff_rows,
             "active_admin_count": active_admin_count,
             "google_user_ids": google_user_ids,
+            "deleted_at": deleted_at,
+            "last_role_change": last_role_change,
             "msg": msg.strip(),
             "err": err.strip(),
             "focus_staff_id": focus_staff_id,
@@ -2337,8 +2402,9 @@ def admin_staff_accounts_create(
     is_admin: str = Form("0"),
     db: SupabaseDB = Depends(get_db),
 ) -> RedirectResponse:
-    _ = get_current_staff(request, db, require_admin=True)
-    resolved_email = email.strip()
+    actor = get_current_staff(request, db, require_admin=True)
+    raw_email = email.strip()
+    resolved_email = raw_email if "@" in raw_email else f"{raw_email}@center.local"
     resolved_display = display_name.strip() or resolved_email.split("@")[0]
     resolved_role = "admin" if is_admin in {"1", "on", "true", "yes"} else "editor"
 
@@ -2368,18 +2434,35 @@ def admin_staff_accounts_create(
         )
 
     try:
-        db.insert("user_profiles", {
-            "id": str(new_user.id),
-            "username": resolved_email.split("@")[0],
-            "display_name": resolved_display,
-            "role": resolved_role,
-            "is_active": True,
-        })
+        # Update the profile auto-created by the on_auth_user_created trigger
+        profile = db.get("user_profiles", "id", str(new_user.id))
+        if profile:
+            profile.username = resolved_email.split("@")[0]
+            profile.email = resolved_email
+            profile.display_name = resolved_display
+            profile.role = resolved_role
+            profile.is_active = True
+            db.update(profile)
+        else:
+            db.insert("user_profiles", {
+                "id": str(new_user.id),
+                "username": resolved_email.split("@")[0],
+                "email": resolved_email,
+                "display_name": resolved_display,
+                "role": resolved_role,
+                "is_active": True,
+            })
     except Exception as e:
         return RedirectResponse(
             url=build_staff_accounts_redirect(err=f"프로필 생성 실패: {e}"),
             status_code=status.HTTP_303_SEE_OTHER,
         )
+
+    log_activity(db, actor, "account_created", "user", str(new_user.id), {
+        "email": resolved_email,
+        "display_name": resolved_display,
+        "role": resolved_role,
+    })
 
     return RedirectResponse(
         url=build_staff_accounts_redirect(msg=f"{resolved_email} 계정을 생성했습니다."),
@@ -2437,10 +2520,28 @@ def admin_staff_accounts_update(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
+    changes = {}
+    if row.display_name != resolved_display:
+        changes["display_name"] = {"from": row.display_name, "to": resolved_display}
+    if row.role != resolved_role:
+        changes["role"] = {"from": row.role, "to": resolved_role}
+    if row.is_active != resolved_active:
+        changes["is_active"] = {"from": row.is_active, "to": resolved_active}
+
     row.display_name = resolved_display
     row.role = resolved_role
     row.is_active = resolved_active
     db.update(row)
+
+    if changes:
+        action = "account_deactivated" if "is_active" in changes and not resolved_active else \
+                 "account_reactivated" if "is_active" in changes and resolved_active else \
+                 "account_updated"
+        log_activity(db, actor, action, "user", str(row.id), {
+            "target_name": resolved_display,
+            "changes": changes,
+        })
+
     return RedirectResponse(
         url=build_staff_accounts_redirect(
             msg=f"{resolved_display} 계정을 수정했습니다.",
@@ -2491,6 +2592,12 @@ def admin_staff_accounts_toggle_active(
 
     row.is_active = target_active
     db.update(row)
+
+    action = "account_reactivated" if target_active else "account_deactivated"
+    log_activity(db, actor, action, "user", str(row.id), {
+        "target_name": row.display_name or row.username,
+    })
+
     state_label = "복구" if target_active else "잠금"
     return RedirectResponse(
         url=build_staff_accounts_redirect(
@@ -2498,6 +2605,113 @@ def admin_staff_accounts_toggle_active(
             focus_staff_id=str(row.id),
         ),
         status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@app.post("/staff/admin/staff-accounts/{target_staff_id}/delete")
+def admin_staff_accounts_delete(
+    request: Request,
+    target_staff_id: str,
+    db: SupabaseDB = Depends(get_db),
+) -> RedirectResponse:
+    actor = get_current_staff(request, db, require_admin=True)
+    row = db.get("user_profiles", "id", target_staff_id)
+    if row is None:
+        return RedirectResponse(
+            url=build_staff_accounts_redirect(err="대상 계정을 찾을 수 없습니다."),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    if str(row.id) == str(actor.id):
+        return RedirectResponse(
+            url=build_staff_accounts_redirect(
+                err="현재 로그인한 본인 계정은 삭제할 수 없습니다.",
+                focus_staff_id=str(row.id),
+            ),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    if row.role == "admin" and row.is_active:
+        active_admin_count = (
+            db.query("user_profiles")
+            .filter(("role", "=", "admin"), ("is_active", "=", True))
+            .count()
+        )
+        if active_admin_count <= 1:
+            return RedirectResponse(
+                url=build_staff_accounts_redirect(
+                    err="최소 1명의 활성 관리자 계정은 유지되어야 합니다.",
+                    focus_staff_id=str(row.id),
+                ),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+
+    display = row.display_name or row.username
+
+    try:
+        admin_client = supabase.create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        admin_client.auth.admin.delete_user(str(row.id))
+    except Exception as e:
+        return RedirectResponse(
+            url=build_staff_accounts_redirect(err=f"인증 계정 삭제 실패: {e}"),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    db.delete_row("user_profiles", "id", str(row.id))
+
+    log_activity(db, actor, "account_deleted", "user", str(row.id), {
+        "target_name": display,
+        "target_email": row.username,
+        "target_role": row.role,
+    })
+
+    return RedirectResponse(
+        url=build_staff_accounts_redirect(msg=f"{display} 계정을 삭제했습니다."),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+ACTIVITY_ACTION_LABELS: dict[str, str] = {
+    "account_created": "계정 생성",
+    "account_updated": "계정 수정",
+    "account_deactivated": "계정 비활성화",
+    "account_reactivated": "계정 복구",
+    "account_deleted": "계정 삭제",
+}
+
+
+@app.get("/staff/admin/activity-logs", response_class=HTMLResponse)
+def admin_activity_logs_page(
+    request: Request,
+    page: int = 1,
+    db: SupabaseDB = Depends(get_db),
+) -> HTMLResponse:
+    staff = get_current_staff(request, db, require_admin=True)
+    per_page = 50
+    offset = (max(1, page) - 1) * per_page
+
+    logs = (
+        db.query("activity_logs")
+        .order_by("created_at DESC")
+        .limit(per_page + 1)
+        .offset(offset)
+        .all()
+    )
+    has_next = len(logs) > per_page
+    logs = logs[:per_page]
+
+    return templates.TemplateResponse(
+        "staff_admin_activity_logs.html",
+        {
+            "request": request,
+            "staff": staff,
+            "staff_menu_items": build_staff_menu(db, "activity_logs", staff.is_admin),
+            "logs": logs,
+            "page": page,
+            "has_next": has_next,
+            "action_labels": ACTIVITY_ACTION_LABELS,
+            "to_jst_datetime": to_jst_datetime,
+        },
     )
 
 

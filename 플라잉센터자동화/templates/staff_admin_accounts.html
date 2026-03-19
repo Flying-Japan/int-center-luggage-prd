@@ -20,17 +20,27 @@
 
   <form method="post" action="/staff/admin/staff-accounts" class="account-create-grid">
     <label class="field">
+      <span class="field-label">이름</span>
+      <input class="control" type="text" id="create-display-name" name="display_name" maxlength="100" placeholder="홍길동" required />
+    </label>
+    <label class="field">
       <span class="field-label">이메일</span>
-      <input class="control" type="email" name="email" maxlength="100" required />
+      <div style="display:flex;align-items:center;gap:0">
+        <input class="control" type="text" id="create-email" name="email" maxlength="100" placeholder="이름 입력 시 자동 생성" style="border-radius:6px 0 0 6px;border-right:none" required />
+        <span class="acct-email-suffix">@center.local</span>
+      </div>
     </label>
     <label class="field">
       <span class="field-label">임시 비밀번호</span>
-      <input class="control" type="password" name="password" required />
+      <div style="display:flex;gap:6px">
+        <input class="control" type="text" id="create-password" name="password" style="flex:1" required />
+        <button class="btn btn-secondary" type="button" id="gen-pw-btn" style="white-space:nowrap">생성</button>
+      </div>
     </label>
     <label class="field">
       <span class="field-label">권한</span>
       <select class="control" name="is_admin" required>
-        <option value="0">직원</option>
+        <option value="0" selected>직원</option>
         <option value="1">매니저(관리자)</option>
       </select>
     </label>
@@ -40,25 +50,29 @@
   </form>
 </section>
 
+{% set active_rows = staff_rows|selectattr('is_active')|list %}
+{% set inactive_rows = staff_rows|rejectattr('is_active')|list %}
+
 <section class="card">
   <div class="acct-header">
     <h3 class="card-title" style="margin:0">계정 목록</h3>
-    <span class="acct-count">{{ staff_rows|length }}명 · 관리자 {{ active_admin_count }}명</span>
+    <span class="acct-count">{{ staff_rows|length }}명 · 활성 {{ active_rows|length }}명 · 관리자 {{ active_admin_count }}명</span>
   </div>
 
   <table class="acct-tbl">
     <thead>
       <tr>
-        <th class="acct-th" style="width:40%">이름</th>
+        <th class="acct-th" style="width:28%">이름</th>
         <th class="acct-th">권한</th>
         <th class="acct-th">상태</th>
         <th class="acct-th">로그인</th>
+        <th class="acct-th">생성일</th>
+        <th class="acct-th">권한변경</th>
         <th class="acct-th acct-th--right"></th>
       </tr>
     </thead>
     <tbody>
-      {% for row in staff_rows %}
-      {% set is_open = (row.id == focus_staff_id) %}
+      {% macro account_row(row, is_open) %}
       {% set initials = (row.display_name or row.username or '?')[:1]|upper %}
       <tr class="acct-tr {% if not row.is_active %}acct-tr--dim{% endif %}">
         <td class="acct-td">
@@ -81,18 +95,38 @@
           </span>
         </td>
         <td class="acct-td">
-          {% if row.id in google_user_ids %}<span class="acct-pill acct-pill--yellow">Google</span>{% else %}<span class="acct-pill acct-pill--gray">이메일</span>{% endif %}
+          {% if row.id in google_user_ids %}<span class="acct-pill acct-pill--yellow">Google</span>{% else %}<span class="acct-pill acct-pill--gray">로컬</span>{% endif %}
+        </td>
+        <td class="acct-td acct-td--date">
+          {% if row.created_at %}{{ to_jst_datetime(row.created_at).strftime('%Y-%m-%d') }}{% else %}-{% endif %}
+        </td>
+        <td class="acct-td acct-td--date">
+          {% if row.id in last_role_change %}{{ to_jst_datetime(last_role_change[row.id]).strftime('%Y-%m-%d') }}{% else %}-{% endif %}
         </td>
         <td class="acct-td acct-td--right">
-          <button class="acct-link account-toggle-btn" type="button" data-target-id="acct-panel-{{ row.id }}" aria-expanded="{{ 'true' if is_open else 'false' }}">수정</button>
-          <form method="post" action="/staff/admin/staff-accounts/{{ row.id }}/toggle-active" style="display:inline" onsubmit="return window.confirm('{{ '복구할까요?' if not row.is_active else '잠글까요?' }}');">
-            <button class="acct-link {% if not row.is_active %}acct-link--green{% else %}acct-link--red{% endif %}" type="submit">{{ "복구" if not row.is_active else "잠금" }}</button>
-          </form>
+          <div class="acct-menu-wrap">
+            <button class="acct-menu-btn" type="button" aria-label="메뉴">⋯</button>
+            <div class="acct-dropdown">
+              <button class="acct-dropdown-item account-toggle-btn" type="button" data-target-id="acct-panel-{{ row.id }}">수정</button>
+              <form method="post" action="/staff/admin/staff-accounts/{{ row.id }}/toggle-active" onsubmit="return window.confirm('{{ '복구할까요?' if not row.is_active else '잠글까요?' }}');">
+                <button class="acct-dropdown-item {% if not row.is_active %}acct-dropdown-item--green{% endif %}" type="submit">{{ "복구" if not row.is_active else "잠금" }}</button>
+              </form>
+              <div class="acct-dropdown-divider"></div>
+              <form method="post" action="/staff/admin/staff-accounts/{{ row.id }}/delete" onsubmit="return window.confirm('정말 삭제할까요? 이 작업은 되돌릴 수 없습니다.');">
+                <button class="acct-dropdown-item acct-dropdown-item--danger" type="submit">삭제</button>
+              </form>
+            </div>
+          </div>
         </td>
       </tr>
       <tr class="acct-panel-row">
-        <td colspan="5" style="padding:0;border:none">
+        <td colspan="7" style="padding:0;border:none">
           <div id="acct-panel-{{ row.id }}" class="acct-edit-panel {% if not is_open %}is-collapsed{% endif %}">
+            <div class="acct-meta" style="margin-bottom:8px;font-size:11px;color:#94a3b8;display:flex;gap:16px;flex-wrap:wrap">
+              {% if row.created_at %}<span>생성: {{ to_jst_datetime(row.created_at).strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
+              {% if row.updated_at %}<span>수정: {{ to_jst_datetime(row.updated_at).strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
+              {% if not row.is_active and row.updated_at %}<span style="color:#dc2626">비활성화: {{ to_jst_datetime(row.updated_at).strftime('%Y-%m-%d %H:%M') }}</span>{% endif %}
+            </div>
             <form method="post" action="/staff/admin/staff-accounts/{{ row.id }}/update" class="acct-edit-form" onsubmit="return window.confirm('저장할까요?');">
               <label class="field"><span class="field-label">표시 이름</span><input class="control" type="text" name="display_name" maxlength="100" value="{{ row.display_name or row.username }}" required /></label>
               <label class="field"><span class="field-label">권한</span>
@@ -112,13 +146,52 @@
           </div>
         </td>
       </tr>
+      {% endmacro %}
+
+      {% for row in active_rows %}
+        {{ account_row(row, row.id == focus_staff_id) }}
       {% endfor %}
+
+      {% if inactive_rows %}
+      <tr class="acct-divider-row">
+        <td colspan="7">
+          <div class="acct-divider">
+            <span class="acct-divider-label">잠금 계정 ({{ inactive_rows|length }})</span>
+          </div>
+        </td>
+      </tr>
+      {% for row in inactive_rows %}
+        {{ account_row(row, row.id == focus_staff_id) }}
+      {% endfor %}
+      {% endif %}
     </tbody>
   </table>
 </section>
 
 <script>
 (function () {
+  // Three-dot menu toggle
+  document.querySelectorAll(".acct-menu-btn").forEach(function (btn) {
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var wrap = btn.closest(".acct-menu-wrap");
+      var wasOpen = wrap.classList.contains("is-open");
+      // Close all open menus first
+      document.querySelectorAll(".acct-menu-wrap.is-open").forEach(function (w) {
+        w.classList.remove("is-open");
+      });
+      if (!wasOpen) wrap.classList.add("is-open");
+    });
+  });
+
+  // Close menu on outside click
+  document.addEventListener("click", function () {
+    document.querySelectorAll(".acct-menu-wrap.is-open").forEach(function (w) {
+      w.classList.remove("is-open");
+    });
+  });
+
+  // Edit panel toggle
   document.querySelectorAll(".account-toggle-btn").forEach(function (btn) {
     btn.addEventListener("click", function () {
       var id = btn.getAttribute("data-target-id");
@@ -126,8 +199,55 @@
       if (!panel) return;
       var open = panel.classList.contains("is-collapsed");
       panel.classList.toggle("is-collapsed", !open);
-      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      // Close the dropdown after clicking
+      var wrap = btn.closest(".acct-menu-wrap");
+      if (wrap) wrap.classList.remove("is-open");
     });
+  });
+
+  // Korean romanization
+  var INITIALS = ['g','kk','n','d','tt','r','m','b','pp','s','ss','','j','jj','ch','k','t','p','h'];
+  var MEDIALS = ['a','ae','ya','yae','eo','e','yeo','ye','o','wa','wae','oe','yo','u','wo','we','wi','yu','eu','ui','i'];
+  var FINALS = ['','k','k','ks','n','nj','nh','t','l','lk','lm','lp','ls','lt','lp','lh','m','p','ps','t','t','ng','t','t','k','t','p','h'];
+
+  function romanize(str) {
+    var result = '';
+    for (var i = 0; i < str.length; i++) {
+      var code = str.charCodeAt(i);
+      if (code >= 0xAC00 && code <= 0xD7A3) {
+        var offset = code - 0xAC00;
+        var initial = Math.floor(offset / (21 * 28));
+        var medial = Math.floor((offset % (21 * 28)) / 28);
+        var final = offset % 28;
+        result += INITIALS[initial] + MEDIALS[medial] + FINALS[final];
+      } else {
+        result += str[i];
+      }
+    }
+    return result;
+  }
+
+  var nameInput = document.getElementById('create-display-name');
+  var emailInput = document.getElementById('create-email');
+  var emailEdited = false;
+
+  emailInput.addEventListener('input', function () { emailEdited = true; });
+
+  nameInput.addEventListener('input', function () {
+    if (emailEdited) return;
+    var name = nameInput.value.trim();
+    if (name.length < 2) { emailInput.value = ''; return; }
+    var surname = romanize(name.charAt(0));
+    var given = romanize(name.slice(1));
+    emailInput.value = given + '.' + surname;
+  });
+
+  // Random password generator
+  document.getElementById('gen-pw-btn').addEventListener('click', function () {
+    var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    var pw = '';
+    for (var i = 0; i < 10; i++) pw += chars[Math.floor(Math.random() * chars.length)];
+    document.getElementById('create-password').value = pw;
   });
 })();
 </script>

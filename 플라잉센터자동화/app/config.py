@@ -20,7 +20,12 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "").rstrip("/")
 
-SECRET_KEY = os.getenv("APP_SECRET_KEY", "dev-secret-change-me")
+_secret_key_raw = os.getenv("APP_SECRET_KEY", "")
+if IS_PRODUCTION and not _secret_key_raw:
+    raise RuntimeError("APP_SECRET_KEY must be set in production")
+SECRET_KEY = _secret_key_raw or "dev-secret-for-local-only"
+
+MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
 SESSION_HTTPS_ONLY = _env_bool("SESSION_HTTPS_ONLY", IS_PRODUCTION)
 SESSION_SAME_SITE = os.getenv("SESSION_SAME_SITE", "lax").strip().lower() or "lax"
 SESSION_MAX_AGE = int(os.getenv("SESSION_MAX_AGE", str(60 * 60 * 12)))
@@ -41,3 +46,6 @@ MAX_COMPANION_COUNT = 99
 R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
 R2_API_TOKEN = os.getenv("R2_API_TOKEN", os.getenv("CLOUDFLARE_API_TOKEN", ""))
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME", "luggage-images")
+
+ASANA_PAT = os.getenv("ASANA_PAT", "")
+ASANA_BUG_PROJECT_GID = os.getenv("ASANA_BUG_PROJECT_GID", "")
