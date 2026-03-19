@@ -4,9 +4,15 @@
 import { fetchSheetData } from "../lib/googleSheets";
 
 const SPREADSHEET_ID = "10mn-Eg0YMk6tKOYfebtjP-mWMGQiaKhmNpLLA04YhoA";
-// TODO: Sheet name changes monthly (e.g., "Daily 01.Mar", "Daily 01.Apr").
-// Consider making this configurable or auto-detecting the current month's sheet.
-const SHEET_NAME = "Daily 01.Mar";
+
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Generate sheet name for a given date's month, e.g. "Daily 01.Mar" */
+function getSheetName(date: Date = new Date()): string {
+  // Convert to JST (UTC+9)
+  const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  return `Daily 01.${MONTH_ABBR[jst.getUTCMonth()]}`;
+}
 
 export interface RentalDailyRevenue {
   date: string; // YYYY-MM-DD format
@@ -43,10 +49,11 @@ export async function fetchRentalDailyRevenue(
   credentials: string
 ): Promise<RentalDailyRevenue[]> {
   // Fetch columns A and K (date and rental revenue)
+  const sheetName = getSheetName();
   const rows = await fetchSheetData(
     credentials,
     SPREADSHEET_ID,
-    `'${SHEET_NAME}'!A:K`
+    `'${sheetName}'!A:K`
   );
 
   const results: RentalDailyRevenue[] = [];
