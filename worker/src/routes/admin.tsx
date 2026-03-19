@@ -8,6 +8,7 @@ import { adminAuth, getStaff } from "../middleware/auth";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { formatDateJST, nowJST } from "../services/storage";
 import { StaffMenu } from "../lib/components";
+import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
 
 const admin = new Hono<AppType>();
 admin.use("/*", adminAuth);
@@ -685,50 +686,108 @@ admin.get("/staff/admin/activity-logs", async (c) => {
 
 // GET /staff/admin/completion-message — Completion message editor
 admin.get("/staff/admin/completion-message", async (c) => {
-  const setting = await c.env.DB.prepare(
-    "SELECT setting_value FROM luggage_app_settings WHERE setting_key = 'customer_success_primary_message_ko'"
-  ).first<{ setting_value: string }>();
+  const msgs = await loadCompletionMessages(c.env.DB);
 
   const staff = getStaff(c);
   const successMsg = c.req.query("success");
   return c.html(
     <html lang="ko">
-      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>완료 메시지</title></head>
+      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>작성완료 문구 수정</title>
+      <style>{`
+.preview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:16px}
+.preview-card{border:1px solid #e5e5e5;border-radius:8px;padding:14px;background:#fafaf9}
+.preview-card h4{margin:0 0 8px;font-size:13px;font-weight:600;color:#37352f}
+.preview-label{font-size:11px;color:#a5a5a3;font-weight:600;margin:10px 0 4px}
+.preview-label:first-of-type{margin-top:0}
+.preview-text{font-size:13px;color:#37352f;white-space:pre-wrap;line-height:1.5;background:#fff;border:1px solid #f0f0ee;border-radius:4px;padding:8px 10px}
+      `}</style>
+      </head>
       <body class="staff-site">
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
           <StaffMenu active="/staff/admin/completion-message" role={staff.role} />
         <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
-        <h2 class="hero-title">접수 완료 메시지 편집</h2>
+        <h2 class="hero-title">작성완료 문구 수정</h2>
+        <p style="font-size:13px;color:#787774;margin:-4px 0 16px">한국어로 입력하면 영어/일본어 문구가 자동 생성됩니다.</p>
         {successMsg && <div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{successMsg}</div>}
+
+        <section class="card" style="padding:16px">
         <form method="post" action="/staff/admin/completion-message">
           <label class="field">
-            <span class="field-label">한국어 메시지</span>
-            <textarea class="control" name="message_ko" rows={5}>{setting?.setting_value || ""}</textarea>
+            <span class="field-label">1차 문구 (상단 안내)</span>
+            <textarea class="control" name="primary_message_ko" rows={4} style="font-size:13px">{msgs.primary.ko}</textarea>
           </label>
-          <button class="btn btn-primary" type="submit">저장</button>
+          <label class="field">
+            <span class="field-label">2차 문구 (혜택 안내)</span>
+            <textarea class="control" name="secondary_message_ko" rows={5} style="font-size:13px">{msgs.secondary.ko}</textarea>
+          </label>
+          <p style="font-size:12px;color:#787774;margin:8px 0 12px"><code style="background:#f0f0ee;padding:2px 5px;border-radius:3px;font-size:11px">{"{amount}"}</code>를 넣으면 실제 결제금액으로 자동 치환됩니다. (예: ¥4,800)</p>
+          <button class="btn btn-primary" type="submit">문구 저장 (자동 번역 포함)</button>
         </form>
+        </section>
+
+        <section class="card" style="padding:16px">
+          <h3 class="card-title">미리보기</h3>
+          <div class="preview-grid">
+            <div class="preview-card">
+              <h4>🇰🇷 한국어 (KO)</h4>
+              <p class="preview-label">1차 문구</p>
+              <div class="preview-text">{msgs.primary.ko}</div>
+              <p class="preview-label">2차 문구</p>
+              <div class="preview-text">{msgs.secondary.ko}</div>
+            </div>
+            <div class="preview-card">
+              <h4>🇺🇸 영어 (EN)</h4>
+              <p class="preview-label">1차 문구</p>
+              <div class="preview-text">{msgs.primary.en}</div>
+              <p class="preview-label">2차 문구</p>
+              <div class="preview-text">{msgs.secondary.en}</div>
+            </div>
+            <div class="preview-card">
+              <h4>🇯🇵 일본어 (JA)</h4>
+              <p class="preview-label">1차 문구</p>
+              <div class="preview-text">{msgs.primary.ja}</div>
+              <p class="preview-label">2차 문구</p>
+              <div class="preview-text">{msgs.secondary.ja}</div>
+            </div>
+          </div>
+        </section>
         </main>
       </body>
     </html>
   );
 });
 
-// POST /staff/admin/completion-message — Save completion message
+// POST /staff/admin/completion-message — Save completion message (auto-translate)
 admin.post("/staff/admin/completion-message", async (c) => {
   const body = await c.req.parseBody();
   const staff = getStaff(c);
-  const messageKo = String(body.message_ko || "");
+  const koPrimary = String(body.primary_message_ko || "");
+  const koSecondary = String(body.secondary_message_ko || "");
 
-  await c.env.DB.prepare(
-    `INSERT INTO luggage_app_settings (setting_key, setting_value, staff_id, updated_at)
-     VALUES ('customer_success_primary_message_ko', ?, ?, datetime('now'))
-     ON CONFLICT(setting_key) DO UPDATE SET setting_value = ?, staff_id = ?, updated_at = datetime('now')`
-  )
-    .bind(messageKo, staff.id, messageKo, staff.id)
-    .run();
+  const msgs = await buildCompletionMessagesFromKo(koPrimary, koSecondary);
 
-  return c.redirect("/staff/admin/completion-message?success=저장되었습니다");
+  // Upsert all 6 messages
+  const entries: [string, string][] = [
+    ["customer_success_primary_message_ko", msgs.primary.ko],
+    ["customer_success_primary_message_en", msgs.primary.en],
+    ["customer_success_primary_message_ja", msgs.primary.ja],
+    ["customer_success_secondary_message_ko", msgs.secondary.ko],
+    ["customer_success_secondary_message_en", msgs.secondary.en],
+    ["customer_success_secondary_message_ja", msgs.secondary.ja],
+  ];
+
+  const stmts = entries.map(([key, value]) =>
+    c.env.DB.prepare(
+      `INSERT INTO luggage_app_settings (setting_key, setting_value, staff_id, updated_at)
+       VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(setting_key) DO UPDATE SET setting_value = ?, staff_id = ?, updated_at = datetime('now')`
+    ).bind(key, value, staff.id, value, staff.id)
+  );
+
+  await c.env.DB.batch(stmts);
+
+  return c.redirect("/staff/admin/completion-message?success=저장되었습니다 (자동 번역 포함)");
 });
 
 // POST /staff/admin/retention/run — Manual retention cleanup
