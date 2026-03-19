@@ -12,6 +12,7 @@ import { calculateStorageDays, calculateExtraDays } from "../services/storage";
 import { createBugTask } from "../lib/asana";
 import { displayOrderStatus, displayPaymentMethod, displayFlyingPassTier } from "../lib/display";
 import { fmtJST } from "../lib/dateFormat";
+import { StaffMenu } from "../lib/components";
 
 type Order = {
   order_id: string;
@@ -126,21 +127,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
           </section>
 
           {/* Staff menu */}
-          <nav class="staff-menu" aria-label="직원 메뉴">
-            <a class="staff-menu-link is-active" href="/staff/dashboard">대시보드</a>
-            <a class="staff-menu-link" href="/staff/cash-closing">정산마감</a>
-            <a class="staff-menu-link" href="/staff/handover">인수인계</a>
-            <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
-            <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
-            <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
-            {staff.role === "admin" && (
-              <>
-                <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
-                <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
-                <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
-              </>
-            )}
-          </nav>
+          <StaffMenu active="/staff/dashboard" role={staff.role} />
 
           {/* Edit card */}
           <section class="card">
@@ -603,14 +590,7 @@ staffOrders.get("/staff/bug-report", (c) => {
           </div>
         </header>
         <main class="container">
-          <nav class="staff-menu" aria-label="직원 메뉴">
-            <a class="staff-menu-link" href="/staff/dashboard">대시보드</a>
-            <a class="staff-menu-link" href="/staff/cash-closing">정산마감</a>
-            <a class="staff-menu-link" href="/staff/handover">인수인계</a>
-            <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
-            <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
-            <a class="staff-menu-link is-active" href="/staff/bug-report">버그신고</a>
-          </nav>
+          <StaffMenu active="/staff/bug-report" role={staff.role} />
           <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
           {success && <div class="card" style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:10px 16px;margin-bottom:12px">버그 신고가 접수되었습니다. 감사합니다!</div>}
           {error && <div class="card" style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;margin-bottom:12px">신고 중 오류가 발생했습니다. 다시 시도해주세요.</div>}

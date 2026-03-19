@@ -7,6 +7,7 @@ import type { AppType } from "../types";
 import { adminAuth, getStaff } from "../middleware/auth";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { formatDateJST, nowJST } from "../services/storage";
+import { StaffMenu } from "../lib/components";
 
 const admin = new Hono<AppType>();
 admin.use("/*", adminAuth);
@@ -65,18 +66,7 @@ admin.get("/staff/admin/sales", async (c) => {
       <body class="staff-site">
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link pill-link-strong" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
-          <nav class="staff-menu" aria-label="직원 메뉴">
-            <a class="staff-menu-link" href="/staff/dashboard">대시보드</a>
-            <a class="staff-menu-link" href="/staff/cash-closing">정산마감</a>
-            <a class="staff-menu-link" href="/staff/handover">인수인계</a>
-            <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
-            <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
-            <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
-            <a class="staff-menu-link is-active" href="/staff/admin/sales">매출관리</a>
-            <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
-            <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
-            <a class="staff-menu-link" href="/staff/admin/completion-message">완료메시지</a>
-          </nav>
+          <StaffMenu active="/staff/admin/sales" role={staff.role} />
         <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">매출 분석</h2>
 
@@ -186,7 +176,7 @@ admin.post("/staff/admin/sales/rental", async (c) => {
 // GET /staff/admin/staff-accounts — Staff account management
 admin.get("/staff/admin/staff-accounts", async (c) => {
   const accounts = await c.env.DB.prepare(
-    "SELECT * FROM user_profiles ORDER BY is_active DESC, created_at DESC"
+    "SELECT id, display_name, username, email, role, is_active, created_at FROM user_profiles ORDER BY is_active DESC, created_at DESC"
   ).all();
 
   const staff = getStaff(c);
@@ -194,9 +184,17 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
   const errorMsg = c.req.query("error");
   const successMsg = c.req.query("success");
 
-  const activeAccounts = accounts.results.filter((a: Record<string, unknown>) => a.is_active as number);
-  const inactiveAccounts = accounts.results.filter((a: Record<string, unknown>) => !(a.is_active as number));
-  const adminCount = accounts.results.filter((a: Record<string, unknown>) => (a.role as string) === "admin" && (a.is_active as number)).length;
+  const activeAccounts: Record<string, unknown>[] = [];
+  const inactiveAccounts: Record<string, unknown>[] = [];
+  let adminCount = 0;
+  for (const a of accounts.results) {
+    if (a.is_active) {
+      activeAccounts.push(a);
+      if (a.role === "admin") adminCount++;
+    } else {
+      inactiveAccounts.push(a);
+    }
+  }
 
   const AccountRow = ({ a, isOpen }: { a: Record<string, unknown>; isOpen: boolean }) => {
     const name = (a.display_name as string) || (a.username as string) || "?";
@@ -319,21 +317,7 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
       <body class="staff-site">
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
-          <nav class="staff-menu" aria-label="직원 메뉴">
-            <a class="staff-menu-link" href="/staff/dashboard">대시보드</a>
-            <a class="staff-menu-link" href="/staff/cash-closing">정산마감</a>
-            <a class="staff-menu-link" href="/staff/handover">인수인계</a>
-            <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
-            <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
-            <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
-            {staff.role === "admin" && (
-              <>
-                <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
-                <a class="staff-menu-link is-active" href="/staff/admin/staff-accounts">계정관리</a>
-                <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
-              </>
-            )}
-          </nav>
+          <StaffMenu active="/staff/admin/staff-accounts" role={staff.role} />
 
         {errorMsg && <div style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{decodeURIComponent(errorMsg)}</div>}
         {successMsg && <div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{successMsg}</div>}
@@ -573,17 +557,7 @@ admin.get("/staff/admin/activity-logs", async (c) => {
       <body class="staff-site">
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
-          <nav class="staff-menu" aria-label="직원 메뉴">
-            <a class="staff-menu-link" href="/staff/dashboard">대시보드</a>
-            <a class="staff-menu-link" href="/staff/cash-closing">정산마감</a>
-            <a class="staff-menu-link" href="/staff/handover">인수인계</a>
-            <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
-            <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
-            <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
-            <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
-            <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
-            <a class="staff-menu-link is-active" href="/staff/admin/activity-logs">활동로그</a>
-          </nav>
+          <StaffMenu active="/staff/admin/activity-logs" role={staff.role} />
         <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">활동 로그</h2>
         <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -627,18 +601,7 @@ admin.get("/staff/admin/completion-message", async (c) => {
       <body class="staff-site">
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
-          <nav class="staff-menu" aria-label="직원 메뉴">
-            <a class="staff-menu-link" href="/staff/dashboard">대시보드</a>
-            <a class="staff-menu-link" href="/staff/cash-closing">정산마감</a>
-            <a class="staff-menu-link" href="/staff/handover">인수인계</a>
-            <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
-            <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
-            <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
-            <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
-            <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
-            <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
-            <a class="staff-menu-link" href="/staff/admin/completion-message">완료메시지</a>
-          </nav>
+          <StaffMenu active="/staff/admin/completion-message" role={staff.role} />
         <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">접수 완료 메시지 편집</h2>
         <form method="post" action="/staff/admin/completion-message">

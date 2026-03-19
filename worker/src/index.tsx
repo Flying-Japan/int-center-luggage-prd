@@ -11,6 +11,7 @@ import { securityHeaders, errorHandler, notFoundHandler, createRateLimiter } fro
 import { staffAuth, getStaff } from "./middleware/auth";
 import { runRetentionCleanup } from "./services/retention";
 import { tagColorClass, TAG_COLOR_RANGES } from "./lib/tagColors";
+import { StaffMenu } from "./lib/components";
 
 const app = new Hono<AppType>();
 
@@ -155,21 +156,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             </div>
           </section>
 
-          <nav class="staff-menu" aria-label="직원 메뉴">
-            <a class="staff-menu-link is-active" href="/staff/dashboard">대시보드</a>
-            <a class="staff-menu-link" href="/staff/cash-closing">정산마감</a>
-            <a class="staff-menu-link" href="/staff/handover">인수인계</a>
-            <a class="staff-menu-link" href="/staff/lost-found">분실물</a>
-            <a class="staff-menu-link" href="/staff/schedule">스케줄</a>
-            <a class="staff-menu-link" href="/staff/bug-report">버그신고</a>
-            {staff.role === "admin" && (
-              <>
-                <a class="staff-menu-link" href="/staff/admin/sales">매출관리</a>
-                <a class="staff-menu-link" href="/staff/admin/staff-accounts">계정관리</a>
-                <a class="staff-menu-link" href="/staff/admin/activity-logs">활동로그</a>
-              </>
-            )}
-          </nav>
+          <StaffMenu active="/staff/dashboard" role={staff.role} />
 
           <section class="card">
             <h3 class="card-title">접수 검색</h3>

@@ -10,12 +10,11 @@ import { setSession, clearSession } from "../middleware/auth";
  * pull from Supabase PG user_profiles and insert into D1.
  */
 async function ensureD1Profile(
-  db: Env["DB"],
   env: Env,
   userId: string
 ): Promise<{ id: string; is_active: number; role: string } | null> {
   // Check D1 first
-  const existing = await db.prepare(
+  const existing = await env.DB.prepare(
     "SELECT id, is_active, role FROM user_profiles WHERE id = ?"
   ).bind(userId).first<{ id: string; is_active: number; role: string }>();
 
@@ -36,7 +35,7 @@ async function ensureD1Profile(
   if (!data.is_active) return { id: data.id, is_active: 0, role: d1Role };
 
   // Insert into D1
-  await db.prepare(
+  await env.DB.prepare(
     "INSERT OR IGNORE INTO user_profiles (id, username, email, display_name, role, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
   ).bind(
     data.id,
@@ -128,7 +127,7 @@ auth.post("/staff/login", async (c) => {
   }
 
   // Check D1 profile, auto-sync from Supabase PG if missing
-  const profile = await ensureD1Profile(c.env.DB, c.env, data.user.id);
+  const profile = await ensureD1Profile(c.env, data.user.id);
 
   if (!profile || !profile.is_active) {
     return c.redirect("/staff/login?error=Account not active");
@@ -220,7 +219,7 @@ auth.get("/auth/callback", async (c) => {
   }
 
   // Check D1 profile, auto-sync from Supabase PG if missing
-  const profile = await ensureD1Profile(c.env.DB, c.env, String(userId));
+  const profile = await ensureD1Profile(c.env, String(userId));
 
   if (!profile || !profile.is_active) {
     return c.redirect("/staff/login?error=access_denied");
