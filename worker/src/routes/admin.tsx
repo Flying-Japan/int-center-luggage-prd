@@ -83,8 +83,8 @@ admin.get("/staff/admin/sales", async (c) => {
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link pill-link-strong" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
           <StaffMenu active="/staff/admin/sales" role={staff.role} />
-        {successMsg && <div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{successMsg}</div>}
-        <h2 class="hero-title">매출 분석</h2>
+        {successMsg && <p class="success-note">{successMsg}</p>}
+        <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div></section>
 
         <section class="card">
           <form method="get" action="/staff/admin/sales" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
@@ -95,30 +95,30 @@ admin.get("/staff/admin/sales", async (c) => {
           </form>
         </section>
 
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:16px 0">
-          <div class="card" style="padding:12px;text-align:center">
-            <p style="font-size:11px;color:#787774;margin:0">짐보관 매출</p>
-            <p style="font-size:18px;font-weight:700;margin:4px 0 0">¥{s.total_revenue?.toLocaleString()}</p>
+        <div class="stat-grid">
+          <div class="card stat-card">
+            <p class="stat-label">짐보관 매출</p>
+            <p class="stat-value">¥{s.total_revenue?.toLocaleString()}</p>
           </div>
-          <div class="card" style="padding:12px;text-align:center">
-            <p style="font-size:11px;color:#787774;margin:0">렌탈 매출</p>
-            <p style="font-size:18px;font-weight:700;margin:4px 0 0">¥{rentalTotal.toLocaleString()}</p>
+          <div class="card stat-card">
+            <p class="stat-label">렌탈 매출</p>
+            <p class="stat-value">¥{rentalTotal.toLocaleString()}</p>
           </div>
-          <div class="card" style="padding:12px;text-align:center;background:#f0fdf4;border:1px solid #86efac">
-            <p style="font-size:11px;color:#166534;margin:0">합계 (짐보관 + 렌탈)</p>
-            <p style="font-size:18px;font-weight:700;margin:4px 0 0;color:#166534">¥{((s.total_revenue || 0) + rentalTotal).toLocaleString()}</p>
+          <div class="card stat-card stat-card--highlight">
+            <p class="stat-label stat-label--highlight">합계 (짐보관 + 렌탈)</p>
+            <p class="stat-value stat-value--highlight">¥{((s.total_revenue || 0) + rentalTotal).toLocaleString()}</p>
           </div>
-          <div class="card" style="padding:12px;text-align:center">
-            <p style="font-size:11px;color:#787774;margin:0">총건수</p>
-            <p style="font-size:18px;font-weight:700;margin:4px 0 0">{s.total_orders}건</p>
+          <div class="card stat-card">
+            <p class="stat-label">총건수</p>
+            <p class="stat-value">{s.total_orders}건</p>
           </div>
-          <div class="card" style="padding:12px;text-align:center">
-            <p style="font-size:11px;color:#787774;margin:0">일평균</p>
-            <p style="font-size:18px;font-weight:700;margin:4px 0 0">¥{Math.round(s.total_revenue / dayCount).toLocaleString()}</p>
+          <div class="card stat-card">
+            <p class="stat-label">일평균</p>
+            <p class="stat-value">¥{Math.round(s.total_revenue / dayCount).toLocaleString()}</p>
           </div>
-          <div class="card" style="padding:12px;text-align:center">
-            <p style="font-size:11px;color:#787774;margin:0">현금 / QR</p>
-            <p style="font-size:14px;font-weight:600;margin:4px 0 0">¥{s.total_cash?.toLocaleString()} / ¥{s.total_qr?.toLocaleString()}</p>
+          <div class="card stat-card">
+            <p class="stat-label">현금 / QR</p>
+            <p class="stat-value stat-value--sm">¥{s.total_cash?.toLocaleString()} / ¥{s.total_qr?.toLocaleString()}</p>
           </div>
         </div>
 
@@ -150,7 +150,7 @@ admin.get("/staff/admin/sales", async (c) => {
         {!c.env.GOOGLE_SHEETS_CREDENTIALS ? (
           <div style="padding:24px;text-align:center;color:#a5a5a3;font-size:13px">Google Sheets 연동이 설정되지 않았습니다</div>
         ) : rentalError ? (
-          <div style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:8px 14px;margin:8px 0;border-radius:6px;font-size:13px">Google Sheets 조회 실패: {rentalError}</div>
+          <p class="error">Google Sheets 조회 실패: {rentalError}</p>
         ) : (
           <div style="overflow-x:auto">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -275,66 +275,14 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
   return c.html(
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>직원 계정</title>
-      <style>{`
-.acct-header{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
-.acct-count{font-size:12px;color:#a5a5a3}
-.acct-row{border-bottom:1px solid #f0f0ee}
-.acct-row--dim{opacity:.55}
-.acct-row:hover{background:#fafaf9}
-.acct-td{padding:6px 10px;font-size:13px;white-space:nowrap;vertical-align:middle}
-.acct-td--date{font-size:12px;color:#a5a5a3}
-.acct-td--actions{width:40px;text-align:right}
-.acct-name-cell{display:flex;align-items:center;gap:8px}
-.acct-avatar{width:28px;height:28px;border-radius:50%;background:#e8edf3;color:#5a6a7e;font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-.acct-avatar--admin{background:#fef2f2;color:#991b1b}
-.acct-name{font-size:13px;font-weight:500;color:#37352f;display:block;line-height:1.3}
-.acct-me{font-size:10px;color:#2383e2;margin-left:4px;font-weight:400}
-.acct-email{font-size:11px;color:#a5a5a3;display:block;line-height:1.2}
-.acct-badge{font-size:10px;padding:2px 7px;border-radius:3px;background:#f0f0ee;color:#6b6b69;font-weight:500}
-.acct-badge--admin{background:#fef2f2;color:#991b1b}
-.acct-status{font-size:11px;font-weight:500}
-.acct-status--on{color:#166534}
-.acct-status--off{color:#991b1b}
-.acct-menu-wrap{position:relative;display:inline-block}
-.acct-menu-btn{background:none;border:none;cursor:pointer;font-size:16px;color:#a5a5a3;padding:2px 6px;border-radius:4px;line-height:1}
-.acct-menu-btn:hover{background:#f0f0ee;color:#37352f}
-.acct-dropdown{display:none;position:absolute;right:0;top:100%;z-index:50;min-width:100px;background:#fff;border:1px solid #e5e5e5;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.08);padding:4px 0}
-.acct-menu-wrap.is-open .acct-dropdown{display:block}
-.acct-dropdown-item{display:block;width:100%;padding:6px 14px;font-size:12px;text-align:left;background:none;border:none;cursor:pointer;color:#37352f}
-.acct-dropdown-item:hover{background:#f7f7f5}
-.acct-dropdown-item--green{color:#166534}
-.acct-dropdown-item--danger{color:#dc2626}
-.acct-dropdown-divider{height:1px;background:#f0f0ee;margin:4px 0}
-.acct-edit-panel{padding:12px 10px 12px 46px;background:#fafaf9;border-bottom:1px solid #f0f0ee;overflow:hidden;transition:max-height .2s ease,opacity .2s ease;max-height:200px;opacity:1}
-.acct-edit-panel.is-collapsed{max-height:0;opacity:0;padding:0 10px 0 46px;border:none}
-.acct-edit-form{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
-.acct-edit-form .field{margin:0}
-.acct-edit-form .control{font-size:13px;padding:5px 8px;min-height:32px}
-.acct-edit-actions{display:flex;gap:6px;align-items:center}
-.acct-edit-cancel{color:#a5a5a3}
-.acct-tbl{width:100%;border-collapse:collapse}
-.acct-tbl thead th{text-align:left;padding:6px 10px;font-size:11px;font-weight:600;color:#a5a5a3;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid #e5e5e5}
-.acct-divider-row td{padding:16px 10px 6px;border:none}
-.acct-divider-label{font-size:11px;color:#a5a5a3;font-weight:600}
-.acct-create-section{padding:12px 16px}
-.acct-create-grid{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
-.acct-create-grid .field{margin:0;min-width:140px;flex:1}
-.acct-create-grid .control{font-size:13px;padding:5px 8px;min-height:32px}
-@media(max-width:768px){
-  .acct-create-grid{flex-direction:column}
-  .acct-create-grid .field{min-width:100%}
-  .acct-edit-panel{padding-left:10px}
-  .acct-edit-form{flex-direction:column;align-items:stretch}
-}
-      `}</style>
       </head>
       <body class="staff-site">
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
           <StaffMenu active="/staff/admin/staff-accounts" role={staff.role} />
-
-        {errorMsg && <div style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{decodeURIComponent(errorMsg)}</div>}
-        {successMsg && <div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{successMsg}</div>}
+        {successMsg && <p class="success-note">{successMsg}</p>}
+        {errorMsg && <p class="error">{decodeURIComponent(errorMsg)}</p>}
+        <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">직원 계정</h2></div></section>
 
         <section class="card">
           <div class="acct-create-section">
@@ -625,7 +573,7 @@ admin.get("/staff/admin/activity-logs", async (c) => {
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
           <StaffMenu active="/staff/admin/activity-logs" role={staff.role} />
-        <h2 class="hero-title">활동 로그</h2>
+        <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">활동 로그</h2></div></section>
 
         <section class="card">
           <form method="get" action="/staff/admin/activity-logs" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
@@ -688,22 +636,13 @@ admin.get("/staff/admin/completion-message", async (c) => {
   return c.html(
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>작성완료 문구 수정</title>
-      <style>{`
-.preview-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:16px}
-.preview-card{border:1px solid #e5e5e5;border-radius:8px;padding:14px;background:#fafaf9}
-.preview-card h4{margin:0 0 8px;font-size:13px;font-weight:600;color:#37352f}
-.preview-label{font-size:11px;color:#a5a5a3;font-weight:600;margin:10px 0 4px}
-.preview-label:first-of-type{margin-top:0}
-.preview-text{font-size:13px;color:#37352f;white-space:pre-wrap;line-height:1.5;background:#fff;border:1px solid #f0f0ee;border-radius:4px;padding:8px 10px}
-      `}</style>
       </head>
       <body class="staff-site">
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
           <StaffMenu active="/staff/admin/completion-message" role={staff.role} />
-        <h2 class="hero-title">작성완료 문구 수정</h2>
-        <p style="font-size:13px;color:#787774;margin:-4px 0 16px">한국어로 입력하면 영어/일본어 문구가 자동 생성됩니다.</p>
-        {successMsg && <div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{successMsg}</div>}
+        {successMsg && <p class="success-note">{successMsg}</p>}
+        <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">작성완료 문구 수정</h2><p class="hero-desc">한국어로 입력하면 영어/일본어 문구가 자동 생성됩니다.</p></div></section>
 
         <section class="card" style="padding:16px">
         <form method="post" action="/staff/admin/completion-message">

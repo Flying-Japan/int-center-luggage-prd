@@ -1104,6 +1104,71 @@ code {
   align-items: end;
 }
 
+/* ── Stat grid (admin sales) ── */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 16px 0; }
+.stat-card { padding: 12px; text-align: center; }
+.stat-card--highlight { background: #f0fdf4; border: 1px solid #86efac; }
+.stat-label { font-size: 11px; color: #787774; margin: 0; }
+.stat-label--highlight { color: #166534; }
+.stat-value { font-size: 18px; font-weight: 700; margin: 4px 0 0; }
+.stat-value--highlight { color: #166534; }
+.stat-value--sm { font-size: 14px; font-weight: 600; }
+
+/* ── Account management (staff-accounts page) ── */
+.acct-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+.acct-count { font-size: 12px; color: #a5a5a3; }
+.acct-row { border-bottom: 1px solid #f0f0ee; }
+.acct-row--dim { opacity: .55; }
+.acct-row:hover { background: #fafaf9; }
+.acct-td { padding: 6px 10px; font-size: 13px; white-space: nowrap; vertical-align: middle; }
+.acct-td--date { font-size: 12px; color: #a5a5a3; }
+.acct-td--actions { width: 40px; text-align: right; }
+.acct-name-cell { display: flex; align-items: center; gap: 8px; }
+.acct-avatar { width: 28px; height: 28px; border-radius: 50%; background: #e8edf3; color: #5a6a7e; font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.acct-avatar--admin { background: #fef2f2; color: #991b1b; }
+.acct-name { font-size: 13px; font-weight: 500; color: #37352f; display: block; line-height: 1.3; }
+.acct-me { font-size: 10px; color: #2383e2; margin-left: 4px; font-weight: 400; }
+.acct-email { font-size: 11px; color: #a5a5a3; display: block; line-height: 1.2; }
+.acct-badge { font-size: 10px; padding: 2px 7px; border-radius: 3px; background: #f0f0ee; color: #6b6b69; font-weight: 500; }
+.acct-badge--admin { background: #fef2f2; color: #991b1b; }
+.acct-status { font-size: 11px; font-weight: 500; }
+.acct-status--on { color: #166534; }
+.acct-status--off { color: #991b1b; }
+.acct-menu-wrap { position: relative; display: inline-block; }
+.acct-menu-btn { background: none; border: none; cursor: pointer; font-size: 16px; color: #a5a5a3; padding: 2px 6px; border-radius: 4px; line-height: 1; }
+.acct-menu-btn:hover { background: #f0f0ee; color: #37352f; }
+.acct-dropdown { display: none; position: absolute; right: 0; top: 100%; z-index: 50; min-width: 100px; background: #fff; border: 1px solid #e5e5e5; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,.08); padding: 4px 0; }
+.acct-menu-wrap.is-open .acct-dropdown { display: block; }
+.acct-dropdown-item { display: block; width: 100%; padding: 6px 14px; font-size: 12px; text-align: left; background: none; border: none; cursor: pointer; color: #37352f; }
+.acct-dropdown-item:hover { background: #f7f7f5; }
+.acct-dropdown-item--green { color: #166534; }
+.acct-dropdown-item--danger { color: #dc2626; }
+.acct-dropdown-divider { height: 1px; background: #f0f0ee; margin: 4px 0; }
+.acct-edit-panel { padding: 12px 10px 12px 46px; background: #fafaf9; border-bottom: 1px solid #f0f0ee; overflow: hidden; transition: max-height .2s ease, opacity .2s ease; max-height: 200px; opacity: 1; }
+.acct-edit-panel.is-collapsed { max-height: 0; opacity: 0; padding: 0 10px 0 46px; border: none; }
+.acct-edit-form { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.acct-edit-form .field { margin: 0; }
+.acct-edit-form .control { font-size: 13px; padding: 5px 8px; min-height: 32px; }
+.acct-edit-actions { display: flex; gap: 6px; align-items: center; }
+.acct-edit-cancel { color: #a5a5a3; }
+.acct-tbl { width: 100%; border-collapse: collapse; }
+.acct-tbl thead th { text-align: left; padding: 6px 10px; font-size: 11px; font-weight: 600; color: #a5a5a3; text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid #e5e5e5; }
+.acct-divider-row td { padding: 16px 10px 6px; border: none; }
+.acct-divider-label { font-size: 11px; color: #a5a5a3; font-weight: 600; }
+.acct-create-section { padding: 12px 16px; }
+.acct-create-grid { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.acct-create-grid .field { margin: 0; min-width: 140px; flex: 1; }
+.acct-create-grid .control { font-size: 13px; padding: 5px 8px; min-height: 32px; }
+.acct-panel-row td { padding: 0; border: none; }
+
+/* ── Preview grid (completion-message page) ── */
+.preview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 16px; }
+.preview-card { border: 1px solid #e5e5e5; border-radius: 8px; padding: 14px; background: #fafaf9; }
+.preview-card h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: #37352f; }
+.preview-label { font-size: 11px; color: #a5a5a3; font-weight: 600; margin: 10px 0 4px; }
+.preview-label:first-of-type { margin-top: 0; }
+.preview-text { font-size: 13px; color: #37352f; white-space: pre-wrap; line-height: 1.5; background: #fff; border: 1px solid #f0f0ee; border-radius: 4px; padding: 8px 10px; }
+
 /* ── QR ── */
 .qr {
   width: 180px;
@@ -1741,6 +1806,10 @@ body.staff-site .col-resize-handle::after { background: rgba(35, 131, 226, 0.4);
   .cash-summary-grid { grid-template-columns: 1fr; }
 
   .account-create-grid, .account-update-grid { grid-template-columns: 1fr; }
+  .acct-create-grid { flex-direction: column; }
+  .acct-create-grid .field { min-width: 100%; }
+  .acct-edit-panel { padding-left: 10px; }
+  .acct-edit-form { flex-direction: column; align-items: stretch; }
 }
 
 /* ── Print ── */
