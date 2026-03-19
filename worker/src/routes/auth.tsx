@@ -29,12 +29,11 @@ async function ensureD1Profile(
     .single();
 
   if (error || !data) return null;
-  // Map PG roles (admin/editor/viewer) to D1 roles (admin/staff)
-  const d1Role = data.role === "admin" ? "admin" : "staff";
 
-  if (!data.is_active) return { id: data.id, is_active: 0, role: d1Role };
+  const role = data.role || "viewer";
+  if (!data.is_active) return { id: data.id, is_active: 0, role };
 
-  // Insert into D1
+  // Insert into D1 — preserve PG role as-is
   await env.DB.prepare(
     "INSERT OR IGNORE INTO user_profiles (id, username, email, display_name, role, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
   ).bind(
@@ -42,12 +41,12 @@ async function ensureD1Profile(
     data.username || "",
     data.email || "",
     data.display_name || data.username || "",
-    d1Role,
+    role,
     data.is_active ? 1 : 0,
     data.created_at || new Date().toISOString()
   ).run();
 
-  return { id: data.id, is_active: data.is_active ? 1 : 0, role: d1Role };
+  return { id: data.id, is_active: data.is_active ? 1 : 0, role };
 }
 
 const auth = new Hono<AppType>();

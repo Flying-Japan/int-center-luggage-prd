@@ -243,7 +243,7 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
               <label class="field"><span class="field-label">표시 이름</span><input class="control" type="text" name="display_name" value={(a.display_name as string) || ""} required /></label>
               <label class="field"><span class="field-label">권한</span>
                 <select class="control" name="role">
-                  <option value="staff" selected={(a.role as string) === "staff"}>직원</option>
+                  <option value="editor" selected={(a.role as string) !== "admin"}>직원</option>
                   <option value="admin" selected={(a.role as string) === "admin"}>관리자</option>
                 </select>
               </label>
@@ -343,7 +343,7 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
               </label>
               <label class="field"><span class="field-label">권한</span>
                 <select class="control" name="role">
-                  <option value="staff" selected>직원</option>
+                  <option value="editor" selected>직원</option>
                   <option value="admin">관리자</option>
                 </select>
               </label>
@@ -435,7 +435,7 @@ admin.post("/staff/admin/staff-accounts", async (c) => {
   const email = rawEmail.includes("@") ? rawEmail : `${rawEmail}@center.local`;
   const password = String(body.password || "").trim();
   const displayName = String(body.display_name || "").trim();
-  const role = String(body.role || "staff");
+  const role = String(body.role || "editor");
 
   if (!rawEmail || !password || !displayName) {
     return c.redirect("/staff/admin/staff-accounts?error=" + encodeURIComponent("모든 항목을 입력해주세요."));
@@ -456,13 +456,24 @@ admin.post("/staff/admin/staff-accounts", async (c) => {
     return c.redirect(`/staff/admin/staff-accounts?error=${encodeURIComponent(error?.message || "Failed")}`);
   }
 
-  // Create profile in D1 — rollback Supabase user on failure
+  // Create profile in D1 + PG — rollback Supabase user on failure
+  const username = email.split("@")[0];
   try {
     await c.env.DB.prepare(
       "INSERT INTO user_profiles (id, display_name, username, email, role, is_active) VALUES (?, ?, ?, ?, ?, 1)"
     )
-      .bind(data.user.id, displayName, email.split("@")[0], email, role)
+      .bind(data.user.id, displayName, username, email, role)
       .run();
+
+    // Dual-write to Supabase PG (best-effort — D1 is primary for luggage)
+    await supabaseAdmin.from("user_profiles").upsert({
+      id: data.user.id,
+      display_name: displayName,
+      username,
+      email,
+      role,
+      is_active: true,
+    }, { onConflict: "id" });
   } catch (e) {
     try {
       await supabaseAdmin.auth.admin.deleteUser(data.user.id);

@@ -196,7 +196,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   username TEXT,
   email TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
-  role TEXT NOT NULL DEFAULT 'staff',
+  role TEXT NOT NULL DEFAULT 'editor',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT
 );
