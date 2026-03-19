@@ -14,6 +14,9 @@ export type Env = {
   ASANA_PAT: string;
   ASANA_BUG_PROJECT_GID: string;
 
+  // Google Sheets (rental revenue sync)
+  GOOGLE_SHEETS_CREDENTIALS?: string;
+
   // App config
   APP_ENV: string;
   APP_SECRET_KEY: string;

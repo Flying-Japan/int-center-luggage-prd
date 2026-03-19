@@ -9,13 +9,13 @@ import { createSupabaseAdmin } from "../lib/supabase";
 import { formatDateJST, nowJST } from "../services/storage";
 import { StaffMenu } from "../lib/components";
 import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
+import { fetchRentalDailyRevenue, type RentalDailyRevenue } from "../services/rentalSync";
 
 const admin = new Hono<AppType>();
 admin.use("/*", adminAuth);
 
 // GET /staff/admin/sales — Sales analytics
 admin.get("/staff/admin/sales", async (c) => {
-  const today = formatDateJST(nowJST());
   const startDate = c.req.query("start_date") || "";
   const endDate = c.req.query("end_date") || "";
 
@@ -30,7 +30,7 @@ admin.get("/staff/admin/sales", async (c) => {
   }
 
   // Daily sales + summary in parallel
-  const [dailySales, summary, rentalSales] = await Promise.all([
+  const [dailySales, summary] = await Promise.all([
     c.env.DB.prepare(
       `SELECT date(created_at, '+9 hours') as sale_date,
          COUNT(*) as order_count,
@@ -50,12 +50,26 @@ admin.get("/staff/admin/sales", async (c) => {
        FROM luggage_orders
        WHERE status IN ('PAID', 'PICKED_UP')${dateFilter}`
     ).bind(...dateParams).first<{ total_orders: number; total_revenue: number; total_cash: number; total_qr: number }>(),
-    c.env.DB.prepare(
-      startDate && endDate
-        ? "SELECT * FROM luggage_rental_daily_sales WHERE business_date BETWEEN ? AND ? ORDER BY business_date DESC"
-        : "SELECT * FROM luggage_rental_daily_sales ORDER BY business_date DESC LIMIT 30"
-    ).bind(...(startDate && endDate ? [startDate, endDate] : [])).all(),
   ]);
+
+  // Fetch rental revenue from Google Sheets (graceful degradation)
+  let rentalData: RentalDailyRevenue[] = [];
+  let rentalError = "";
+  if (c.env.GOOGLE_SHEETS_CREDENTIALS) {
+    try {
+      const allRental = await fetchRentalDailyRevenue(c.env.GOOGLE_SHEETS_CREDENTIALS);
+      // Filter by date range if specified
+      if (startDate && endDate) {
+        rentalData = allRental.filter((r) => r.date >= startDate && r.date <= endDate);
+      } else {
+        rentalData = allRental;
+      }
+    } catch (e) {
+      rentalError = e instanceof Error ? e.message : "알 수 없는 오류";
+      console.error("Rental sync error:", rentalError);
+    }
+  }
+  const rentalTotal = rentalData.reduce((sum, r) => sum + r.rentalRevenue, 0);
 
   const s = summary || { total_orders: 0, total_revenue: 0, total_cash: 0, total_qr: 0 };
   const dayCount = dailySales.results.length || 1;
@@ -83,8 +97,16 @@ admin.get("/staff/admin/sales", async (c) => {
 
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:16px 0">
           <div class="card" style="padding:12px;text-align:center">
-            <p style="font-size:11px;color:#787774;margin:0">총매출</p>
+            <p style="font-size:11px;color:#787774;margin:0">짐보관 매출</p>
             <p style="font-size:18px;font-weight:700;margin:4px 0 0">¥{s.total_revenue?.toLocaleString()}</p>
+          </div>
+          <div class="card" style="padding:12px;text-align:center">
+            <p style="font-size:11px;color:#787774;margin:0">렌탈 매출</p>
+            <p style="font-size:18px;font-weight:700;margin:4px 0 0">¥{rentalTotal.toLocaleString()}</p>
+          </div>
+          <div class="card" style="padding:12px;text-align:center;background:#f0fdf4;border:1px solid #86efac">
+            <p style="font-size:11px;color:#166534;margin:0">합계 (짐보관 + 렌탈)</p>
+            <p style="font-size:18px;font-weight:700;margin:4px 0 0;color:#166534">¥{((s.total_revenue || 0) + rentalTotal).toLocaleString()}</p>
           </div>
           <div class="card" style="padding:12px;text-align:center">
             <p style="font-size:11px;color:#787774;margin:0">총건수</p>
@@ -124,65 +146,40 @@ admin.get("/staff/admin/sales", async (c) => {
         </section>
 
         <section class="card">
-        <h3 class="card-title">렌탈 일별 매출</h3>
-        <form method="post" action="/staff/admin/sales/rental" class="grid2" style="margin-bottom:12px">
-          <label class="field"><span class="field-label">날짜</span><input class="control" type="date" name="business_date" value={today} required /></label>
-          <label class="field"><span class="field-label">매출 (¥)</span><input class="control" type="number" name="revenue_amount" placeholder="0" required /></label>
-          <label class="field"><span class="field-label">고객수</span><input class="control" type="number" name="customer_count" value="0" /></label>
-          <label class="field"><span class="field-label">메모</span><input class="control" type="text" name="note" placeholder="메모" /></label>
-          <label class="button-wrap"><span class="field-label sr-only">등록</span><button class="btn btn-primary" type="submit">등록</button></label>
-        </form>
-        <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;padding:6px 8px">날짜</th><th style="text-align:right;padding:6px 8px">매출</th><th style="text-align:right;padding:6px 8px">고객수</th><th style="text-align:left;padding:6px 8px">메모</th></tr></thead>
-          <tbody>
-          {rentalSales.results.length === 0 && (
-            <tr><td colspan={4} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
-          )}
-          {rentalSales.results.map((r: Record<string, unknown>) => (
-            <tr style="border-bottom:1px solid var(--line)">
-              <td style="padding:4px 8px">{r.business_date as string}</td>
-              <td style="padding:4px 8px;text-align:right;font-weight:600">¥{(r.revenue_amount as number)?.toLocaleString()}</td>
-              <td style="padding:4px 8px;text-align:right">{r.customer_count as number}</td>
-              <td style="padding:4px 8px">{(r.note as string) || "-"}</td>
-            </tr>
-          ))}
-          </tbody>
-        </table>
-        </div>
+        <h3 class="card-title">렌탈 일별 매출 <span style="font-size:11px;font-weight:400;color:#a5a5a3;margin-left:6px">Google Sheets 연동</span></h3>
+        {!c.env.GOOGLE_SHEETS_CREDENTIALS ? (
+          <div style="padding:24px;text-align:center;color:#a5a5a3;font-size:13px">Google Sheets 연동이 설정되지 않았습니다</div>
+        ) : rentalError ? (
+          <div style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:8px 14px;margin:8px 0;border-radius:6px;font-size:13px">Google Sheets 조회 실패: {rentalError}</div>
+        ) : (
+          <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;padding:6px 8px">날짜</th><th style="text-align:right;padding:6px 8px">렌탈 매출</th></tr></thead>
+            <tbody>
+            {rentalData.length === 0 && (
+              <tr><td colspan={2} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
+            )}
+            {rentalData.map((r) => (
+              <tr style="border-bottom:1px solid var(--line)">
+                <td style="padding:4px 8px">{r.date}</td>
+                <td style="padding:4px 8px;text-align:right;font-weight:600">¥{r.rentalRevenue.toLocaleString()}</td>
+              </tr>
+            ))}
+            {rentalData.length > 0 && (
+              <tr style="border-top:2px solid var(--line);font-weight:700">
+                <td style="padding:6px 8px">합계</td>
+                <td style="padding:6px 8px;text-align:right">¥{rentalTotal.toLocaleString()}</td>
+              </tr>
+            )}
+            </tbody>
+          </table>
+          </div>
+        )}
         </section>
         </main>
       </body>
     </html>
   );
-});
-
-// POST /staff/admin/sales/rental — Create/upsert rental daily sales
-admin.post("/staff/admin/sales/rental", async (c) => {
-  const body = await c.req.parseBody();
-  const staff = getStaff(c);
-
-  const bizDate = String(body.business_date);
-  const revenueAmount = parseInt(String(body.revenue_amount || "0"), 10);
-  const customerCount = parseInt(String(body.customer_count || "0"), 10);
-  const note = String(body.note || "") || null;
-
-  // Check if entry exists for this date — update instead of creating duplicate
-  const existing = await c.env.DB.prepare(
-    "SELECT rental_id FROM luggage_rental_daily_sales WHERE business_date = ?"
-  ).bind(bizDate).first<{ rental_id: number }>();
-
-  if (existing) {
-    await c.env.DB.prepare(
-      "UPDATE luggage_rental_daily_sales SET revenue_amount = ?, customer_count = ?, note = ?, staff_id = ?, updated_at = datetime('now') WHERE rental_id = ?"
-    ).bind(revenueAmount, customerCount, note, staff.id, existing.rental_id).run();
-  } else {
-    await c.env.DB.prepare(
-      "INSERT INTO luggage_rental_daily_sales (business_date, revenue_amount, customer_count, note, staff_id) VALUES (?, ?, ?, ?, ?)"
-    ).bind(bizDate, revenueAmount, customerCount, note, staff.id).run();
-  }
-
-  return c.redirect("/staff/admin/sales?success=저장되었습니다");
 });
 
 // GET /staff/admin/staff-accounts — Staff account management

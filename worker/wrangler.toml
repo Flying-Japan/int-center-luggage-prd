@@ -24,3 +24,6 @@ zone_name = "flyingjp.com"
 
 [triggers]
 crons = ["0 18 * * *"]
+
+# Google Sheets rental revenue sync (service account credentials)
+# Set via: wrangler secret put GOOGLE_SHEETS_CREDENTIALS
