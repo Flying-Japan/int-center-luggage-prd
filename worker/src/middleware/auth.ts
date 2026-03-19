@@ -1,13 +1,14 @@
 import { type Context, type Next } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Env } from "../types";
+import { createSupabaseAdmin } from "../lib/supabase";
 
-/** Staff user from user_profiles table */
+/** Staff user from Supabase PG user_profiles table */
 export type StaffUser = {
   id: string;
   display_name: string | null;
   username: string | null;
-  is_active: number;
+  is_active: boolean;
   role: string;
   created_at: string;
 };
@@ -85,23 +86,37 @@ async function readSession(c: AppContext): Promise<string | null> {
 }
 
 /**
- * Get current authenticated staff user from session cookie + D1 lookup.
+ * Get current authenticated staff user from session cookie + Supabase PG lookup.
  * Returns null if not authenticated.
  */
 export async function getCurrentStaff(c: AppContext): Promise<StaffUser | null> {
+  // Return cached profile if already fetched this request
+  const cached = c.get("staff") as StaffUser | undefined;
+  if (cached) return cached;
+
   const userId = await readSession(c);
   if (!userId) return null;
 
-  const staff = await c.env.DB.prepare(
-    "SELECT id, display_name, username, is_active, role, created_at FROM user_profiles WHERE id = ?"
-  )
-    .bind(userId)
-    .first<StaffUser>();
+  const supabaseAdmin = createSupabaseAdmin(c.env);
+  const { data, error } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, display_name, username, is_active, role, created_at")
+    .eq("id", userId)
+    .single();
 
-  if (!staff || !staff.is_active) {
+  if (error || !data || !data.is_active) {
     clearSession(c);
     return null;
   }
+
+  const staff: StaffUser = {
+    id: data.id,
+    display_name: data.display_name,
+    username: data.username,
+    is_active: data.is_active,
+    role: data.role,
+    created_at: data.created_at,
+  };
 
   return staff;
 }

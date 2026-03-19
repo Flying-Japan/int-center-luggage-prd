@@ -189,18 +189,6 @@ CREATE TABLE IF NOT EXISTS luggage_work_schedules (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Auth: User profiles (shared table, no prefix)
-CREATE TABLE IF NOT EXISTS user_profiles (
-  id TEXT PRIMARY KEY,
-  display_name TEXT,
-  username TEXT,
-  email TEXT,
-  is_active INTEGER NOT NULL DEFAULT 1,
-  role TEXT NOT NULL DEFAULT 'editor',
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT
-);
-
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_luggage_orders_status ON luggage_orders(status);
 CREATE INDEX IF NOT EXISTS idx_luggage_orders_created_at ON luggage_orders(created_at);

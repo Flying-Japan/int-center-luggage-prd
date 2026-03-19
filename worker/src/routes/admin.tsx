@@ -175,9 +175,14 @@ admin.post("/staff/admin/sales/rental", async (c) => {
 
 // GET /staff/admin/staff-accounts — Staff account management
 admin.get("/staff/admin/staff-accounts", async (c) => {
-  const accounts = await c.env.DB.prepare(
-    "SELECT id, display_name, username, email, role, is_active, created_at FROM user_profiles ORDER BY is_active DESC, created_at DESC"
-  ).all();
+  const supabaseAdmin = createSupabaseAdmin(c.env);
+  const { data: accountRows } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, display_name, username, email, role, is_active, created_at")
+    .order("is_active", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  const accounts = { results: accountRows || [] };
 
   const staff = getStaff(c);
   const focusId = c.req.query("focus");
@@ -200,7 +205,7 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
     const name = (a.display_name as string) || (a.username as string) || "?";
     const initial = name[0].toUpperCase();
     const isMe = a.id === staff.id;
-    const isActive = a.is_active as number;
+    const isActive = a.is_active as boolean;
     const isAdmin = (a.role as string) === "admin";
     const created = a.created_at ? new Date(a.created_at as string).toISOString().slice(0, 10) : "-";
 
@@ -456,17 +461,10 @@ admin.post("/staff/admin/staff-accounts", async (c) => {
     return c.redirect(`/staff/admin/staff-accounts?error=${encodeURIComponent(error?.message || "Failed")}`);
   }
 
-  // Create profile in D1 + PG — rollback Supabase user on failure
+  // Create profile in Supabase PG — rollback Supabase user on failure
   const username = email.split("@")[0];
   try {
-    await c.env.DB.prepare(
-      "INSERT INTO user_profiles (id, display_name, username, email, role, is_active) VALUES (?, ?, ?, ?, ?, 1)"
-    )
-      .bind(data.user.id, displayName, username, email, role)
-      .run();
-
-    // Dual-write to Supabase PG (best-effort — D1 is primary for luggage)
-    await supabaseAdmin.from("user_profiles").upsert({
+    const { error: pgError } = await supabaseAdmin.from("user_profiles").upsert({
       id: data.user.id,
       display_name: displayName,
       username,
@@ -474,6 +472,8 @@ admin.post("/staff/admin/staff-accounts", async (c) => {
       role,
       is_active: true,
     }, { onConflict: "id" });
+
+    if (pgError) throw pgError;
   } catch (e) {
     try {
       await supabaseAdmin.auth.admin.deleteUser(data.user.id);
@@ -493,15 +493,19 @@ admin.post("/staff/admin/staff-accounts/:id/toggle-active", async (c) => {
     return c.redirect("/staff/admin/staff-accounts?error=자신의 계정은 비활성화할 수 없습니다");
   }
 
-  const profile = await c.env.DB.prepare("SELECT is_active FROM user_profiles WHERE id = ?")
-    .bind(targetId)
-    .first<{ is_active: number }>();
+  const supabaseAdmin = createSupabaseAdmin(c.env);
+  const { data: profile } = await supabaseAdmin
+    .from("user_profiles")
+    .select("is_active")
+    .eq("id", targetId)
+    .single();
 
   if (!profile) return c.redirect("/staff/admin/staff-accounts");
 
-  await c.env.DB.prepare("UPDATE user_profiles SET is_active = ? WHERE id = ?")
-    .bind(profile.is_active ? 0 : 1, targetId)
-    .run();
+  await supabaseAdmin
+    .from("user_profiles")
+    .update({ is_active: !profile.is_active, updated_at: new Date().toISOString() })
+    .eq("id", targetId);
 
   return c.redirect("/staff/admin/staff-accounts");
 });
@@ -511,17 +515,16 @@ admin.post("/staff/admin/staff-accounts/:id/update", async (c) => {
   const targetId = c.req.param("id");
   const body = await c.req.parseBody();
 
-  const updates: string[] = [];
-  const values: (string | number)[] = [];
+  const updates: Record<string, string> = {};
+  if (body.display_name) updates.display_name = String(body.display_name);
+  if (body.role) updates.role = String(body.role);
 
-  if (body.display_name) { updates.push("display_name = ?"); values.push(String(body.display_name)); }
-  if (body.role) { updates.push("role = ?"); values.push(String(body.role)); }
-
-  if (updates.length > 0) {
-    values.push(targetId);
-    await c.env.DB.prepare(`UPDATE user_profiles SET ${updates.join(", ")} WHERE id = ?`)
-      .bind(...values)
-      .run();
+  if (Object.keys(updates).length > 0) {
+    const supabaseAdmin = createSupabaseAdmin(c.env);
+    await supabaseAdmin
+      .from("user_profiles")
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq("id", targetId);
   }
 
   return c.redirect("/staff/admin/staff-accounts");
@@ -531,12 +534,10 @@ admin.post("/staff/admin/staff-accounts/:id/update", async (c) => {
 admin.post("/staff/admin/staff-accounts/:id/delete", async (c) => {
   const targetId = c.req.param("id");
 
-  // Delete from Supabase Auth first
+  // Delete from Supabase Auth + PG
   const supabaseAdmin = createSupabaseAdmin(c.env);
   await supabaseAdmin.auth.admin.deleteUser(targetId);
-
-  // Then delete D1 profile
-  await c.env.DB.prepare("DELETE FROM user_profiles WHERE id = ?").bind(targetId).run();
+  await supabaseAdmin.from("user_profiles").delete().eq("id", targetId);
   return c.redirect("/staff/admin/staff-accounts");
 });
 
