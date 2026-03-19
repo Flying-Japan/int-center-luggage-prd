@@ -60,6 +60,7 @@ admin.get("/staff/admin/sales", async (c) => {
   const dayCount = dailySales.results.length || 1;
 
   const staff = getStaff(c);
+  const successMsg = c.req.query("success");
   return c.html(
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>매출 분석</title></head>
@@ -67,6 +68,7 @@ admin.get("/staff/admin/sales", async (c) => {
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link pill-link-strong" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
           <StaffMenu active="/staff/admin/sales" role={staff.role} />
+        {successMsg && <div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{successMsg}</div>}
         <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">매출 분석</h2>
 
@@ -82,7 +84,7 @@ admin.get("/staff/admin/sales", async (c) => {
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:16px 0">
           <div class="card" style="padding:12px;text-align:center">
             <p style="font-size:11px;color:#787774;margin:0">총매출</p>
-            <p style="font-size:18px;font-weight:700;margin:4px 0 0">¥{s.total_revenue}</p>
+            <p style="font-size:18px;font-weight:700;margin:4px 0 0">¥{s.total_revenue?.toLocaleString()}</p>
           </div>
           <div class="card" style="padding:12px;text-align:center">
             <p style="font-size:11px;color:#787774;margin:0">총건수</p>
@@ -90,30 +92,35 @@ admin.get("/staff/admin/sales", async (c) => {
           </div>
           <div class="card" style="padding:12px;text-align:center">
             <p style="font-size:11px;color:#787774;margin:0">일평균</p>
-            <p style="font-size:18px;font-weight:700;margin:4px 0 0">¥{Math.round(s.total_revenue / dayCount)}</p>
+            <p style="font-size:18px;font-weight:700;margin:4px 0 0">¥{Math.round(s.total_revenue / dayCount).toLocaleString()}</p>
           </div>
           <div class="card" style="padding:12px;text-align:center">
             <p style="font-size:11px;color:#787774;margin:0">현금 / QR</p>
-            <p style="font-size:14px;font-weight:600;margin:4px 0 0">¥{s.total_cash} / ¥{s.total_qr}</p>
+            <p style="font-size:14px;font-weight:600;margin:4px 0 0">¥{s.total_cash?.toLocaleString()} / ¥{s.total_qr?.toLocaleString()}</p>
           </div>
         </div>
 
         <section class="card">
         <h3 class="card-title">짐보관 일별 매출</h3>
+        <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;padding:6px 8px">날짜</th><th style="text-align:right;padding:6px 8px">건수</th><th style="text-align:right;padding:6px 8px">현금</th><th style="text-align:right;padding:6px 8px">QR</th><th style="text-align:right;padding:6px 8px">합계</th></tr></thead>
           <tbody>
+          {dailySales.results.length === 0 && (
+            <tr><td colspan={5} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
+          )}
           {dailySales.results.map((d: Record<string, unknown>) => (
             <tr style="border-bottom:1px solid var(--line)">
               <td style="padding:4px 8px">{d.sale_date as string}</td>
               <td style="padding:4px 8px;text-align:right">{d.order_count as number}</td>
-              <td style="padding:4px 8px;text-align:right">¥{d.cash_total as number}</td>
-              <td style="padding:4px 8px;text-align:right">¥{d.qr_total as number}</td>
-              <td style="padding:4px 8px;text-align:right;font-weight:600">¥{d.grand_total as number}</td>
+              <td style="padding:4px 8px;text-align:right">¥{(d.cash_total as number)?.toLocaleString()}</td>
+              <td style="padding:4px 8px;text-align:right">¥{(d.qr_total as number)?.toLocaleString()}</td>
+              <td style="padding:4px 8px;text-align:right;font-weight:600">¥{(d.grand_total as number)?.toLocaleString()}</td>
             </tr>
           ))}
           </tbody>
         </table>
+        </div>
         </section>
 
         <section class="card">
@@ -125,19 +132,24 @@ admin.get("/staff/admin/sales", async (c) => {
           <label class="field"><span class="field-label">메모</span><input class="control" type="text" name="note" placeholder="메모" /></label>
           <label class="button-wrap"><span class="field-label sr-only">등록</span><button class="btn btn-primary" type="submit">등록</button></label>
         </form>
+        <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;padding:6px 8px">날짜</th><th style="text-align:right;padding:6px 8px">매출</th><th style="text-align:right;padding:6px 8px">고객수</th><th style="text-align:left;padding:6px 8px">메모</th></tr></thead>
           <tbody>
+          {rentalSales.results.length === 0 && (
+            <tr><td colspan={4} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
+          )}
           {rentalSales.results.map((r: Record<string, unknown>) => (
             <tr style="border-bottom:1px solid var(--line)">
               <td style="padding:4px 8px">{r.business_date as string}</td>
-              <td style="padding:4px 8px;text-align:right;font-weight:600">¥{r.revenue_amount as number}</td>
+              <td style="padding:4px 8px;text-align:right;font-weight:600">¥{(r.revenue_amount as number)?.toLocaleString()}</td>
               <td style="padding:4px 8px;text-align:right">{r.customer_count as number}</td>
               <td style="padding:4px 8px">{(r.note as string) || "-"}</td>
             </tr>
           ))}
           </tbody>
         </table>
+        </div>
         </section>
         </main>
       </body>
@@ -170,7 +182,7 @@ admin.post("/staff/admin/sales/rental", async (c) => {
     ).bind(bizDate, revenueAmount, customerCount, note, staff.id).run();
   }
 
-  return c.redirect("/staff/admin/sales");
+  return c.redirect("/staff/admin/sales?success=저장되었습니다");
 });
 
 // GET /staff/admin/staff-accounts — Staff account management
@@ -228,7 +240,7 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
             <button class="acct-menu-btn" type="button" aria-label="메뉴">&#x22EF;</button>
             <div class="acct-dropdown">
               <button class="acct-dropdown-item acct-edit-toggle" type="button" data-panel={`acct-panel-${a.id}`}>수정</button>
-              <form method="post" action={`/staff/admin/staff-accounts/${a.id}/toggle-active`}>
+              <form method="post" action={`/staff/admin/staff-accounts/${a.id}/toggle-active`} onsubmit={`return confirm('${isActive ? "이 계정을 잠금 처리할까요?" : "이 계정을 복구할까요?"}')`}>
                 <button class={`acct-dropdown-item${!isActive ? " acct-dropdown-item--green" : ""}`} type="submit">{isActive ? "잠금" : "복구"}</button>
               </form>
               {!isMe && (<>
@@ -364,6 +376,7 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
               <span class="acct-count">{accounts.results.length}명 · 활성 {activeAccounts.length}명 · 관리자 {adminCount}명</span>
             </div>
           </div>
+          <div style="overflow-x:auto">
           <table class="acct-tbl">
             <thead>
               <tr>
@@ -386,6 +399,7 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
               </>)}
             </tbody>
           </table>
+          </div>
         </section>
         </main>
         <script dangerouslySetInnerHTML={{__html: `(function(){
@@ -502,12 +516,13 @@ admin.post("/staff/admin/staff-accounts/:id/toggle-active", async (c) => {
 
   if (!profile) return c.redirect("/staff/admin/staff-accounts");
 
+  const newActive = !profile.is_active;
   await supabaseAdmin
     .from("user_profiles")
-    .update({ is_active: !profile.is_active, updated_at: new Date().toISOString() })
+    .update({ is_active: newActive, updated_at: new Date().toISOString() })
     .eq("id", targetId);
 
-  return c.redirect("/staff/admin/staff-accounts");
+  return c.redirect(`/staff/admin/staff-accounts?success=${newActive ? "계정이 복구되었습니다" : "계정이 잠금되었습니다"}`);
 });
 
 // POST /staff/admin/staff-accounts/:id/update
@@ -527,7 +542,7 @@ admin.post("/staff/admin/staff-accounts/:id/update", async (c) => {
       .eq("id", targetId);
   }
 
-  return c.redirect("/staff/admin/staff-accounts");
+  return c.redirect("/staff/admin/staff-accounts?success=저장되었습니다");
 });
 
 // POST /staff/admin/staff-accounts/:id/delete
@@ -555,12 +570,55 @@ const ACTION_LABELS: Record<string, string> = {
 
 // GET /staff/admin/activity-logs — Audit log viewer
 admin.get("/staff/admin/activity-logs", async (c) => {
-  const logs = await c.env.DB.prepare(
-    `SELECT a.*, COALESCE(u.display_name, u.username) as staff_name
-     FROM luggage_audit_logs a
-     LEFT JOIN user_profiles u ON a.staff_id = u.id
-     ORDER BY a.timestamp DESC LIMIT 200`
-  ).all();
+  const today = formatDateJST(nowJST());
+  const startDate = c.req.query("start_date") || "";
+  const endDate = c.req.query("end_date") || "";
+  const page = parseInt(c.req.query("page") || "1", 10);
+  const limit = 50;
+  const offset = (page - 1) * limit;
+
+  // Build date filter — default last 7 days
+  let dateFilter = "";
+  const dateParams: string[] = [];
+  if (startDate && endDate) {
+    dateFilter = " WHERE date(a.timestamp, '+9 hours') BETWEEN ? AND ?";
+    dateParams.push(startDate, endDate);
+  } else {
+    dateFilter = " WHERE date(a.timestamp, '+9 hours') >= date('now', '-7 days')";
+  }
+
+  const defaultStart = startDate || formatDateJST(new Date(Date.now() - 7 * 86400000));
+  const defaultEnd = endDate || today;
+
+  // Fetch logs from D1 with pagination
+  const [logs, countResult] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT a.* FROM luggage_audit_logs a${dateFilter}
+       ORDER BY a.timestamp DESC LIMIT ? OFFSET ?`
+    ).bind(...dateParams, limit, offset).all(),
+    c.env.DB.prepare(
+      `SELECT COUNT(*) as cnt FROM luggage_audit_logs a${dateFilter}`
+    ).bind(...dateParams).first<{ cnt: number }>(),
+  ]);
+
+  const totalCount = countResult?.cnt || 0;
+  const hasMore = offset + limit < totalCount;
+
+  // Bulk-fetch staff names from Supabase PG
+  const staffIds = [...new Set(logs.results.map((l: Record<string, unknown>) => l.staff_id as string).filter(Boolean))];
+  const staffNameMap: Record<string, string> = {};
+  if (staffIds.length > 0) {
+    const supabaseAdmin = createSupabaseAdmin(c.env);
+    const { data: profiles } = await supabaseAdmin
+      .from("user_profiles")
+      .select("id, display_name, username")
+      .in("id", staffIds);
+    if (profiles) {
+      for (const p of profiles) {
+        staffNameMap[p.id] = p.display_name || p.username || p.id;
+      }
+    }
+  }
 
   const staff = getStaff(c);
   return c.html(
@@ -572,6 +630,17 @@ admin.get("/staff/admin/activity-logs", async (c) => {
           <StaffMenu active="/staff/admin/activity-logs" role={staff.role} />
         <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">활동 로그</h2>
+
+        <section class="card">
+          <form method="get" action="/staff/admin/activity-logs" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+            <label class="field"><span class="field-label">시작일</span><input class="control" type="date" name="start_date" value={startDate || defaultStart} /></label>
+            <label class="field"><span class="field-label">종료일</span><input class="control" type="date" name="end_date" value={endDate || defaultEnd} /></label>
+            <button class="btn btn-primary" type="submit">조회</button>
+            <a class="btn btn-secondary" href="/staff/admin/activity-logs">초기화</a>
+          </form>
+        </section>
+
+        <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead>
             <tr style="border-bottom:2px solid var(--line)">
@@ -583,17 +652,31 @@ admin.get("/staff/admin/activity-logs", async (c) => {
             </tr>
           </thead>
           <tbody>
+          {logs.results.length === 0 && (
+            <tr><td colspan={5} style="padding:24px;text-align:center;color:#a5a5a3">활동 기록이 없습니다</td></tr>
+          )}
           {logs.results.map((l: Record<string, unknown>) => (
             <tr style="border-bottom:1px solid var(--line)">
               <td style="padding:4px 8px;white-space:nowrap">{l.timestamp ? new Date(l.timestamp as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
               <td style="padding:4px 8px"><a href={`/staff/orders/${l.order_id as string}`} style="color:var(--primary)">{l.order_id as string}</a></td>
-              <td style="padding:4px 8px">{(l.staff_name as string) || (l.staff_id as string) || "-"}</td>
+              <td style="padding:4px 8px">{staffNameMap[l.staff_id as string] || (l.staff_id as string) || "-"}</td>
               <td style="padding:4px 8px"><span class="status-pill" style="font-size:10px">{ACTION_LABELS[l.action as string] || (l.action as string)}</span></td>
               <td style="padding:4px 8px;color:#666">{(l.details as string) || "-"}</td>
             </tr>
           ))}
           </tbody>
         </table>
+        </div>
+
+        <div style="display:flex;gap:8px;justify-content:center;margin:16px 0">
+          {page > 1 && (
+            <a class="btn btn-secondary btn-sm" href={`/staff/admin/activity-logs?page=${page - 1}${startDate ? `&start_date=${startDate}` : ""}${endDate ? `&end_date=${endDate}` : ""}`}>← 이전</a>
+          )}
+          <span style="font-size:12px;color:#a5a5a3;padding:6px 0">{totalCount}건 중 {offset + 1}-{Math.min(offset + limit, totalCount)}</span>
+          {hasMore && (
+            <a class="btn btn-secondary btn-sm" href={`/staff/admin/activity-logs?page=${page + 1}${startDate ? `&start_date=${startDate}` : ""}${endDate ? `&end_date=${endDate}` : ""}`}>다음 →</a>
+          )}
+        </div>
         </main>
       </body>
     </html>
@@ -607,6 +690,7 @@ admin.get("/staff/admin/completion-message", async (c) => {
   ).first<{ setting_value: string }>();
 
   const staff = getStaff(c);
+  const successMsg = c.req.query("success");
   return c.html(
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>완료 메시지</title></head>
@@ -616,6 +700,7 @@ admin.get("/staff/admin/completion-message", async (c) => {
           <StaffMenu active="/staff/admin/completion-message" role={staff.role} />
         <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">접수 완료 메시지 편집</h2>
+        {successMsg && <div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{successMsg}</div>}
         <form method="post" action="/staff/admin/completion-message">
           <label class="field">
             <span class="field-label">한국어 메시지</span>
@@ -643,7 +728,7 @@ admin.post("/staff/admin/completion-message", async (c) => {
     .bind(messageKo, staff.id, messageKo, staff.id)
     .run();
 
-  return c.redirect("/staff/admin/completion-message");
+  return c.redirect("/staff/admin/completion-message?success=저장되었습니다");
 });
 
 // POST /staff/admin/retention/run — Manual retention cleanup
