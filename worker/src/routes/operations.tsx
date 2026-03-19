@@ -767,7 +767,6 @@ ops.get("/staff/schedule", async (c) => {
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
           <StaffMenu active="/staff/schedule" role={staff.role} />
-        <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">근무 스케줄</h2>
         {calendarUrl?.setting_value ? (
           <>

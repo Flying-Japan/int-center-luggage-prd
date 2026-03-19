@@ -70,7 +70,6 @@ admin.get("/staff/admin/sales", async (c) => {
         <main class="container">
           <StaffMenu active="/staff/admin/sales" role={staff.role} />
         {successMsg && <div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{successMsg}</div>}
-        <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">매출 분석</h2>
 
         <section class="card">
@@ -629,7 +628,6 @@ admin.get("/staff/admin/activity-logs", async (c) => {
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
           <StaffMenu active="/staff/admin/activity-logs" role={staff.role} />
-        <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">활동 로그</h2>
 
         <section class="card">
@@ -706,7 +704,6 @@ admin.get("/staff/admin/completion-message", async (c) => {
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
           <StaffMenu active="/staff/admin/completion-message" role={staff.role} />
-        <a class="btn-link" href="/staff/dashboard">← 대시보드</a>
         <h2 class="hero-title">작성완료 문구 수정</h2>
         <p style="font-size:13px;color:#787774;margin:-4px 0 16px">한국어로 입력하면 영어/일본어 문구가 자동 생성됩니다.</p>
         {successMsg && <div style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:8px 14px;margin-bottom:10px;border-radius:6px;font-size:13px">{successMsg}</div>}
@@ -730,21 +727,21 @@ admin.get("/staff/admin/completion-message", async (c) => {
           <h3 class="card-title">미리보기</h3>
           <div class="preview-grid">
             <div class="preview-card">
-              <h4>🇰🇷 한국어 (KO)</h4>
+              <h4>KO 한국어</h4>
               <p class="preview-label">1차 문구</p>
               <div class="preview-text">{msgs.primary.ko}</div>
               <p class="preview-label">2차 문구</p>
               <div class="preview-text">{msgs.secondary.ko}</div>
             </div>
             <div class="preview-card">
-              <h4>🇺🇸 영어 (EN)</h4>
+              <h4>EN English</h4>
               <p class="preview-label">1차 문구</p>
               <div class="preview-text">{msgs.primary.en}</div>
               <p class="preview-label">2차 문구</p>
               <div class="preview-text">{msgs.secondary.en}</div>
             </div>
             <div class="preview-card">
-              <h4>🇯🇵 일본어 (JA)</h4>
+              <h4>JA 日本語</h4>
               <p class="preview-label">1차 문구</p>
               <div class="preview-text">{msgs.primary.ja}</div>
               <p class="preview-label">2차 문구</p>
