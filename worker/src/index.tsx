@@ -11,7 +11,7 @@ import { securityHeaders, errorHandler, notFoundHandler, createRateLimiter } fro
 import { staffAuth, getStaff } from "./middleware/auth";
 import { runRetentionCleanup } from "./services/retention";
 import { tagColorClass, TAG_COLOR_RANGES } from "./lib/tagColors";
-import { StaffMenu } from "./lib/components";
+import { StaffMenu, StaffTopbar } from "./lib/components";
 
 const app = new Hono<AppType>();
 
@@ -128,23 +128,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body class="staff-site">
-        <header class="topbar">
-          <div class="topbar-inner">
-            <a class="brand" href="/staff/dashboard">
-              <img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="32" style="mix-blend-mode:multiply" />
-            </a>
-            <nav class="pill-nav">
-              <a class="pill-link pill-link-strong" href="/staff/dashboard">대시보드</a>
-              {staff.role === "admin" && (
-                <a class="pill-link" href="/staff/admin/sales">매출관리</a>
-              )}
-              <span class="pill-user">{staff.display_name || staff.username}</span>
-              <form method="post" action="/staff/logout" style="display:inline">
-                <button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button>
-              </form>
-            </nav>
-          </div>
-        </header>
+        <StaffTopbar staff={staff} />
 
         <main class="container">
           <section class="hero hero-row">

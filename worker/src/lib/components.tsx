@@ -1,5 +1,23 @@
 import type { FC } from "hono/jsx";
 
+export const StaffTopbar: FC<{ staff: { display_name: string | null; username: string | null; role: string } }> = ({ staff }) => (
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/staff/dashboard">
+        <img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="32" />
+      </a>
+      <nav class="pill-nav">
+        <a class="pill-link" href="/staff/dashboard">대시보드</a>
+        {staff.role === "admin" && <a class="pill-link" href="/staff/admin/sales">매출관리</a>}
+        <span class="pill-user">{staff.display_name || staff.username}</span>
+        <form method="post" action="/staff/logout" style="display:inline">
+          <button type="submit" class="pill-link pill-link-btn">로그아웃</button>
+        </form>
+      </nav>
+    </div>
+  </header>
+);
+
 export const StaffMenu: FC<{ active: string; role: string }> = ({ active, role }) => {
   const links = [
     { href: "/staff/dashboard", label: "대시보드" },

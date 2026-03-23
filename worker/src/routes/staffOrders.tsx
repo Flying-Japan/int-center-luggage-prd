@@ -12,7 +12,7 @@ import { calculateStorageDays, calculateExtraDays } from "../services/storage";
 import { createBugTask } from "../lib/asana";
 import { displayOrderStatus, displayPaymentMethod, displayFlyingPassTier } from "../lib/display";
 import { fmtJST } from "../lib/dateFormat";
-import { StaffMenu } from "../lib/components";
+import { StaffMenu, StaffTopbar } from "../lib/components";
 
 type Order = {
   order_id: string;
@@ -99,21 +99,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body class="staff-site">
-        <header class="topbar">
-          <div class="topbar-inner">
-            <a class="brand" href="/staff/dashboard">
-              <img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="32" style="mix-blend-mode:multiply" />
-            </a>
-            <nav class="pill-nav">
-              <a class="pill-link" href="/staff/dashboard">대시보드</a>
-              {staff.role === "admin" && <a class="pill-link" href="/staff/admin/sales">매출관리</a>}
-              <span class="pill-user">{staff.display_name || staff.username}</span>
-              <form method="post" action="/staff/logout" style="display:inline">
-                <button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button>
-              </form>
-            </nav>
-          </div>
-        </header>
+        <StaffTopbar staff={staff} />
         <main class="container">
           {/* Hero */}
           <section class="hero hero-row">
@@ -577,25 +563,12 @@ staffOrders.get("/staff/bug-report", (c) => {
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body class="staff-site">
-        <header class="topbar">
-          <div class="topbar-inner">
-            <a class="brand" href="/staff/dashboard">
-              <img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="32" style="mix-blend-mode:multiply" />
-            </a>
-            <nav class="pill-nav">
-              <a class="pill-link" href="/staff/dashboard">대시보드</a>
-              <span class="pill-user">{staff.display_name || staff.username}</span>
-              <form method="post" action="/staff/logout" style="display:inline">
-                <button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button>
-              </form>
-            </nav>
-          </div>
-        </header>
+        <StaffTopbar staff={staff} />
         <main class="container">
           <StaffMenu active="/staff/bug-report" role={staff.role} />
           <section class="hero"><div><p class="hero-kicker">Operations</p><h2 class="hero-title">버그 신고</h2></div></section>
-          {success && <div class="card" style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:10px 16px;margin-bottom:12px">버그 신고가 접수되었습니다. 감사합니다!</div>}
-          {error && <div class="card" style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;margin-bottom:12px">신고 중 오류가 발생했습니다. 다시 시도해주세요.</div>}
+          {success && <p class="success-note">버그 신고가 접수되었습니다. 감사합니다!</p>}
+          {error && <p class="error">신고 중 오류가 발생했습니다. 다시 시도해주세요.</p>}
           <section class="card">
             <h3 class="card-title">버그 신고</h3>
             <form method="post" action="/staff/bug-report" class="grid2">

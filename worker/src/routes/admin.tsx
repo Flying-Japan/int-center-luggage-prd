@@ -7,7 +7,7 @@ import type { AppType } from "../types";
 import { adminAuth, getStaff } from "../middleware/auth";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { formatDateJST, nowJST } from "../services/storage";
-import { StaffMenu } from "../lib/components";
+import { StaffMenu, StaffTopbar } from "../lib/components";
 import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
 
 const admin = new Hono<AppType>();
@@ -71,7 +71,7 @@ admin.get("/staff/admin/sales", async (c) => {
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script><title>매출 분석</title></head>
       <body class="staff-site">
-        <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="32" /></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link pill-link-strong" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
+        <StaffTopbar staff={staff} />
         <main class="container">
           <StaffMenu active="/staff/admin/sales" role={staff.role} />
         {successMsg && <p class="success-note">{successMsg}</p>}
@@ -159,14 +159,14 @@ admin.get("/staff/admin/sales", async (c) => {
         <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="border-bottom:2px solid var(--line)">
-            <th style="text-align:left;padding:6px 8px">Date</th>
-            <th style="text-align:right;padding:6px 8px">People</th>
-            <th style="text-align:right;padding:6px 8px">Cash</th>
-            <th style="text-align:right;padding:6px 8px">Pay</th>
-            <th style="text-align:right;padding:6px 8px;color:#2383e2">Luggage</th>
-            <th style="text-align:right;padding:6px 8px;color:#12b886">Rental</th>
-            <th style="text-align:right;padding:6px 8px;font-weight:700">Luggage + Rental Daily</th>
-            <th style="text-align:right;padding:6px 8px">% (Luggage / Rental)</th>
+            <th class="sales-th">Date</th>
+            <th class="sales-th sales-th--right">People</th>
+            <th class="sales-th sales-th--right">Cash</th>
+            <th class="sales-th sales-th--right">Pay</th>
+            <th class="sales-th sales-th--right sales-td--luggage">Luggage</th>
+            <th class="sales-th sales-th--right sales-td--rental">Rental</th>
+            <th class="sales-th sales-th--right sales-td--bold">Luggage + Rental Daily</th>
+            <th class="sales-th sales-th--right">% (Luggage / Rental)</th>
           </tr></thead>
           <tbody>
           {mergedRows.length === 0 && (
@@ -176,57 +176,57 @@ admin.get("/staff/admin/sales", async (c) => {
             const lPct = r.combined > 0 ? Math.round(r.luggage / r.combined * 100) : 0;
             return (
               <tr style="border-bottom:1px solid var(--line)">
-                <td style="padding:4px 8px;white-space:nowrap">{r.dateJP}</td>
-                <td style="padding:4px 8px;text-align:right">{r.orders || "-"}</td>
-                <td style="padding:4px 8px;text-align:right">{r.cash ? `¥${r.cash.toLocaleString()}` : "-"}</td>
-                <td style="padding:4px 8px;text-align:right">{r.qr ? `¥${r.qr.toLocaleString()}` : "-"}</td>
-                <td style="padding:4px 8px;text-align:right;color:#2383e2">{r.luggage ? `¥${r.luggage.toLocaleString()}` : "-"}</td>
-                <td style="padding:4px 8px;text-align:right;color:#12b886">{r.rental ? `¥${r.rental.toLocaleString()}` : "-"}</td>
-                <td style="padding:4px 8px;text-align:right;font-weight:600">¥{r.combined.toLocaleString()}</td>
-                <td style="padding:4px 8px;text-align:right;font-size:11px;color:#787774">{r.combined > 0 ? `${lPct}% / ${100 - lPct}%` : "-"}</td>
+                <td class="sales-td" style="white-space:nowrap">{r.dateJP}</td>
+                <td class="sales-td sales-td--right">{r.orders || "-"}</td>
+                <td class="sales-td sales-td--right">{r.cash ? `¥${r.cash.toLocaleString()}` : "-"}</td>
+                <td class="sales-td sales-td--right">{r.qr ? `¥${r.qr.toLocaleString()}` : "-"}</td>
+                <td class="sales-td sales-td--right sales-td--luggage">{r.luggage ? `¥${r.luggage.toLocaleString()}` : "-"}</td>
+                <td class="sales-td sales-td--right sales-td--rental">{r.rental ? `¥${r.rental.toLocaleString()}` : "-"}</td>
+                <td class="sales-td sales-td--right sales-td--bold">¥{r.combined.toLocaleString()}</td>
+                <td class="sales-td sales-td--right sales-td--muted">{r.combined > 0 ? `${lPct}% / ${100 - lPct}%` : "-"}</td>
               </tr>
             );
           })}
           {mergedRows.length > 0 && (<>
-            <tr style="border-top:2px solid var(--line);font-weight:700;background:#fafaf9">
-              <td style="padding:6px 8px">Total</td>
-              <td style="padding:6px 8px;text-align:right">{totalPeople.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{totalCash.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{totalQr.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right;color:#2383e2">¥{totalLuggage.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right;color:#12b886">¥{totalRental.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{totalCombined.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right;font-size:11px;color:#787774">{totalCombined > 0 ? `${Math.round(totalLuggage / totalCombined * 100)}% / ${Math.round(totalRental / totalCombined * 100)}%` : "-"}</td>
+            <tr class="sales-total-row">
+              <td class="sales-td">Total</td>
+              <td class="sales-td sales-td--right">{totalPeople.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{totalCash.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{totalQr.toLocaleString()}</td>
+              <td class="sales-td sales-td--right sales-td--luggage">¥{totalLuggage.toLocaleString()}</td>
+              <td class="sales-td sales-td--right sales-td--rental">¥{totalRental.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{totalCombined.toLocaleString()}</td>
+              <td class="sales-td sales-td--right sales-td--muted">{totalCombined > 0 ? `${Math.round(totalLuggage / totalCombined * 100)}% / ${Math.round(totalRental / totalCombined * 100)}%` : "-"}</td>
             </tr>
-            <tr style="font-weight:600;color:#787774;font-size:12px">
-              <td style="padding:6px 8px">Daily Avg</td>
-              <td style="padding:6px 8px;text-align:right">{Math.round(totalPeople / dayCount)}</td>
-              <td style="padding:6px 8px;text-align:right">¥{Math.round(totalCash / dayCount).toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{Math.round(totalQr / dayCount).toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right;color:#2383e2">¥{Math.round(totalLuggage / dayCount).toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right;color:#12b886">¥{Math.round(totalRental / dayCount).toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{Math.round(totalCombined / dayCount).toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right;font-size:11px;color:#787774">{totalCombined > 0 ? `${Math.round(totalLuggage / totalCombined * 100)}% / ${Math.round(totalRental / totalCombined * 100)}%` : "-"}</td>
+            <tr class="sales-avg-row">
+              <td class="sales-td">Daily Avg</td>
+              <td class="sales-td sales-td--right">{Math.round(totalPeople / dayCount)}</td>
+              <td class="sales-td sales-td--right">¥{Math.round(totalCash / dayCount).toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{Math.round(totalQr / dayCount).toLocaleString()}</td>
+              <td class="sales-td sales-td--right sales-td--luggage">¥{Math.round(totalLuggage / dayCount).toLocaleString()}</td>
+              <td class="sales-td sales-td--right sales-td--rental">¥{Math.round(totalRental / dayCount).toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{Math.round(totalCombined / dayCount).toLocaleString()}</td>
+              <td class="sales-td sales-td--right sales-td--muted">{totalCombined > 0 ? `${Math.round(totalLuggage / totalCombined * 100)}% / ${Math.round(totalRental / totalCombined * 100)}%` : "-"}</td>
             </tr>
             {minMax && (<>
-            <tr style="font-weight:500;color:#12b886;font-size:12px">
-              <td style="padding:6px 8px">Max</td>
-              <td style="padding:6px 8px;text-align:right">{minMax.people.max}</td>
-              <td style="padding:6px 8px;text-align:right">¥{minMax.cash.max.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{minMax.qr.max.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{minMax.luggage.max.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{minMax.rental.max.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{minMax.combined.max.toLocaleString()}</td>
+            <tr class="sales-max-row">
+              <td class="sales-td">Max</td>
+              <td class="sales-td sales-td--right">{minMax.people.max}</td>
+              <td class="sales-td sales-td--right">¥{minMax.cash.max.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{minMax.qr.max.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{minMax.luggage.max.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{minMax.rental.max.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{minMax.combined.max.toLocaleString()}</td>
               <td></td>
             </tr>
-            <tr style="font-weight:500;color:#ef7d22;font-size:12px">
-              <td style="padding:6px 8px">Min</td>
-              <td style="padding:6px 8px;text-align:right">{minMax.people.min}</td>
-              <td style="padding:6px 8px;text-align:right">¥{minMax.cash.min.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{minMax.qr.min.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{minMax.luggage.min.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{minMax.rental.min.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{minMax.combined.min.toLocaleString()}</td>
+            <tr class="sales-min-row">
+              <td class="sales-td">Min</td>
+              <td class="sales-td sales-td--right">{minMax.people.min}</td>
+              <td class="sales-td sales-td--right">¥{minMax.cash.min.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{minMax.qr.min.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{minMax.luggage.min.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{minMax.rental.min.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">¥{minMax.combined.min.toLocaleString()}</td>
               <td></td>
             </tr>
             </>)}
@@ -462,7 +462,7 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>직원 계정</title>
       </head>
       <body class="staff-site">
-        <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="32" /></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
+        <StaffTopbar staff={staff} />
         <main class="container">
           <StaffMenu active="/staff/admin/staff-accounts" role={staff.role} />
         {successMsg && <p class="success-note">{successMsg}</p>}
@@ -755,7 +755,7 @@ admin.get("/staff/admin/activity-logs", async (c) => {
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>활동 로그</title></head>
       <body class="staff-site">
-        <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="32" /></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
+        <StaffTopbar staff={staff} />
         <main class="container">
           <StaffMenu active="/staff/admin/activity-logs" role={staff.role} />
         <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">활동 로그</h2></div></section>
@@ -825,7 +825,7 @@ admin.get("/staff/admin/completion-message", async (c) => {
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>작성완료 문구 수정</title>
       </head>
       <body class="staff-site">
-        <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="32" /></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
+        <StaffTopbar staff={staff} />
         <main class="container">
           <StaffMenu active="/staff/admin/completion-message" role={staff.role} />
         {successMsg && <p class="success-note">{successMsg}</p>}

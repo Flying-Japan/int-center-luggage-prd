@@ -136,6 +136,10 @@ a { color: inherit; text-decoration: none; }
   mix-blend-mode: multiply;
 }
 
+.brand-logo-horizontal {
+  mix-blend-mode: multiply;
+}
+
 /* ── Pill nav ── */
 .pill-nav {
   display: inline-flex;
@@ -183,6 +187,8 @@ a { color: inherit; text-decoration: none; }
   margin-left: 2px;
   line-height: 1;
 }
+
+.pill-link-btn { background: none; border: none; cursor: pointer; padding: 4px 10px; font: inherit; color: inherit; }
 
 /* ── Container ── */
 .container {
@@ -1116,6 +1122,20 @@ code {
 .stat-value { font-size: 18px; font-weight: 700; margin: 4px 0 0; }
 .stat-value--highlight { color: #166534; }
 .stat-value--sm { font-size: 14px; font-weight: 600; }
+
+/* ── Sales table ── */
+.sales-th { text-align: left; padding: 6px 8px; }
+.sales-th--right { text-align: right; }
+.sales-td { padding: 4px 8px; }
+.sales-td--right { text-align: right; }
+.sales-td--luggage { color: #2383e2; }
+.sales-td--rental { color: #12b886; }
+.sales-td--bold { font-weight: 600; }
+.sales-td--muted { font-size: 11px; color: #787774; }
+.sales-total-row { border-top: 2px solid var(--line); font-weight: 700; background: rgba(245,249,255,0.5); }
+.sales-avg-row { font-weight: 600; color: #787774; font-size: 12px; }
+.sales-max-row { font-weight: 500; color: #12b886; font-size: 12px; }
+.sales-min-row { font-weight: 500; color: #ef7d22; font-size: 12px; }
 
 /* ── Account management (staff-accounts page) ── */
 .acct-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
