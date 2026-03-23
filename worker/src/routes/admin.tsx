@@ -121,14 +121,14 @@ admin.get("/staff/admin/sales", async (c) => {
         <main class="container">
           <StaffMenu active="/staff/admin/sales" role={staff.role} />
         {successMsg && <p class="success-note">{successMsg}</p>}
-        <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div></section>
-
-        <section class="card">
-          <form method="get" action="/staff/admin/sales" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
-            <label class="field"><span class="field-label">시작일</span><input class="control" type="date" name="start_date" value={startDate} /></label>
-            <label class="field"><span class="field-label">종료일</span><input class="control" type="date" name="end_date" value={endDate} /></label>
-            <button class="btn btn-primary" type="submit">조회</button>
-            <a class="btn btn-secondary" href="/staff/admin/sales">초기화</a>
+        <section class="hero" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px">
+          <div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div>
+          <form method="get" action="/staff/admin/sales" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input class="control" type="date" name="start_date" value={startDate} style="font-size:12px;padding:5px 8px;min-height:32px" />
+            <span style="color:#a5a5a3;font-size:12px">~</span>
+            <input class="control" type="date" name="end_date" value={endDate} style="font-size:12px;padding:5px 8px;min-height:32px" />
+            <button class="btn btn-primary btn-sm" type="submit">조회</button>
+            {(startDate || endDate) && <a class="btn btn-sm btn-secondary" href="/staff/admin/sales">초기화</a>}
           </form>
         </section>
 
@@ -238,22 +238,36 @@ admin.get("/staff/admin/sales", async (c) => {
   defaults.font.size = 11;
   defaults.color = '#787774';
 
+  function linReg(vals){
+    var n=vals.length;if(n<2)return vals;
+    var sx=0,sy=0,sxy=0,sx2=0;
+    for(var i=0;i<n;i++){sx+=i;sy+=vals[i];sxy+=i*vals[i];sx2+=i*i;}
+    var m=(n*sxy-sx*sy)/(n*sx2-sx*sx);
+    var b=(sy-m*sx)/n;
+    return vals.map(function(_,i){return Math.round(m*i+b);});
+  }
+
   new Chart(document.getElementById('trendChart'),{
     type:'line',
     data:{
       labels: labels,
       datasets:[
         {label:'짐보관 (Luggage)',data:luggageVals,borderColor:'#4285F4',backgroundColor:'rgba(66,133,244,0.08)',pointBackgroundColor:'#4285F4',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false},
+        {label:'Luggage Trend',data:linReg(luggageVals),borderColor:'rgba(66,133,244,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0},
         {label:'렌탈 (Rental)',data:rentalVals,borderColor:'#EA4335',backgroundColor:'rgba(234,67,53,0.08)',pointBackgroundColor:'#EA4335',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false},
-        {label:'합계 (Combined)',data:combinedVals,borderColor:'#FBBC05',backgroundColor:'rgba(251,188,5,0.08)',pointBackgroundColor:'#FBBC05',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false}
+        {label:'Rental Trend',data:linReg(rentalVals),borderColor:'rgba(234,67,53,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0},
+        {label:'합계 (Combined)',data:combinedVals,borderColor:'#FBBC05',backgroundColor:'rgba(251,188,5,0.08)',pointBackgroundColor:'#FBBC05',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false},
+        {label:'Combined Trend',data:linReg(combinedVals),borderColor:'rgba(251,188,5,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0}
       ]
     },
     options:{
       responsive:true,maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
       plugins:{
-        legend:{position:'top',labels:{boxWidth:12,padding:16,usePointStyle:true,pointStyle:'circle'}},
-        tooltip:{callbacks:{label:function(c){return c.dataset.label+': \\u00A5'+c.raw.toLocaleString();}}}
+        legend:{position:'top',labels:{boxWidth:12,padding:16,usePointStyle:true,pointStyle:'circle',
+          filter:function(item){return item.text.indexOf('Trend')===-1;}}},
+        tooltip:{filter:function(item){return item.dataset.label.indexOf('Trend')===-1;},
+          callbacks:{label:function(c){return c.dataset.label+': \\u00A5'+c.raw.toLocaleString();}}}
       },
       scales:{
         x:{grid:{display:false}},
