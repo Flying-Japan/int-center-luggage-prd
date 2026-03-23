@@ -102,8 +102,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
         <header class="topbar">
           <div class="topbar-inner">
             <a class="brand" href="/staff/dashboard">
-              <img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" />
-              <span>Flying Japan Staff</span>
+              <img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="32" style="mix-blend-mode:multiply" />
             </a>
             <nav class="pill-nav">
               <a class="pill-link" href="/staff/dashboard">대시보드</a>
@@ -577,8 +576,7 @@ staffOrders.get("/staff/bug-report", (c) => {
         <header class="topbar">
           <div class="topbar-inner">
             <a class="brand" href="/staff/dashboard">
-              <img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" />
-              <span>Flying Japan Staff</span>
+              <img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="32" style="mix-blend-mode:multiply" />
             </a>
             <nav class="pill-nav">
               <a class="pill-link" href="/staff/dashboard">대시보드</a>
