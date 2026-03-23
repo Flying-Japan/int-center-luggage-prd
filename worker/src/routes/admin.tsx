@@ -54,6 +54,17 @@ admin.get("/staff/admin/sales", async (c) => {
   const totalCash = mergedRows.reduce((s, r) => s + r.cash, 0);
   const totalQr = mergedRows.reduce((s, r) => s + r.qr, 0);
 
+  // Min / Max stats (only from days with data)
+  const activeDays = mergedRows.filter(r => r.combined > 0);
+  const minMax = activeDays.length > 0 ? {
+    people: { min: Math.min(...activeDays.map(r => r.orders)), max: Math.max(...activeDays.map(r => r.orders)) },
+    cash: { min: Math.min(...activeDays.map(r => r.cash)), max: Math.max(...activeDays.map(r => r.cash)) },
+    qr: { min: Math.min(...activeDays.map(r => r.qr)), max: Math.max(...activeDays.map(r => r.qr)) },
+    luggage: { min: Math.min(...activeDays.map(r => r.luggage)), max: Math.max(...activeDays.map(r => r.luggage)) },
+    rental: { min: Math.min(...activeDays.map(r => r.rental)), max: Math.max(...activeDays.map(r => r.rental)) },
+    combined: { min: Math.min(...activeDays.map(r => r.combined)), max: Math.max(...activeDays.map(r => r.combined)) },
+  } : null;
+
   const staff = getStaff(c);
   const successMsg = c.req.query("success");
   return c.html(
@@ -197,6 +208,28 @@ admin.get("/staff/admin/sales", async (c) => {
               <td style="padding:6px 8px;text-align:right">¥{Math.round(totalCombined / dayCount).toLocaleString()}</td>
               <td style="padding:6px 8px;text-align:right;font-size:11px;color:#787774">{totalCombined > 0 ? `${Math.round(totalLuggage / totalCombined * 100)}% / ${Math.round(totalRental / totalCombined * 100)}%` : "-"}</td>
             </tr>
+            {minMax && (<>
+            <tr style="font-weight:500;color:#12b886;font-size:12px">
+              <td style="padding:6px 8px">Max</td>
+              <td style="padding:6px 8px;text-align:right">{minMax.people.max}</td>
+              <td style="padding:6px 8px;text-align:right">¥{minMax.cash.max.toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">¥{minMax.qr.max.toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">¥{minMax.luggage.max.toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">¥{minMax.rental.max.toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">¥{minMax.combined.max.toLocaleString()}</td>
+              <td></td>
+            </tr>
+            <tr style="font-weight:500;color:#ef7d22;font-size:12px">
+              <td style="padding:6px 8px">Min</td>
+              <td style="padding:6px 8px;text-align:right">{minMax.people.min}</td>
+              <td style="padding:6px 8px;text-align:right">¥{minMax.cash.min.toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">¥{minMax.qr.min.toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">¥{minMax.luggage.min.toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">¥{minMax.rental.min.toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">¥{minMax.combined.min.toLocaleString()}</td>
+              <td></td>
+            </tr>
+            </>)}
           </>)}
           </tbody>
         </table>
