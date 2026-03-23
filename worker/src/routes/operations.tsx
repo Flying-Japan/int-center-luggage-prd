@@ -441,7 +441,7 @@ ops.get("/staff/handover", async (c) => {
                   {(note.staff_id as string) === staff.id && (
                     <div style="margin-top:8px;display:flex;gap:6px">
                       <form method="post" action={`/staff/handover/${noteId}/delete`} style="display:inline" onsubmit="return confirm('이 노트를 삭제하시겠습니까?')">
-                        <button class="btn btn-sm" style="color:#991b1b;font-size:11px" type="submit">삭제</button>
+                        <button class="btn btn-sm btn-secondary" style="font-size:11px" type="submit">삭제</button>
                       </form>
                     </div>
                   )}
@@ -670,7 +670,7 @@ ops.get("/staff/lost-found", async (c) => {
                           </form>
                         )}
                         <form method="post" action={`/staff/lost-found/${e.entry_id}/delete`} style="display:inline;margin-left:4px" onsubmit="return confirm('삭제하시겠습니까?')">
-                          <button class="btn btn-sm" style="color:#991b1b" type="submit">삭제</button>
+                          <button class="btn btn-sm btn-secondary" type="submit">삭제</button>
                         </form>
                       </td>
                     </tr>

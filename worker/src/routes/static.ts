@@ -1266,10 +1266,10 @@ body.staff-site .pill-user {
 /* ── Staff Layout ── */
 body.staff-site .container {
   width: 100%;
-  max-width: 100%;
-  gap: 12px;
-  margin: 0 auto;
-  padding: 0 24px;
+  max-width: 1200px;
+  gap: 14px;
+  margin: 16px auto 32px;
+  padding: 0 28px;
 }
 
 /* ── Staff Hero ── */
