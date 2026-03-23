@@ -121,16 +121,32 @@ admin.get("/staff/admin/sales", async (c) => {
         <main class="container">
           <StaffMenu active="/staff/admin/sales" role={staff.role} />
         {successMsg && <p class="success-note">{successMsg}</p>}
-        <section class="hero" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px">
-          <div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div>
-          <form method="get" action="/staff/admin/sales" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <input class="control" type="date" name="start_date" value={startDate} style="font-size:12px;padding:5px 8px;min-height:32px" />
-            <span style="color:#a5a5a3;font-size:12px">~</span>
-            <input class="control" type="date" name="end_date" value={endDate} style="font-size:12px;padding:5px 8px;min-height:32px" />
-            <button class="btn btn-primary btn-sm" type="submit">조회</button>
-            {(startDate || endDate) && <a class="btn btn-sm btn-secondary" href="/staff/admin/sales">초기화</a>}
-          </form>
-        </section>
+        <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div></section>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:-8px 0 12px">
+          {[
+            { label: "이번 달", days: 0, month: true },
+            { label: "7일", days: 7, month: false },
+            { label: "14일", days: 14, month: false },
+            { label: "30일", days: 30, month: false },
+            { label: "90일", days: 90, month: false },
+          ].map(opt => {
+            const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+            let sd: string, ed: string;
+            if (opt.month) {
+              sd = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+              ed = now.toISOString().slice(0, 10);
+            } else {
+              const from = new Date(now.getTime() - opt.days * 86400000);
+              sd = from.toISOString().slice(0, 10);
+              ed = now.toISOString().slice(0, 10);
+            }
+            const isActive = startDate === sd && endDate === ed;
+            return <a class={`btn btn-sm${isActive ? " btn-primary" : " btn-secondary"}`} href={`/staff/admin/sales?start_date=${sd}&end_date=${ed}`}>{opt.label}</a>;
+          })}
+          {!startDate && !endDate && <span class="btn btn-sm btn-primary" style="cursor:default">전체</span>}
+          {(startDate || endDate) && <a class="btn btn-sm btn-secondary" href="/staff/admin/sales">전체</a>}
+          {(startDate || endDate) && <span style="font-size:11px;color:#a5a5a3;margin-left:4px">{startDate} ~ {endDate}</span>}
+        </div>
 
         <div class="stat-grid">
           <div class="card stat-card">
