@@ -285,7 +285,7 @@ admin.get("/staff/admin/sales", async (c) => {
   function renderCal(){
     calTitle.textContent=calY+'년 '+pad(calM+1)+'월';
     var html='';
-    DOW.forEach(function(d){html+='<div style="color:#a5a5a3;font-weight:600;padding:4px 0">'+d+'</div>';});
+    DOW.forEach(function(d){html+='<div style="color:#a5a5a3;font-weight:600;padding:4px 0;font-size:10px">'+d+'</div>';});
     var first=new Date(calY,calM,1).getDay();
     var days=new Date(calY,calM+1,0).getDate();
     var today=new Date(Date.now()+9*3600000).toISOString().slice(0,10);
@@ -294,30 +294,40 @@ admin.get("/staff/admin/sales", async (c) => {
       var ds=fmtD(calY,calM,d);
       var isToday=ds===today;
       var isSel=ds===selStart||ds===selEnd;
-      var inRange=selStart&&selEnd&&ds>=selStart&&ds<=selEnd;
-      var bg=isSel?'#2383e2':inRange?'#e8f0fe':'transparent';
-      var clr=isSel?'#fff':isToday?'#2383e2':'#37352f';
-      var brd=isToday&&!isSel?'1px solid #2383e2':'1px solid transparent';
-      html+='<div data-date="'+ds+'" style="padding:5px 0;border-radius:4px;cursor:pointer;background:'+bg+';color:'+clr+';border:'+brd+';font-weight:'+(isSel?'600':'400')+'">'+d+'</div>';
+      var inRange=selStart&&selEnd&&ds>selStart&&ds<selEnd;
+      var isEdge=isSel;
+      var bg=isEdge?'#2383e2':inRange?'#e8f0fe':'transparent';
+      var clr=isEdge?'#fff':isToday?'#2383e2':'#37352f';
+      var brd=isToday&&!isEdge?'1px solid #2383e2':'1px solid transparent';
+      html+='<div data-date="'+ds+'" class="cal-day" style="padding:5px 0;border-radius:4px;cursor:pointer;background:'+bg+';color:'+clr+';border:'+brd+';font-weight:'+(isEdge?'600':'400')+'">'+d+'</div>';
     }
     calGrid.innerHTML=html;
-    if(selStart&&selEnd){calRange.textContent=selStart+' ~ '+selEnd;calApply.style.display='inline-block';}
+    if(selStart&&selEnd&&selStart!==selEnd){calRange.textContent=selStart+' ~ '+selEnd;calApply.style.display='inline-block';}
+    else if(selStart&&selEnd&&selStart===selEnd){calRange.textContent=selStart+' (1일)';calApply.style.display='inline-block';}
     else if(selStart){calRange.textContent=selStart+' ~ 종료일 선택';calApply.style.display='none';}
     else{calRange.textContent='';calApply.style.display='none';}
   }
 
   if(calGrid){
     calGrid.addEventListener('click',function(e){
-      var ds=e.target.getAttribute('data-date');if(!ds)return;
-      if(!selStart||selEnd){selStart=ds;selEnd=null;}
-      else if(ds<selStart){selEnd=selStart;selStart=ds;}
-      else{selEnd=ds;}
+      e.stopPropagation();
+      var el=e.target;
+      var ds=el.getAttribute('data-date');
+      if(!ds&&el.parentElement)ds=el.parentElement.getAttribute('data-date');
+      if(!ds)return;
+      if(!selStart||selEnd){
+        selStart=ds;selEnd=null;
+      }else{
+        if(ds===selStart){selEnd=ds;}
+        else if(ds<selStart){selEnd=selStart;selStart=ds;}
+        else{selEnd=ds;}
+      }
       renderCal();
     });
-    document.getElementById('calPrev').addEventListener('click',function(e){e.stopPropagation();calM--;if(calM<0){calM=11;calY--;}renderCal();});
-    document.getElementById('calNext').addEventListener('click',function(e){e.stopPropagation();calM++;if(calM>11){calM=0;calY++;}renderCal();});
-    calApply.addEventListener('click',function(){
-      if(selStart&&selEnd)window.location.href='/staff/admin/sales?start_date='+selStart+'&end_date='+selEnd;
+    document.getElementById('calPrev').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();calM--;if(calM<0){calM=11;calY--;}renderCal();});
+    document.getElementById('calNext').addEventListener('click',function(e){e.preventDefault();e.stopPropagation();calM++;if(calM>11){calM=0;calY++;}renderCal();});
+    calApply.addEventListener('click',function(e){e.stopPropagation();
+      if(selStart&&selEnd)window.location.href='/staff/admin/sales?start_date='+selStart+'&end_date='+(selEnd||selStart);
     });
     renderCal();
   }
