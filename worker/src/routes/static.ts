@@ -884,15 +884,15 @@ tbody tr:hover { background: #eef5ff; }
 
 /* ── Tag number cell colors (pill style on tag_no cell) ── */
 .tag-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; padding: 3px 10px; border-radius: 999px; font-weight: 800; font-size: 13px; }
-.tag-color-orange { color: #c2410c; background: #fff7ed; border: 1.5px solid #fb923c; }
-.tag-color-blue { color: #1e40af; background: #eff6ff; border: 1.5px solid #60a5fa; }
-.tag-color-yellow { color: #92400e; background: #fefce8; border: 1.5px solid #facc15; }
-.tag-color-green { color: #166534; background: #f0fdf4; border: 1.5px solid #4ade80; }
-.tag-color-purple { color: #6b21a8; background: #faf5ff; border: 1.5px solid #a78bfa; }
-.tag-color-black { color: #1a202c; background: #f1f5f9; border: 1.5px solid #64748b; }
-.tag-color-gray { color: #475569; background: #f8fafc; border: 1.5px solid #94a3b8; }
-.tag-color-pink { color: #9d174d; background: #fdf2f8; border: 1.5px solid #f472b6; }
-.tag-color-brown { color: #78350f; background: #fffbeb; border: 1.5px solid #d97706; }
+.tag-color-orange { color: #fff; background: #f97316; border: 2px solid #ea580c; }
+.tag-color-blue { color: #fff; background: #3b82f6; border: 2px solid #2563eb; }
+.tag-color-yellow { color: #422006; background: #fbbf24; border: 2px solid #f59e0b; }
+.tag-color-green { color: #fff; background: #22c55e; border: 2px solid #16a34a; }
+.tag-color-purple { color: #fff; background: #a855f7; border: 2px solid #9333ea; }
+.tag-color-black { color: #fff; background: #334155; border: 2px solid #1e293b; }
+.tag-color-gray { color: #fff; background: #94a3b8; border: 2px solid #64748b; }
+.tag-color-pink { color: #fff; background: #ec4899; border: 2px solid #db2777; }
+.tag-color-brown { color: #fff; background: #b45309; border: 2px solid #92400e; }
 
 /* ── Click-to-edit cells ── */
 .editable { cursor: pointer; border-bottom: 1px dashed transparent; transition: border-color 0.15s; }
@@ -1579,15 +1579,15 @@ body.staff-site .extension-badge { background: #a78bfa; border-radius: 6px; font
 
 /* ── Staff tag pill — preserve color borders (high specificity) ── */
 body.staff-site #staff-orders-table .tag-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; padding: 3px 10px; border-radius: 999px !important; font-weight: 800; font-size: 13px; border-bottom: none !important; }
-body.staff-site #staff-orders-table .tag-pill.tag-color-orange { color: #c2410c !important; background: #fff7ed !important; border: 1.5px solid #fb923c !important; }
-body.staff-site #staff-orders-table .tag-pill.tag-color-blue { color: #1e40af !important; background: #eff6ff !important; border: 1.5px solid #60a5fa !important; }
-body.staff-site #staff-orders-table .tag-pill.tag-color-yellow { color: #92400e !important; background: #fefce8 !important; border: 1.5px solid #facc15 !important; }
-body.staff-site #staff-orders-table .tag-pill.tag-color-green { color: #166534 !important; background: #f0fdf4 !important; border: 1.5px solid #4ade80 !important; }
-body.staff-site #staff-orders-table .tag-pill.tag-color-purple { color: #6b21a8 !important; background: #faf5ff !important; border: 1.5px solid #a78bfa !important; }
-body.staff-site #staff-orders-table .tag-pill.tag-color-black { color: #1a202c !important; background: #f1f5f9 !important; border: 1.5px solid #64748b !important; }
-body.staff-site #staff-orders-table .tag-pill.tag-color-gray { color: #475569 !important; background: #f8fafc !important; border: 1.5px solid #94a3b8 !important; }
-body.staff-site #staff-orders-table .tag-pill.tag-color-pink { color: #9d174d !important; background: #fdf2f8 !important; border: 1.5px solid #f472b6 !important; }
-body.staff-site #staff-orders-table .tag-pill.tag-color-brown { color: #78350f !important; background: #fffbeb !important; border: 1.5px solid #d97706 !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-orange { color: #fff !important; background: #f97316 !important; border: 2px solid #ea580c !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-blue { color: #fff !important; background: #3b82f6 !important; border: 2px solid #2563eb !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-yellow { color: #422006 !important; background: #fbbf24 !important; border: 2px solid #f59e0b !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-green { color: #fff !important; background: #22c55e !important; border: 2px solid #16a34a !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-purple { color: #fff !important; background: #a855f7 !important; border: 2px solid #9333ea !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-black { color: #fff !important; background: #334155 !important; border: 2px solid #1e293b !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-gray { color: #fff !important; background: #94a3b8 !important; border: 2px solid #64748b !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-pink { color: #fff !important; background: #ec4899 !important; border: 2px solid #db2777 !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-brown { color: #fff !important; background: #b45309 !important; border: 2px solid #92400e !important; }
 
 body.staff-site .price-amount { color: var(--text); font-weight: 600; font-size: 13px; }
 
