@@ -122,134 +122,128 @@ admin.get("/staff/admin/sales", async (c) => {
           </div>
         </div>
 
-        <div class="chart-row">
-          <section class="card" style="padding:16px">
-            <h3 class="card-title">일별 매출 추이</h3>
-            <div style="position:relative;height:280px"><canvas id="dailyChart"></canvas></div>
-          </section>
-          <section class="card" style="padding:16px">
-            <h3 class="card-title">결제 비율</h3>
-            <div style="position:relative;height:280px;display:flex;gap:16px">
-              <div style="flex:1"><canvas id="paymentChart"></canvas></div>
-              <div style="flex:1"><canvas id="revenueChart"></canvas></div>
-            </div>
-          </section>
-        </div>
+        <section class="card" style="padding:16px">
+          <h3 class="card-title">일별 매출 추이</h3>
+          <div style="position:relative;height:320px"><canvas id="trendChart"></canvas></div>
+        </section>
 
         <section class="card">
-        <h3 class="card-title">짐보관 일별 매출</h3>
+        <h3 class="card-title">일별 매출 상세</h3>
+        {rentalError && <p class="error" style="margin:0 8px 8px">Google Sheets 조회 실패: {rentalError}</p>}
         <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;padding:6px 8px">날짜</th><th style="text-align:right;padding:6px 8px">건수</th><th style="text-align:right;padding:6px 8px">현금</th><th style="text-align:right;padding:6px 8px">QR</th><th style="text-align:right;padding:6px 8px">합계</th></tr></thead>
+          <thead><tr style="border-bottom:2px solid var(--line)">
+            <th style="text-align:left;padding:6px 8px">날짜</th>
+            <th style="text-align:right;padding:6px 8px">고객수</th>
+            <th style="text-align:right;padding:6px 8px">현금</th>
+            <th style="text-align:right;padding:6px 8px">QR</th>
+            <th style="text-align:right;padding:6px 8px;color:#2383e2">짐보관</th>
+            <th style="text-align:right;padding:6px 8px;color:#12b886">렌탈</th>
+            <th style="text-align:right;padding:6px 8px;font-weight:700">합계</th>
+            <th style="text-align:right;padding:6px 8px">비율</th>
+          </tr></thead>
           <tbody>
           {dailySales.results.length === 0 && (
-            <tr><td colspan={5} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
+            <tr><td colspan={8} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
           )}
-          {dailySales.results.map((d: Record<string, unknown>) => (
-            <tr style="border-bottom:1px solid var(--line)">
-              <td style="padding:4px 8px">{d.sale_date as string}</td>
-              <td style="padding:4px 8px;text-align:right">{d.order_count as number}</td>
-              <td style="padding:4px 8px;text-align:right">¥{(d.cash_total as number)?.toLocaleString()}</td>
-              <td style="padding:4px 8px;text-align:right">¥{(d.qr_total as number)?.toLocaleString()}</td>
-              <td style="padding:4px 8px;text-align:right;font-weight:600">¥{(d.grand_total as number)?.toLocaleString()}</td>
-            </tr>
-          ))}
+          {(() => {
+            const rentalMap = Object.fromEntries(rentalData.map(r => [r.date, r.rentalRevenue]));
+            let luggageSum = 0, rentalSum = 0;
+            const rows = dailySales.results.map((d: Record<string, unknown>) => {
+              const date = d.sale_date as string;
+              const luggage = (d.grand_total as number) || 0;
+              const rental = rentalMap[date] || 0;
+              const combined = luggage + rental;
+              luggageSum += luggage;
+              rentalSum += rental;
+              const luggagePct = combined > 0 ? Math.round(luggage / combined * 100) : 0;
+              const rentalPct = combined > 0 ? 100 - luggagePct : 0;
+              return (
+                <tr style="border-bottom:1px solid var(--line)">
+                  <td style="padding:4px 8px">{date}</td>
+                  <td style="padding:4px 8px;text-align:right">{d.order_count as number}</td>
+                  <td style="padding:4px 8px;text-align:right">¥{(d.cash_total as number)?.toLocaleString()}</td>
+                  <td style="padding:4px 8px;text-align:right">¥{(d.qr_total as number)?.toLocaleString()}</td>
+                  <td style="padding:4px 8px;text-align:right;color:#2383e2">¥{luggage.toLocaleString()}</td>
+                  <td style="padding:4px 8px;text-align:right;color:#12b886">{rental ? `¥${rental.toLocaleString()}` : "-"}</td>
+                  <td style="padding:4px 8px;text-align:right;font-weight:600">¥{combined.toLocaleString()}</td>
+                  <td style="padding:4px 8px;text-align:right;font-size:11px;color:#787774">{combined > 0 ? `${luggagePct}% / ${rentalPct}%` : "-"}</td>
+                </tr>
+              );
+            });
+            const totalCombined = luggageSum + rentalSum;
+            const totalLPct = totalCombined > 0 ? Math.round(luggageSum / totalCombined * 100) : 0;
+            return (<>{rows}
+              {dailySales.results.length > 0 && (
+                <tr style="border-top:2px solid var(--line);font-weight:700;background:#fafaf9">
+                  <td style="padding:6px 8px">합계</td>
+                  <td style="padding:6px 8px;text-align:right">{s.total_orders}</td>
+                  <td style="padding:6px 8px;text-align:right">¥{s.total_cash?.toLocaleString()}</td>
+                  <td style="padding:6px 8px;text-align:right">¥{s.total_qr?.toLocaleString()}</td>
+                  <td style="padding:6px 8px;text-align:right;color:#2383e2">¥{luggageSum.toLocaleString()}</td>
+                  <td style="padding:6px 8px;text-align:right;color:#12b886">¥{rentalSum.toLocaleString()}</td>
+                  <td style="padding:6px 8px;text-align:right">¥{totalCombined.toLocaleString()}</td>
+                  <td style="padding:6px 8px;text-align:right;font-size:11px;color:#787774">{totalLPct}% / {100 - totalLPct}%</td>
+                </tr>
+              )}
+              {dailySales.results.length > 0 && (
+                <tr style="font-weight:600;color:#787774;font-size:12px">
+                  <td style="padding:6px 8px">일평균</td>
+                  <td style="padding:6px 8px;text-align:right">{Math.round(s.total_orders / dayCount)}</td>
+                  <td style="padding:6px 8px;text-align:right">¥{Math.round((s.total_cash || 0) / dayCount).toLocaleString()}</td>
+                  <td style="padding:6px 8px;text-align:right">¥{Math.round((s.total_qr || 0) / dayCount).toLocaleString()}</td>
+                  <td style="padding:6px 8px;text-align:right;color:#2383e2">¥{Math.round(luggageSum / dayCount).toLocaleString()}</td>
+                  <td style="padding:6px 8px;text-align:right;color:#12b886">¥{Math.round(rentalSum / (rentalData.length || 1)).toLocaleString()}</td>
+                  <td style="padding:6px 8px;text-align:right">¥{Math.round(totalCombined / dayCount).toLocaleString()}</td>
+                  <td></td>
+                </tr>
+              )}
+            </>);
+          })()}
           </tbody>
         </table>
         </div>
         </section>
-
-        <section class="card">
-        <h3 class="card-title">렌탈 일별 매출 <span style="font-size:11px;font-weight:400;color:#a5a5a3;margin-left:6px">Google Sheets 연동</span></h3>
-        {!c.env.GOOGLE_SHEETS_CREDENTIALS ? (
-          <div style="padding:24px;text-align:center;color:#a5a5a3;font-size:13px">Google Sheets 연동이 설정되지 않았습니다</div>
-        ) : rentalError ? (
-          <p class="error">Google Sheets 조회 실패: {rentalError}</p>
-        ) : (
-          <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
-            <thead><tr style="border-bottom:2px solid var(--line)"><th style="text-align:left;padding:6px 8px">날짜</th><th style="text-align:right;padding:6px 8px">렌탈 매출</th></tr></thead>
-            <tbody>
-            {rentalData.length === 0 && (
-              <tr><td colspan={2} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
-            )}
-            {rentalData.map((r) => (
-              <tr style="border-bottom:1px solid var(--line)">
-                <td style="padding:4px 8px">{r.date}</td>
-                <td style="padding:4px 8px;text-align:right;font-weight:600">¥{r.rentalRevenue.toLocaleString()}</td>
-              </tr>
-            ))}
-            {rentalData.length > 0 && (
-              <tr style="border-top:2px solid var(--line);font-weight:700">
-                <td style="padding:6px 8px">합계</td>
-                <td style="padding:6px 8px;text-align:right">¥{rentalTotal.toLocaleString()}</td>
-              </tr>
-            )}
-            </tbody>
-          </table>
-          </div>
-        )}
-        </section>
         <script dangerouslySetInnerHTML={{__html: `(function(){
   var dailyData = ${JSON.stringify(dailySales.results.slice().reverse().map((d: Record<string, unknown>) => ({
-    date: (d.sale_date as string || "").slice(5),
-    fullDate: d.sale_date as string || "",
-    cash: d.cash_total as number || 0,
-    qr: d.qr_total as number || 0,
-    total: d.grand_total as number || 0,
+    date: d.sale_date as string || "",
+    label: (d.sale_date as string || "").slice(5),
+    luggage: d.grand_total as number || 0,
   })))};
   var rentalMap = ${JSON.stringify(Object.fromEntries(rentalData.map(r => [r.date, r.rentalRevenue])))};
-  var cashTotal = ${s.total_cash || 0};
-  var qrTotal = ${s.total_qr || 0};
-  var luggageTotal = ${s.total_revenue || 0};
-  var rentalSum = ${rentalTotal};
 
   if(!dailyData.length){return;}
-  var labels = dailyData.map(function(d){return d.date;});
+  var labels = dailyData.map(function(d){return d.label;});
+  var luggageVals = dailyData.map(function(d){return d.luggage;});
+  var rentalVals = dailyData.map(function(d){return rentalMap[d.date]||0;});
+  var combinedVals = dailyData.map(function(d,i){return d.luggage+(rentalMap[d.date]||0);});
+
   var defaults = Chart.defaults;
   defaults.font.family = "'Pretendard','Noto Sans KR',sans-serif";
   defaults.font.size = 11;
   defaults.color = '#787774';
 
-  new Chart(document.getElementById('dailyChart'),{
-    type:'bar',
+  new Chart(document.getElementById('trendChart'),{
+    type:'line',
     data:{
       labels: labels,
       datasets:[
-        {label:'짐보관',data:dailyData.map(function(d){return d.total;}),backgroundColor:'rgba(35,131,226,0.7)',borderRadius:3,barPercentage:0.7},
-        {label:'렌탈',data:dailyData.map(function(d){return rentalMap[d.fullDate]||0;}),backgroundColor:'rgba(18,184,134,0.7)',borderRadius:3,barPercentage:0.7}
+        {label:'짐보관 (Luggage)',data:luggageVals,borderColor:'#4285F4',backgroundColor:'rgba(66,133,244,0.08)',pointBackgroundColor:'#4285F4',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false},
+        {label:'렌탈 (Rental)',data:rentalVals,borderColor:'#EA4335',backgroundColor:'rgba(234,67,53,0.08)',pointBackgroundColor:'#EA4335',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false},
+        {label:'합계 (Combined)',data:combinedVals,borderColor:'#FBBC05',backgroundColor:'rgba(251,188,5,0.08)',pointBackgroundColor:'#FBBC05',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false}
       ]
     },
     options:{
       responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{position:'top',labels:{boxWidth:12,padding:8}},tooltip:{callbacks:{label:function(c){return c.dataset.label+': \\u00A5'+c.raw.toLocaleString();}}}},
-      scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,ticks:{callback:function(v){return '\\u00A5'+(v/1000)+'k';}},grid:{color:'#f0f0ee'}}}
-    }
-  });
-
-  new Chart(document.getElementById('paymentChart'),{
-    type:'doughnut',
-    data:{
-      labels:['\\uD604\\uAE08 (Cash)','QR'],
-      datasets:[{data:[cashTotal,qrTotal],backgroundColor:['rgba(35,131,226,0.8)','rgba(239,125,34,0.8)'],borderWidth:0,cutout:'65%'}]
-    },
-    options:{
-      responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{position:'bottom',labels:{boxWidth:10,padding:6,font:{size:11}}},
-        tooltip:{callbacks:{label:function(c){var t=cashTotal+qrTotal;var p=t?Math.round(c.raw/t*100):0;return c.label+': \\u00A5'+c.raw.toLocaleString()+' ('+p+'%)';}}}}
-    }
-  });
-
-  new Chart(document.getElementById('revenueChart'),{
-    type:'doughnut',
-    data:{
-      labels:['짐보관','렌탈'],
-      datasets:[{data:[luggageTotal,rentalSum],backgroundColor:['rgba(35,131,226,0.8)','rgba(18,184,134,0.8)'],borderWidth:0,cutout:'65%'}]
-    },
-    options:{
-      responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{position:'bottom',labels:{boxWidth:10,padding:6,font:{size:11}}},
-        tooltip:{callbacks:{label:function(c){var t=luggageTotal+rentalSum;var p=t?Math.round(c.raw/t*100):0;return c.label+': \\u00A5'+c.raw.toLocaleString()+' ('+p+'%)';}}}}
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{position:'top',labels:{boxWidth:12,padding:16,usePointStyle:true,pointStyle:'circle'}},
+        tooltip:{callbacks:{label:function(c){return c.dataset.label+': \\u00A5'+c.raw.toLocaleString();}}}
+      },
+      scales:{
+        x:{grid:{display:false}},
+        y:{ticks:{callback:function(v){return '\\u00A5'+v.toLocaleString();}},grid:{color:'#f0f0ee'},beginAtZero:true}
+      }
     }
   });
 })()`}} />
