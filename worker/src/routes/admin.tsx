@@ -335,12 +335,18 @@ admin.get("/staff/admin/sales", async (c) => {
   defaults.color = '#787774';
 
   function linReg(vals){
-    var n=vals.length;if(n<2)return vals;
-    var sx=0,sy=0,sxy=0,sx2=0;
-    for(var i=0;i<n;i++){sx+=i;sy+=vals[i];sxy+=i*vals[i];sx2+=i*i;}
-    var m=(n*sxy-sx*sy)/(n*sx2-sx*sx);
+    // Only use non-zero points for regression, project across all positions
+    var pts=[];
+    for(var i=0;i<vals.length;i++){if(vals[i]>0)pts.push({x:i,y:vals[i]});}
+    if(pts.length<2)return vals.map(function(){return null;});
+    var n=pts.length,sx=0,sy=0,sxy=0,sx2=0;
+    for(var j=0;j<n;j++){sx+=pts[j].x;sy+=pts[j].y;sxy+=pts[j].x*pts[j].y;sx2+=pts[j].x*pts[j].x;}
+    var denom=n*sx2-sx*sx;if(denom===0)return vals.map(function(){return null;});
+    var m=(n*sxy-sx*sy)/denom;
     var b=(sy-m*sx)/n;
-    return vals.map(function(_,i){return Math.round(m*i+b);});
+    // Only draw trend line between first and last non-zero data points
+    var first=pts[0].x,last=pts[pts.length-1].x;
+    return vals.map(function(_,i){return i>=first&&i<=last?Math.round(m*i+b):null;});
   }
 
   new Chart(document.getElementById('trendChart'),{
@@ -349,11 +355,11 @@ admin.get("/staff/admin/sales", async (c) => {
       labels: labels,
       datasets:[
         {label:'짐보관 (Luggage)',data:luggageVals,borderColor:'#4285F4',backgroundColor:'rgba(66,133,244,0.08)',pointBackgroundColor:'#4285F4',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false},
-        {label:'Luggage Trend',data:linReg(luggageVals),borderColor:'rgba(66,133,244,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0},
+        {label:'Luggage Trend',data:linReg(luggageVals),borderColor:'rgba(66,133,244,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true},
         {label:'렌탈 (Rental)',data:rentalVals,borderColor:'#EA4335',backgroundColor:'rgba(234,67,53,0.08)',pointBackgroundColor:'#EA4335',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false},
-        {label:'Rental Trend',data:linReg(rentalVals),borderColor:'rgba(234,67,53,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0},
+        {label:'Rental Trend',data:linReg(rentalVals),borderColor:'rgba(234,67,53,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true},
         {label:'합계 (Combined)',data:combinedVals,borderColor:'#FBBC05',backgroundColor:'rgba(251,188,5,0.08)',pointBackgroundColor:'#FBBC05',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false},
-        {label:'Combined Trend',data:linReg(combinedVals),borderColor:'rgba(251,188,5,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0}
+        {label:'Combined Trend',data:linReg(combinedVals),borderColor:'rgba(251,188,5,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true}
       ]
     },
     options:{
