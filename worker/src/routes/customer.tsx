@@ -110,9 +110,9 @@ customer.get("/customer", (c) => {
     ko: "영업시간: 09:00~21:00", en: "Hours: 09:00-21:00", ja: "営業時間: 09:00〜21:00",
   };
   const footerCopyright: Record<string, string> = {
-    ko: "© 2026 Flying Japan Inc. All rights reserved.",
-    en: "© 2026 Flying Japan Inc. All rights reserved.",
-    ja: "© 2026 Flying Japan Inc. All rights reserved.",
+    ko: "© 2026 Flying Inc. All rights reserved.",
+    en: "© 2026 Flying Inc. All rights reserved.",
+    ja: "© 2026 Flying Inc. All rights reserved.",
   };
   const previewMetaEmpty: Record<string, string> = {
     ko: "짐 수량과 수령일을 입력해 주세요.",
@@ -1325,7 +1325,7 @@ customer.get("/customer/orders/:id", async (c) => {
   const footerHours: Record<string, string> = {
     ko: "영업시간: 09:00~21:00", en: "Hours: 09:00-21:00", ja: "営業時間: 09:00〜21:00",
   };
-  const footerCopyright = "© 2026 Flying Japan Inc. All rights reserved.";
+  const footerCopyright = "© 2026 Flying Inc. All rights reserved.";
 
   const summaryLabel: Record<string, string> = {
     ko: "접수 정보", en: "Order Summary", ja: "受付情報",
