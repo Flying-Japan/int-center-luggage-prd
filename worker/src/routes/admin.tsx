@@ -91,7 +91,7 @@ admin.get("/staff/admin/sales", async (c) => {
           const isCustom = (startDate || endDate) && !activePreset;
           const displayLabel = activePreset ? activePreset.label : isCustom ? `${startDate} ~ ${endDate}` : "전체";
           return (
-            <div class="date-range-wrap" style="position:relative;margin:-8px 0 12px">
+            <div class="date-range-wrap" style="position:relative;margin:0 0 12px">
               <button type="button" class="btn btn-sm btn-secondary date-range-trigger" id="dateRangeTrigger" style="display:inline-flex;align-items:center;gap:6px">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
                 <span id="dateRangeLabel">{displayLabel}</span>
@@ -769,15 +769,16 @@ admin.get("/staff/admin/activity-logs", async (c) => {
           </form>
         </section>
 
-        <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <section class="card">
+        <div class="table-wrap">
+        <table>
           <thead>
-            <tr style="border-bottom:2px solid var(--line)">
-              <th style="text-align:left;padding:6px 8px">시간</th>
-              <th style="text-align:left;padding:6px 8px">주문</th>
-              <th style="text-align:left;padding:6px 8px">직원</th>
-              <th style="text-align:left;padding:6px 8px">행동</th>
-              <th style="text-align:left;padding:6px 8px">상세</th>
+            <tr>
+              <th>시간</th>
+              <th>주문</th>
+              <th>직원</th>
+              <th>행동</th>
+              <th>상세</th>
             </tr>
           </thead>
           <tbody>
@@ -785,17 +786,18 @@ admin.get("/staff/admin/activity-logs", async (c) => {
             <tr><td colspan={5} style="padding:24px;text-align:center;color:#a5a5a3">활동 기록이 없습니다</td></tr>
           )}
           {logs.results.map((l: Record<string, unknown>) => (
-            <tr style="border-bottom:1px solid var(--line)">
-              <td style="padding:4px 8px;white-space:nowrap">{l.timestamp ? new Date(l.timestamp as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
-              <td style="padding:4px 8px"><a href={`/staff/orders/${l.order_id as string}`} style="color:var(--primary)">{l.order_id as string}</a></td>
-              <td style="padding:4px 8px">{staffNameMap[l.staff_id as string] || (l.staff_id as string) || "-"}</td>
-              <td style="padding:4px 8px"><span class="status-pill" style="font-size:10px">{ACTION_LABELS[l.action as string] || (l.action as string)}</span></td>
-              <td style="padding:4px 8px;color:#666">{(l.details as string) || "-"}</td>
+            <tr>
+              <td style="white-space:nowrap">{l.timestamp ? new Date(l.timestamp as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
+              <td><a href={`/staff/orders/${l.order_id as string}`} style="color:var(--primary)">{l.order_id as string}</a></td>
+              <td>{staffNameMap[l.staff_id as string] || (l.staff_id as string) || "-"}</td>
+              <td><span class="status-pill" style="font-size:10px">{ACTION_LABELS[l.action as string] || (l.action as string)}</span></td>
+              <td>{(l.details as string) || "-"}</td>
             </tr>
           ))}
           </tbody>
         </table>
         </div>
+        </section>
 
         <div style="display:flex;gap:8px;justify-content:center;margin:16px 0">
           {page > 1 && (

@@ -118,7 +118,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
           {/* Hero */}
           <section class="hero hero-row">
             <div>
-              <p class="hero-kicker">접수 상세</p>
+              <p class="hero-kicker">접수 관리</p>
               <h2 class="hero-title">접수 상세: {orderId}</h2>
               <p class="hero-desc">수정 가능한 필드만 조정 가능합니다.</p>
             </div>
@@ -204,26 +204,28 @@ staffOrders.get("/staff/orders/:id", async (c) => {
           {extensions.results.length > 0 && (
             <section class="card">
               <h3 class="card-title">연장 접수 내역</h3>
-              <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <div class="table-wrap">
+              <table>
                 <thead>
-                  <tr style="border-bottom:1px solid var(--line)">
-                    <th style="text-align:left;padding:6px 8px">접수번호</th>
-                    <th style="text-align:left;padding:6px 8px">생성일</th>
-                    <th style="text-align:left;padding:6px 8px">금액</th>
-                    <th style="text-align:left;padding:6px 8px">상태</th>
+                  <tr>
+                    <th>접수번호</th>
+                    <th>생성일</th>
+                    <th>금액</th>
+                    <th>상태</th>
                   </tr>
                 </thead>
                 <tbody>
                   {extensions.results.map((ext: Record<string, unknown>) => (
-                    <tr style="border-bottom:1px solid var(--line)">
-                      <td style="padding:6px 8px"><a href={`/staff/orders/${ext.order_id as string}`} style="color:var(--primary);text-decoration:underline">{ext.order_id as string}</a></td>
-                      <td style="padding:6px 8px">{ext.created_at ? (ext.created_at as string).slice(0, 10) : "-"}</td>
-                      <td style="padding:6px 8px">{yen(ext.prepaid_amount as number)}</td>
-                      <td style="padding:6px 8px"><span class={`status-pill status-${(ext.status as string).toLowerCase()}`}>{displayOrderStatus(ext.status as string)}</span></td>
+                    <tr>
+                      <td><a href={`/staff/orders/${ext.order_id as string}`} style="color:var(--primary);text-decoration:underline">{ext.order_id as string}</a></td>
+                      <td>{ext.created_at ? (ext.created_at as string).slice(0, 10) : "-"}</td>
+                      <td>{yen(ext.prepaid_amount as number)}</td>
+                      <td><span class={`status-pill status-${(ext.status as string).toLowerCase()}`}>{displayOrderStatus(ext.status as string)}</span></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
             </section>
           )}
 
@@ -291,26 +293,28 @@ staffOrders.get("/staff/orders/:id", async (c) => {
           <section class="card">
             <h3 class="card-title">활동 이력</h3>
             {auditLogs.results.length > 0 ? (
-              <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <div class="table-wrap">
+              <table>
                 <thead>
-                  <tr style="border-bottom:1px solid var(--line)">
-                    <th style="text-align:left;padding:5px 8px">시간</th>
-                    <th style="text-align:left;padding:5px 8px">직원</th>
-                    <th style="text-align:left;padding:5px 8px">행동</th>
-                    <th style="text-align:left;padding:5px 8px">상세</th>
+                  <tr>
+                    <th>시간</th>
+                    <th>직원</th>
+                    <th>행동</th>
+                    <th>상세</th>
                   </tr>
                 </thead>
                 <tbody>
                   {auditLogs.results.map((l: Record<string, unknown>) => (
-                    <tr style="border-bottom:1px solid var(--line)">
-                      <td style="padding:4px 8px;white-space:nowrap">{l.timestamp ? new Date(l.timestamp as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
-                      <td style="padding:4px 8px">{(l.display_name as string) || (l.username as string) || (l.staff_id as string) || "-"}</td>
-                      <td style="padding:4px 8px"><span class="status-pill" style="font-size:10px">{l.action as string}</span></td>
-                      <td style="padding:4px 8px;color:#666">{(l.details as string) || "-"}</td>
+                    <tr>
+                      <td style="white-space:nowrap">{l.timestamp ? new Date(l.timestamp as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
+                      <td>{(l.display_name as string) || (l.username as string) || (l.staff_id as string) || "-"}</td>
+                      <td><span class="status-pill" style="font-size:10px">{l.action as string}</span></td>
+                      <td>{(l.details as string) || "-"}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <p class="muted">이력 없음</p>
             )}
@@ -589,6 +593,7 @@ staffOrders.get("/staff/bug-report", (c) => {
         </header>
         <main class="container">
           <StaffMenu active="/staff/bug-report" role={staff.role} />
+          <section class="hero"><div><p class="hero-kicker">Operations</p><h2 class="hero-title">버그 신고</h2></div></section>
           {success && <div class="card" style="background:#f0fdf4;border:1px solid #86efac;color:#166534;padding:10px 16px;margin-bottom:12px">버그 신고가 접수되었습니다. 감사합니다!</div>}
           {error && <div class="card" style="background:#fef2f2;border:1px solid #fca5a5;color:#991b1b;padding:10px 16px;margin-bottom:12px">신고 중 오류가 발생했습니다. 다시 시도해주세요.</div>}
           <section class="card">
