@@ -124,31 +124,48 @@ admin.get("/staff/admin/sales", async (c) => {
           <StaffMenu active="/staff/admin/sales" role={staff.role} />
         {successMsg && <p class="success-note">{successMsg}</p>}
         <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div></section>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:-8px 0 12px">
-          {[
-            { label: "이번 달", days: 0, month: true },
-            { label: "7일", days: 7, month: false },
-            { label: "14일", days: 14, month: false },
-            { label: "30일", days: 30, month: false },
-            { label: "90일", days: 90, month: false },
-          ].map(opt => {
-            const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
-            let sd: string, ed: string;
-            if (opt.month) {
-              sd = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
-              ed = now.toISOString().slice(0, 10);
-            } else {
-              const from = new Date(now.getTime() - opt.days * 86400000);
-              sd = from.toISOString().slice(0, 10);
-              ed = now.toISOString().slice(0, 10);
-            }
-            const isActive = startDate === sd && endDate === ed;
-            return <a class={`btn btn-sm${isActive ? " btn-primary" : " btn-secondary"}`} href={`/staff/admin/sales?start_date=${sd}&end_date=${ed}`}>{opt.label}</a>;
-          })}
-          {!startDate && !endDate && <span class="btn btn-sm btn-primary" style="cursor:default">전체</span>}
-          {(startDate || endDate) && <a class="btn btn-sm btn-secondary" href="/staff/admin/sales">전체</a>}
-          {(startDate || endDate) && <span style="font-size:11px;color:#a5a5a3;margin-left:4px">{startDate} ~ {endDate}</span>}
-        </div>
+        {(() => {
+          const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+          const today = now.toISOString().slice(0, 10);
+          const monthStart = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+          const presets = [
+            { label: "전체", sd: "", ed: "" },
+            { label: "이번 달", sd: monthStart, ed: today },
+            { label: "최근 7일", sd: new Date(now.getTime() - 7 * 86400000).toISOString().slice(0, 10), ed: today },
+            { label: "최근 14일", sd: new Date(now.getTime() - 14 * 86400000).toISOString().slice(0, 10), ed: today },
+            { label: "최근 30일", sd: new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10), ed: today },
+          ];
+          const activePreset = presets.find(p => p.sd === startDate && p.ed === endDate);
+          const isCustom = (startDate || endDate) && !activePreset;
+          const displayLabel = activePreset ? activePreset.label : isCustom ? `${startDate} ~ ${endDate}` : "전체";
+          return (
+            <div class="date-range-wrap" style="position:relative;margin:-8px 0 12px">
+              <button type="button" class="btn btn-sm btn-secondary date-range-trigger" id="dateRangeTrigger" style="display:inline-flex;align-items:center;gap:6px">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+                <span id="dateRangeLabel">{displayLabel}</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9" /></svg>
+              </button>
+              <div id="dateRangeDropdown" style="display:none;position:absolute;top:100%;left:0;z-index:50;margin-top:4px;background:#fff;border:1px solid #e5e5e5;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.1);padding:8px 0;min-width:260px">
+                <div style="padding:4px 8px">
+                  {presets.map(p => {
+                    const active = p.sd === startDate && p.ed === endDate;
+                    return <a href={p.sd ? `/staff/admin/sales?start_date=${p.sd}&end_date=${p.ed}` : "/staff/admin/sales"} style={`display:block;padding:7px 12px;font-size:12px;border-radius:4px;text-decoration:none;color:${active ? "#2383e2" : "#37352f"};font-weight:${active ? "600" : "400"};background:${active ? "#e8f0fe" : "transparent"}`}>{p.label}</a>;
+                  })}
+                </div>
+                <div style="height:1px;background:#f0f0ee;margin:6px 0" />
+                <form method="get" action="/staff/admin/sales" style="padding:8px 12px">
+                  <p style="font-size:11px;font-weight:600;color:#a5a5a3;margin:0 0 6px">기간 직접 선택</p>
+                  <div style="display:flex;gap:4px;align-items:center">
+                    <input class="control" type="date" name="start_date" value={startDate} style="font-size:11px;padding:4px 6px;min-height:28px;flex:1" />
+                    <span style="color:#a5a5a3;font-size:11px">~</span>
+                    <input class="control" type="date" name="end_date" value={endDate} style="font-size:11px;padding:4px 6px;min-height:28px;flex:1" />
+                    <button class="btn btn-sm btn-primary" type="submit" style="padding:4px 10px;min-height:28px;font-size:11px">적용</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          );
+        })()}
 
         <div class="stat-grid">
           <div class="card stat-card">
@@ -243,6 +260,12 @@ admin.get("/staff/admin/sales", async (c) => {
         </div>
         </section>
         <script dangerouslySetInnerHTML={{__html: `(function(){
+  var trigger=document.getElementById('dateRangeTrigger');
+  var dropdown=document.getElementById('dateRangeDropdown');
+  if(trigger&&dropdown){
+    trigger.addEventListener('click',function(e){e.stopPropagation();dropdown.style.display=dropdown.style.display==='none'?'block':'none';});
+    document.addEventListener('click',function(e){if(!dropdown.contains(e.target))dropdown.style.display='none';});
+  }
   var rows = ${JSON.stringify(mergedRows.slice().reverse().map(r => ({ label: r.dateJP.slice(5), luggage: r.luggage, rental: r.rental, combined: r.combined })))};
 
   if(!rows.length){return;}
