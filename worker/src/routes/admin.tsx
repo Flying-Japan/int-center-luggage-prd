@@ -170,14 +170,14 @@ admin.get("/staff/admin/sales", async (c) => {
         <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="border-bottom:2px solid var(--line)">
-            <th style="text-align:left;padding:6px 8px">날짜</th>
-            <th style="text-align:right;padding:6px 8px">고객수</th>
-            <th style="text-align:right;padding:6px 8px">현금</th>
-            <th style="text-align:right;padding:6px 8px">QR</th>
-            <th style="text-align:right;padding:6px 8px;color:#2383e2">짐보관</th>
-            <th style="text-align:right;padding:6px 8px;color:#12b886">렌탈</th>
-            <th style="text-align:right;padding:6px 8px;font-weight:700">합계</th>
-            <th style="text-align:right;padding:6px 8px">비율</th>
+            <th style="text-align:left;padding:6px 8px">Date</th>
+            <th style="text-align:right;padding:6px 8px">People</th>
+            <th style="text-align:right;padding:6px 8px">Cash</th>
+            <th style="text-align:right;padding:6px 8px">Pay</th>
+            <th style="text-align:right;padding:6px 8px;color:#2383e2">Luggage</th>
+            <th style="text-align:right;padding:6px 8px;color:#12b886">Rental</th>
+            <th style="text-align:right;padding:6px 8px;font-weight:700">Luggage + Rental Daily</th>
+            <th style="text-align:right;padding:6px 8px">% (Luggage / Rental)</th>
           </tr></thead>
           <tbody>
           {mergedRows.length === 0 && (
