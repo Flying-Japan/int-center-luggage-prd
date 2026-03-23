@@ -153,15 +153,18 @@ admin.get("/staff/admin/sales", async (c) => {
                   })}
                 </div>
                 <div style="height:1px;background:#f0f0ee;margin:6px 0" />
-                <form method="get" action="/staff/admin/sales" style="padding:8px 12px">
-                  <p style="font-size:11px;font-weight:600;color:#a5a5a3;margin:0 0 6px">기간 직접 선택</p>
-                  <div style="display:flex;gap:4px;align-items:center">
-                    <input class="control" type="date" name="start_date" value={startDate} style="font-size:11px;padding:4px 6px;min-height:28px;flex:1" />
-                    <span style="color:#a5a5a3;font-size:11px">~</span>
-                    <input class="control" type="date" name="end_date" value={endDate} style="font-size:11px;padding:4px 6px;min-height:28px;flex:1" />
-                    <button class="btn btn-sm btn-primary" type="submit" style="padding:4px 10px;min-height:28px;font-size:11px">적용</button>
+                <div style="padding:8px 12px">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <button type="button" id="calPrev" style="background:none;border:none;cursor:pointer;padding:2px 6px;font-size:14px;color:#787774">&#x2039;</button>
+                    <span id="calTitle" style="font-size:12px;font-weight:600;color:#37352f"></span>
+                    <button type="button" id="calNext" style="background:none;border:none;cursor:pointer;padding:2px 6px;font-size:14px;color:#787774">&#x203A;</button>
                   </div>
-                </form>
+                  <div id="calGrid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center;font-size:11px"></div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+                    <span id="calRange" style="font-size:11px;color:#a5a5a3"></span>
+                    <button type="button" id="calApply" class="btn btn-sm btn-primary" style="padding:4px 10px;min-height:28px;font-size:11px;display:none">적용</button>
+                  </div>
+                </div>
               </div>
             </div>
           );
@@ -264,7 +267,59 @@ admin.get("/staff/admin/sales", async (c) => {
   var dropdown=document.getElementById('dateRangeDropdown');
   if(trigger&&dropdown){
     trigger.addEventListener('click',function(e){e.stopPropagation();dropdown.style.display=dropdown.style.display==='none'?'block':'none';});
-    document.addEventListener('click',function(e){if(!dropdown.contains(e.target))dropdown.style.display='none';});
+    document.addEventListener('click',function(e){if(!dropdown.contains(e.target)&&e.target!==trigger&&!trigger.contains(e.target))dropdown.style.display='none';});
+  }
+  // Calendar range picker
+  var DOW=['일','월','화','수','목','금','토'];
+  var calGrid=document.getElementById('calGrid');
+  var calTitle=document.getElementById('calTitle');
+  var calRange=document.getElementById('calRange');
+  var calApply=document.getElementById('calApply');
+  var calY,calM,selStart=null,selEnd=null;
+  var initDate=new Date(Date.now()+9*3600000);
+  calY=initDate.getUTCFullYear();calM=initDate.getUTCMonth();
+
+  function pad(n){return n<10?'0'+n:''+n;}
+  function fmtD(y,m,d){return y+'-'+pad(m+1)+'-'+pad(d);}
+
+  function renderCal(){
+    calTitle.textContent=calY+'년 '+pad(calM+1)+'월';
+    var html='';
+    DOW.forEach(function(d){html+='<div style="color:#a5a5a3;font-weight:600;padding:4px 0">'+d+'</div>';});
+    var first=new Date(calY,calM,1).getDay();
+    var days=new Date(calY,calM+1,0).getDate();
+    var today=new Date(Date.now()+9*3600000).toISOString().slice(0,10);
+    for(var i=0;i<first;i++)html+='<div></div>';
+    for(var d=1;d<=days;d++){
+      var ds=fmtD(calY,calM,d);
+      var isToday=ds===today;
+      var isSel=ds===selStart||ds===selEnd;
+      var inRange=selStart&&selEnd&&ds>=selStart&&ds<=selEnd;
+      var bg=isSel?'#2383e2':inRange?'#e8f0fe':'transparent';
+      var clr=isSel?'#fff':isToday?'#2383e2':'#37352f';
+      var brd=isToday&&!isSel?'1px solid #2383e2':'1px solid transparent';
+      html+='<div data-date="'+ds+'" style="padding:5px 0;border-radius:4px;cursor:pointer;background:'+bg+';color:'+clr+';border:'+brd+';font-weight:'+(isSel?'600':'400')+'">'+d+'</div>';
+    }
+    calGrid.innerHTML=html;
+    if(selStart&&selEnd){calRange.textContent=selStart+' ~ '+selEnd;calApply.style.display='inline-block';}
+    else if(selStart){calRange.textContent=selStart+' ~ 종료일 선택';calApply.style.display='none';}
+    else{calRange.textContent='';calApply.style.display='none';}
+  }
+
+  if(calGrid){
+    calGrid.addEventListener('click',function(e){
+      var ds=e.target.getAttribute('data-date');if(!ds)return;
+      if(!selStart||selEnd){selStart=ds;selEnd=null;}
+      else if(ds<selStart){selEnd=selStart;selStart=ds;}
+      else{selEnd=ds;}
+      renderCal();
+    });
+    document.getElementById('calPrev').addEventListener('click',function(e){e.stopPropagation();calM--;if(calM<0){calM=11;calY--;}renderCal();});
+    document.getElementById('calNext').addEventListener('click',function(e){e.stopPropagation();calM++;if(calM>11){calM=0;calY++;}renderCal();});
+    calApply.addEventListener('click',function(){
+      if(selStart&&selEnd)window.location.href='/staff/admin/sales?start_date='+selStart+'&end_date='+selEnd;
+    });
+    renderCal();
   }
   var rows = ${JSON.stringify(mergedRows.slice().reverse().map(r => ({ label: r.dateJP.slice(5), luggage: r.luggage, rental: r.rental, combined: r.combined })))};
 
