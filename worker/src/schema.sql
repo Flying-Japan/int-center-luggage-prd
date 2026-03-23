@@ -189,6 +189,17 @@ CREATE TABLE IF NOT EXISTS luggage_work_schedules (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Daily sales (imported from Google Sheets — luggage + rental combined)
+CREATE TABLE IF NOT EXISTS luggage_daily_sales (
+  sale_date TEXT PRIMARY KEY,
+  people INTEGER NOT NULL DEFAULT 0,
+  cash INTEGER NOT NULL DEFAULT 0,
+  qr INTEGER NOT NULL DEFAULT 0,
+  luggage_total INTEGER NOT NULL DEFAULT 0,
+  rental_total INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_luggage_orders_status ON luggage_orders(status);
 CREATE INDEX IF NOT EXISTS idx_luggage_orders_created_at ON luggage_orders(created_at);

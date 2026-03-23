@@ -9,7 +9,6 @@ import { createSupabaseAdmin } from "../lib/supabase";
 import { formatDateJST, nowJST } from "../services/storage";
 import { StaffMenu } from "../lib/components";
 import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
-import { fetchRentalDailyRevenue, type RentalDailyRevenue } from "../services/rentalSync";
 
 const admin = new Hono<AppType>();
 admin.use("/*", adminAuth);
@@ -19,99 +18,41 @@ admin.get("/staff/admin/sales", async (c) => {
   const startDate = c.req.query("start_date") || "";
   const endDate = c.req.query("end_date") || "";
 
-  // Build date filter
-  let dateFilter = "";
-  const dateParams: string[] = [];
+  // Query from luggage_daily_sales (imported from Google Sheets)
+  let whereClause = "";
+  const params: string[] = [];
   if (startDate && endDate) {
-    dateFilter = " AND date(created_at, '+9 hours') BETWEEN ? AND ?";
-    dateParams.push(startDate, endDate);
-  } else {
-    dateFilter = " AND date(created_at, '+9 hours') >= date('now', '-30 days')";
+    whereClause = " WHERE sale_date BETWEEN ? AND ?";
+    params.push(startDate, endDate);
   }
 
-  // Daily sales + summary in parallel
-  const [dailySales, summary] = await Promise.all([
-    c.env.DB.prepare(
-      `SELECT date(created_at, '+9 hours') as sale_date,
-         COUNT(*) as order_count,
-         SUM(CASE WHEN payment_method = 'CASH' THEN prepaid_amount + extra_amount ELSE 0 END) as cash_total,
-         SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as qr_total,
-         SUM(prepaid_amount + extra_amount) as grand_total
-       FROM luggage_orders
-       WHERE status IN ('PAID', 'PICKED_UP')${dateFilter}
-       GROUP BY date(created_at, '+9 hours')
-       ORDER BY sale_date DESC`
-    ).bind(...dateParams).all(),
-    c.env.DB.prepare(
-      `SELECT COUNT(*) as total_orders,
-         SUM(prepaid_amount + extra_amount) as total_revenue,
-         SUM(CASE WHEN payment_method = 'CASH' THEN prepaid_amount + extra_amount ELSE 0 END) as total_cash,
-         SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as total_qr
-       FROM luggage_orders
-       WHERE status IN ('PAID', 'PICKED_UP')${dateFilter}`
-    ).bind(...dateParams).first<{ total_orders: number; total_revenue: number; total_cash: number; total_qr: number }>(),
-  ]);
+  const dailyRows = await c.env.DB.prepare(
+    `SELECT sale_date, people, cash, qr, luggage_total, rental_total FROM luggage_daily_sales${whereClause} ORDER BY sale_date DESC`
+  ).bind(...params).all<{ sale_date: string; people: number; cash: number; qr: number; luggage_total: number; rental_total: number }>();
 
-  // Fetch rental revenue from Google Sheets (graceful degradation)
-  let rentalData: RentalDailyRevenue[] = [];
-  let rentalError = "";
-  if (c.env.GOOGLE_SHEETS_CREDENTIALS) {
-    try {
-      const allRental = await fetchRentalDailyRevenue(c.env.GOOGLE_SHEETS_CREDENTIALS);
-      // Filter by date range if specified
-      if (startDate && endDate) {
-        rentalData = allRental.filter((r) => r.date >= startDate && r.date <= endDate);
-      } else {
-        rentalData = allRental;
-      }
-    } catch (e) {
-      rentalError = e instanceof Error ? e.message : "알 수 없는 오류";
-      console.error("Rental sync error:", rentalError);
-    }
-  }
-  const rentalTotal = rentalData.reduce((sum, r) => sum + r.rentalRevenue, 0);
-
-  const s = summary || { total_orders: 0, total_revenue: 0, total_cash: 0, total_qr: 0 };
-
-  // Merge luggage + rental into unified daily rows
   const DOW_JP = ["日", "月", "火", "水", "木", "金", "土"];
-  const luggageMap = new Map<string, { orders: number; cash: number; qr: number; total: number }>();
-  for (const d of dailySales.results as Record<string, unknown>[]) {
-    luggageMap.set(d.sale_date as string, {
-      orders: d.order_count as number || 0,
-      cash: d.cash_total as number || 0,
-      qr: d.qr_total as number || 0,
-      total: d.grand_total as number || 0,
-    });
-  }
-  const rentalMap = new Map<string, { revenue: number; count: number }>();
-  for (const r of rentalData) rentalMap.set(r.date, { revenue: r.rentalRevenue, count: r.rentalCount });
-
-  // Collect all dates from both sources
-  const allDates = [...new Set([...luggageMap.keys(), ...rentalMap.keys()])].sort().reverse();
-  const dayCount = allDates.length || 1;
-
-  interface MergedRow { date: string; dateJP: string; orders: number; cash: number; qr: number; luggage: number; rental: number; rentalCount: number; combined: number; }
-  const mergedRows: MergedRow[] = allDates.map(date => {
-    const l = luggageMap.get(date) || { orders: 0, cash: 0, qr: 0, total: 0 };
-    const rd = rentalMap.get(date) || { revenue: 0, count: 0 };
-    const dow = DOW_JP[new Date(date + "T00:00:00+09:00").getDay()];
+  interface MergedRow { date: string; dateJP: string; orders: number; cash: number; qr: number; luggage: number; rental: number; combined: number; }
+  const mergedRows: MergedRow[] = dailyRows.results.map(r => {
+    const dow = DOW_JP[new Date(r.sale_date + "T00:00:00+09:00").getDay()];
     return {
-      date,
-      dateJP: `${date.replace(/-/g, "/")}/${dow}`,
-      orders: l.orders,
-      cash: l.cash,
-      qr: l.qr,
-      luggage: l.total,
-      rental: rd.revenue,
-      rentalCount: rd.count,
-      combined: l.total + rd.revenue,
+      date: r.sale_date,
+      dateJP: `${r.sale_date.replace(/-/g, "/")}/${dow}`,
+      orders: r.people,
+      cash: r.cash,
+      qr: r.qr,
+      luggage: r.luggage_total,
+      rental: r.rental_total,
+      combined: r.luggage_total + r.rental_total,
     };
   });
+
+  const dayCount = mergedRows.length || 1;
   const totalLuggage = mergedRows.reduce((s, r) => s + r.luggage, 0);
   const totalRental = mergedRows.reduce((s, r) => s + r.rental, 0);
-  const totalRentalCount = mergedRows.reduce((s, r) => s + r.rentalCount, 0);
   const totalCombined = totalLuggage + totalRental;
+  const totalPeople = mergedRows.reduce((s, r) => s + r.orders, 0);
+  const totalCash = mergedRows.reduce((s, r) => s + r.cash, 0);
+  const totalQr = mergedRows.reduce((s, r) => s + r.qr, 0);
 
   const staff = getStaff(c);
   const successMsg = c.req.query("success");
@@ -173,27 +114,27 @@ admin.get("/staff/admin/sales", async (c) => {
         <div class="stat-grid">
           <div class="card stat-card">
             <p class="stat-label">짐보관 매출</p>
-            <p class="stat-value">¥{s.total_revenue?.toLocaleString()}</p>
+            <p class="stat-value">¥{totalLuggage.toLocaleString()}</p>
           </div>
           <div class="card stat-card">
             <p class="stat-label">렌탈 매출</p>
-            <p class="stat-value">¥{rentalTotal.toLocaleString()}</p>
+            <p class="stat-value">¥{totalRental.toLocaleString()}</p>
           </div>
           <div class="card stat-card stat-card--highlight">
             <p class="stat-label stat-label--highlight">합계 (짐보관 + 렌탈)</p>
             <p class="stat-value stat-value--highlight">¥{totalCombined.toLocaleString()}</p>
           </div>
           <div class="card stat-card">
-            <p class="stat-label">총건수</p>
-            <p class="stat-value">{s.total_orders}건</p>
+            <p class="stat-label">총고객수</p>
+            <p class="stat-value">{totalPeople.toLocaleString()}명</p>
           </div>
           <div class="card stat-card">
             <p class="stat-label">일평균</p>
-            <p class="stat-value">¥{Math.round(s.total_revenue / dayCount).toLocaleString()}</p>
+            <p class="stat-value">¥{Math.round(totalCombined / dayCount).toLocaleString()}</p>
           </div>
           <div class="card stat-card">
             <p class="stat-label">현금 / QR</p>
-            <p class="stat-value stat-value--sm">¥{s.total_cash?.toLocaleString()} / ¥{s.total_qr?.toLocaleString()}</p>
+            <p class="stat-value stat-value--sm">¥{totalCash.toLocaleString()} / ¥{totalQr.toLocaleString()}</p>
           </div>
         </div>
 
@@ -204,7 +145,6 @@ admin.get("/staff/admin/sales", async (c) => {
 
         <section class="card">
         <h3 class="card-title">일별 매출 상세</h3>
-        {rentalError && <p class="error" style="margin:0 8px 8px">Google Sheets 조회 실패: {rentalError}</p>}
         <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="border-bottom:2px solid var(--line)">
@@ -230,7 +170,7 @@ admin.get("/staff/admin/sales", async (c) => {
                 <td style="padding:4px 8px;text-align:right">{r.cash ? `¥${r.cash.toLocaleString()}` : "-"}</td>
                 <td style="padding:4px 8px;text-align:right">{r.qr ? `¥${r.qr.toLocaleString()}` : "-"}</td>
                 <td style="padding:4px 8px;text-align:right;color:#2383e2">{r.luggage ? `¥${r.luggage.toLocaleString()}` : "-"}</td>
-                <td style="padding:4px 8px;text-align:right;color:#12b886">{r.rental ? <><span>¥{r.rental.toLocaleString()}</span>{r.rentalCount > 0 && <span style="font-size:10px;color:#a5a5a3;margin-left:3px">({r.rentalCount})</span>}</> : "-"}</td>
+                <td style="padding:4px 8px;text-align:right;color:#12b886">{r.rental ? `¥${r.rental.toLocaleString()}` : "-"}</td>
                 <td style="padding:4px 8px;text-align:right;font-weight:600">¥{r.combined.toLocaleString()}</td>
                 <td style="padding:4px 8px;text-align:right;font-size:11px;color:#787774">{r.combined > 0 ? `${lPct}% / ${100 - lPct}%` : "-"}</td>
               </tr>
@@ -239,21 +179,21 @@ admin.get("/staff/admin/sales", async (c) => {
           {mergedRows.length > 0 && (<>
             <tr style="border-top:2px solid var(--line);font-weight:700;background:#fafaf9">
               <td style="padding:6px 8px">Total</td>
-              <td style="padding:6px 8px;text-align:right">{s.total_orders}</td>
-              <td style="padding:6px 8px;text-align:right">¥{s.total_cash?.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{s.total_qr?.toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">{totalPeople.toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">¥{totalCash.toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">¥{totalQr.toLocaleString()}</td>
               <td style="padding:6px 8px;text-align:right;color:#2383e2">¥{totalLuggage.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right;color:#12b886">¥{totalRental.toLocaleString()}{totalRentalCount > 0 && <span style="font-size:10px;color:#a5a5a3;margin-left:3px">({totalRentalCount})</span>}</td>
+              <td style="padding:6px 8px;text-align:right;color:#12b886">¥{totalRental.toLocaleString()}</td>
               <td style="padding:6px 8px;text-align:right">¥{totalCombined.toLocaleString()}</td>
               <td style="padding:6px 8px;text-align:right;font-size:11px;color:#787774">{totalCombined > 0 ? `${Math.round(totalLuggage / totalCombined * 100)}% / ${Math.round(totalRental / totalCombined * 100)}%` : "-"}</td>
             </tr>
             <tr style="font-weight:600;color:#787774;font-size:12px">
               <td style="padding:6px 8px">Daily Avg</td>
-              <td style="padding:6px 8px;text-align:right">{Math.round(s.total_orders / dayCount)}</td>
-              <td style="padding:6px 8px;text-align:right">¥{Math.round((s.total_cash || 0) / dayCount).toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right">¥{Math.round((s.total_qr || 0) / dayCount).toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">{Math.round(totalPeople / dayCount)}</td>
+              <td style="padding:6px 8px;text-align:right">¥{Math.round(totalCash / dayCount).toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right">¥{Math.round(totalQr / dayCount).toLocaleString()}</td>
               <td style="padding:6px 8px;text-align:right;color:#2383e2">¥{Math.round(totalLuggage / dayCount).toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right;color:#12b886">¥{Math.round(totalRental / (rentalData.length || 1)).toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right;color:#12b886">¥{Math.round(totalRental / dayCount).toLocaleString()}</td>
               <td style="padding:6px 8px;text-align:right">¥{Math.round(totalCombined / dayCount).toLocaleString()}</td>
               <td style="padding:6px 8px;text-align:right;font-size:11px;color:#787774">{totalCombined > 0 ? `${Math.round(totalLuggage / totalCombined * 100)}% / ${Math.round(totalRental / totalCombined * 100)}%` : "-"}</td>
             </tr>
