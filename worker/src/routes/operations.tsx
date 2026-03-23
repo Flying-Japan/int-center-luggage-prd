@@ -39,9 +39,9 @@ ops.get("/staff/cash-closing", async (c) => {
             <form method="post" action="/staff/cash-closing">
               <label class="field">
                 <span class="field-label">마감 유형</span>
-                <select class="control" name="closing_type">
-                  <option value="MORNING_HANDOVER">오전</option>
-                  <option value="FINAL_CLOSE">최종</option>
+                <select class="control" name="closing_type" style="max-width:180px">
+                  <option value="MORNING_HANDOVER">오전 인수인계</option>
+                  <option value="FINAL_CLOSE">최종 마감</option>
                 </select>
               </label>
 
