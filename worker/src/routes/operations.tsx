@@ -16,6 +16,8 @@ ops.use("/*", staffAuth);
 // ============================================================
 
 const DENOMS = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1] as const;
+const CLOSING_TYPE_LABELS: Record<string, string> = { MORNING_HANDOVER: "오전", FINAL_CLOSE: "최종" };
+const WORKFLOW_LABELS: Record<string, string> = { DRAFT: "임시", SUBMITTED: "제출", VERIFIED: "확인" };
 
 // GET /staff/cash-closing — Cash closing list & form
 ops.get("/staff/cash-closing", async (c) => {
@@ -38,8 +40,8 @@ ops.get("/staff/cash-closing", async (c) => {
               <label class="field">
                 <span class="field-label">마감 유형</span>
                 <select class="control" name="closing_type">
-                  <option value="MORNING_HANDOVER">오전 인수인계</option>
-                  <option value="FINAL_CLOSE">최종 마감</option>
+                  <option value="MORNING_HANDOVER">오전</option>
+                  <option value="FINAL_CLOSE">최종</option>
                 </select>
               </label>
 
@@ -85,8 +87,8 @@ ops.get("/staff/cash-closing", async (c) => {
                   {closings.results.map((cl: Record<string, unknown>) => (
                     <tr>
                       <td><a href={`/staff/cash-closing/${cl.closing_id}`}>{cl.business_date as string}</a></td>
-                      <td>{cl.closing_type as string}</td>
-                      <td>{cl.workflow_status as string}</td>
+                      <td>{CLOSING_TYPE_LABELS[cl.closing_type as string] || cl.closing_type as string}</td>
+                      <td><span class="status-pill">{WORKFLOW_LABELS[cl.workflow_status as string] || cl.workflow_status as string}</span></td>
                       <td>¥{cl.total_amount as number}</td>
                     </tr>
                   ))}
@@ -190,7 +192,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
 
           <section class="card">
             <h3 class="card-title">정산 상세: {cl.business_date as string}</h3>
-            <p style="margin-bottom:12px">유형: {cl.closing_type as string} | 상태: <span class="status-pill">{cl.workflow_status as string}</span></p>
+            <p style="margin-bottom:12px">유형: {CLOSING_TYPE_LABELS[cl.closing_type as string] || cl.closing_type as string} | 상태: <span class="status-pill">{WORKFLOW_LABELS[cl.workflow_status as string] || cl.workflow_status as string}</span></p>
 
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px">
               <div class="card" style="padding:12px;text-align:center">
