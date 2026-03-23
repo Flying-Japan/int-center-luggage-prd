@@ -17,6 +17,7 @@ function getSheetName(date: Date = new Date()): string {
 export interface RentalDailyRevenue {
   date: string; // YYYY-MM-DD format
   rentalRevenue: number; // yen amount
+  rentalCount: number; // number of rental orders
 }
 
 /**
@@ -48,19 +49,30 @@ function parseYen(raw: string): number {
 export async function fetchRentalDailyRevenue(
   credentials: string
 ): Promise<RentalDailyRevenue[]> {
-  // Fetch columns A and K (date and rental revenue)
   const sheetName = getSheetName();
-  const rows = await fetchSheetData(
-    credentials,
-    SPREADSHEET_ID,
-    `'${sheetName}'!A:K`
-  );
+
+  // Fetch daily revenue + rental order counts in parallel
+  const [dailyRows, rentalRows] = await Promise.all([
+    fetchSheetData(credentials, SPREADSHEET_ID, `'${sheetName}'!A:K`),
+    fetchSheetData(credentials, SPREADSHEET_ID, "'New Rental'!X:X"),
+  ]);
+
+  // Count rental orders per date from "New Rental" col X (결제(월/일))
+  const countMap = new Map<string, number>();
+  for (let i = 1; i < rentalRows.length; i++) {
+    const raw = rentalRows[i]?.[0];
+    if (!raw) continue;
+    // Format varies: "2026/03/01/日" or just a date string
+    const dateStr = parseSheetDate(raw);
+    if (!dateStr) continue;
+    countMap.set(dateStr, (countMap.get(dateStr) || 0) + 1);
+  }
 
   const results: RentalDailyRevenue[] = [];
 
   // Skip header rows (row 0 = header group, row 1 = column headers)
-  for (let i = 2; i < rows.length; i++) {
-    const row = rows[i];
+  for (let i = 2; i < dailyRows.length; i++) {
+    const row = dailyRows[i];
     if (!row || row.length === 0) continue;
 
     const dateStr = parseSheetDate(row[0] || "");
@@ -70,7 +82,11 @@ export async function fetchRentalDailyRevenue(
     const rentalRevenue = parseYen(row[10] || "");
     if (rentalRevenue === 0) continue;
 
-    results.push({ date: dateStr, rentalRevenue });
+    results.push({
+      date: dateStr,
+      rentalRevenue,
+      rentalCount: countMap.get(dateStr) || 0,
+    });
   }
 
   return results;

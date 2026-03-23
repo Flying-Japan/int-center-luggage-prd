@@ -84,17 +84,17 @@ admin.get("/staff/admin/sales", async (c) => {
       total: d.grand_total as number || 0,
     });
   }
-  const rentalMap = new Map<string, number>();
-  for (const r of rentalData) rentalMap.set(r.date, r.rentalRevenue);
+  const rentalMap = new Map<string, { revenue: number; count: number }>();
+  for (const r of rentalData) rentalMap.set(r.date, { revenue: r.rentalRevenue, count: r.rentalCount });
 
   // Collect all dates from both sources
   const allDates = [...new Set([...luggageMap.keys(), ...rentalMap.keys()])].sort().reverse();
   const dayCount = allDates.length || 1;
 
-  interface MergedRow { date: string; dateJP: string; orders: number; cash: number; qr: number; luggage: number; rental: number; combined: number; }
+  interface MergedRow { date: string; dateJP: string; orders: number; cash: number; qr: number; luggage: number; rental: number; rentalCount: number; combined: number; }
   const mergedRows: MergedRow[] = allDates.map(date => {
     const l = luggageMap.get(date) || { orders: 0, cash: 0, qr: 0, total: 0 };
-    const rental = rentalMap.get(date) || 0;
+    const rd = rentalMap.get(date) || { revenue: 0, count: 0 };
     const dow = DOW_JP[new Date(date + "T00:00:00+09:00").getDay()];
     return {
       date,
@@ -103,12 +103,14 @@ admin.get("/staff/admin/sales", async (c) => {
       cash: l.cash,
       qr: l.qr,
       luggage: l.total,
-      rental,
-      combined: l.total + rental,
+      rental: rd.revenue,
+      rentalCount: rd.count,
+      combined: l.total + rd.revenue,
     };
   });
   const totalLuggage = mergedRows.reduce((s, r) => s + r.luggage, 0);
   const totalRental = mergedRows.reduce((s, r) => s + r.rental, 0);
+  const totalRentalCount = mergedRows.reduce((s, r) => s + r.rentalCount, 0);
   const totalCombined = totalLuggage + totalRental;
 
   const staff = getStaff(c);
@@ -208,7 +210,7 @@ admin.get("/staff/admin/sales", async (c) => {
                 <td style="padding:4px 8px;text-align:right">{r.cash ? `¥${r.cash.toLocaleString()}` : "-"}</td>
                 <td style="padding:4px 8px;text-align:right">{r.qr ? `¥${r.qr.toLocaleString()}` : "-"}</td>
                 <td style="padding:4px 8px;text-align:right;color:#2383e2">{r.luggage ? `¥${r.luggage.toLocaleString()}` : "-"}</td>
-                <td style="padding:4px 8px;text-align:right;color:#12b886">{r.rental ? `¥${r.rental.toLocaleString()}` : "-"}</td>
+                <td style="padding:4px 8px;text-align:right;color:#12b886">{r.rental ? <><span>¥{r.rental.toLocaleString()}</span>{r.rentalCount > 0 && <span style="font-size:10px;color:#a5a5a3;margin-left:3px">({r.rentalCount})</span>}</> : "-"}</td>
                 <td style="padding:4px 8px;text-align:right;font-weight:600">¥{r.combined.toLocaleString()}</td>
                 <td style="padding:4px 8px;text-align:right;font-size:11px;color:#787774">{r.combined > 0 ? `${lPct}% / ${100 - lPct}%` : "-"}</td>
               </tr>
@@ -221,7 +223,7 @@ admin.get("/staff/admin/sales", async (c) => {
               <td style="padding:6px 8px;text-align:right">¥{s.total_cash?.toLocaleString()}</td>
               <td style="padding:6px 8px;text-align:right">¥{s.total_qr?.toLocaleString()}</td>
               <td style="padding:6px 8px;text-align:right;color:#2383e2">¥{totalLuggage.toLocaleString()}</td>
-              <td style="padding:6px 8px;text-align:right;color:#12b886">¥{totalRental.toLocaleString()}</td>
+              <td style="padding:6px 8px;text-align:right;color:#12b886">¥{totalRental.toLocaleString()}{totalRentalCount > 0 && <span style="font-size:10px;color:#a5a5a3;margin-left:3px">({totalRentalCount})</span>}</td>
               <td style="padding:6px 8px;text-align:right">¥{totalCombined.toLocaleString()}</td>
               <td style="padding:6px 8px;text-align:right;font-size:11px;color:#787774">{totalCombined > 0 ? `${Math.round(totalLuggage / totalCombined * 100)}% / ${Math.round(totalRental / totalCombined * 100)}%` : "-"}</td>
             </tr>
