@@ -1061,7 +1061,7 @@ code {
   padding: 12px;
 }
 
-.ops-item-unread { border-color: #ea5757; box-shadow: 0 0 0 1px rgba(234, 87, 87, 0.16); background: #fff9f9; }
+.ops-item-unread { border-color: var(--primary); box-shadow: 0 0 0 1px rgba(47, 128, 248, 0.16); background: var(--primary-soft); }
 
 .ops-item-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .ops-item-title { margin: 10px 0 6px; font-size: 15px; font-weight: 700; }
