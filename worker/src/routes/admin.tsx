@@ -78,7 +78,7 @@ admin.get("/staff/admin/sales", async (c) => {
   const successMsg = c.req.query("success");
   return c.html(
     <html lang="ko">
-      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>매출 분석</title></head>
+      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script><title>매출 분석</title></head>
       <body class="staff-site">
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/staff/dashboard"><img class="brand-logo" src="/static/logo-horizontal.png" alt="Flying Japan" width="24" height="24" /><span>Flying Japan Staff</span></a><nav class="pill-nav"><a class="pill-link" href="/staff/dashboard">대시보드</a><a class="pill-link pill-link-strong" href="/staff/admin/sales">매출관리</a><span class="pill-user">{staff.display_name || staff.username}</span><form method="post" action="/staff/logout" style="display:inline"><button type="submit" class="pill-link" style="background:none;border:none;cursor:pointer;padding:4px 10px;font:inherit;color:inherit">로그아웃</button></form></nav></div></header>
         <main class="container">
@@ -120,6 +120,20 @@ admin.get("/staff/admin/sales", async (c) => {
             <p class="stat-label">현금 / QR</p>
             <p class="stat-value stat-value--sm">¥{s.total_cash?.toLocaleString()} / ¥{s.total_qr?.toLocaleString()}</p>
           </div>
+        </div>
+
+        <div class="chart-row">
+          <section class="card" style="padding:16px">
+            <h3 class="card-title">일별 매출 추이</h3>
+            <div style="position:relative;height:280px"><canvas id="dailyChart"></canvas></div>
+          </section>
+          <section class="card" style="padding:16px">
+            <h3 class="card-title">결제 비율</h3>
+            <div style="position:relative;height:280px;display:flex;gap:16px">
+              <div style="flex:1"><canvas id="paymentChart"></canvas></div>
+              <div style="flex:1"><canvas id="revenueChart"></canvas></div>
+            </div>
+          </section>
         </div>
 
         <section class="card">
@@ -176,6 +190,69 @@ admin.get("/staff/admin/sales", async (c) => {
           </div>
         )}
         </section>
+        <script dangerouslySetInnerHTML={{__html: `(function(){
+  var dailyData = ${JSON.stringify(dailySales.results.slice().reverse().map((d: Record<string, unknown>) => ({
+    date: (d.sale_date as string || "").slice(5),
+    fullDate: d.sale_date as string || "",
+    cash: d.cash_total as number || 0,
+    qr: d.qr_total as number || 0,
+    total: d.grand_total as number || 0,
+  })))};
+  var rentalMap = ${JSON.stringify(Object.fromEntries(rentalData.map(r => [r.date, r.rentalRevenue])))};
+  var cashTotal = ${s.total_cash || 0};
+  var qrTotal = ${s.total_qr || 0};
+  var luggageTotal = ${s.total_revenue || 0};
+  var rentalSum = ${rentalTotal};
+
+  if(!dailyData.length){return;}
+  var labels = dailyData.map(function(d){return d.date;});
+  var defaults = Chart.defaults;
+  defaults.font.family = "'Pretendard','Noto Sans KR',sans-serif";
+  defaults.font.size = 11;
+  defaults.color = '#787774';
+
+  new Chart(document.getElementById('dailyChart'),{
+    type:'bar',
+    data:{
+      labels: labels,
+      datasets:[
+        {label:'짐보관',data:dailyData.map(function(d){return d.total;}),backgroundColor:'rgba(35,131,226,0.7)',borderRadius:3,barPercentage:0.7},
+        {label:'렌탈',data:dailyData.map(function(d){return rentalMap[d.fullDate]||0;}),backgroundColor:'rgba(18,184,134,0.7)',borderRadius:3,barPercentage:0.7}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'top',labels:{boxWidth:12,padding:8}},tooltip:{callbacks:{label:function(c){return c.dataset.label+': \\u00A5'+c.raw.toLocaleString();}}}},
+      scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,ticks:{callback:function(v){return '\\u00A5'+(v/1000)+'k';}},grid:{color:'#f0f0ee'}}}
+    }
+  });
+
+  new Chart(document.getElementById('paymentChart'),{
+    type:'doughnut',
+    data:{
+      labels:['\\uD604\\uAE08 (Cash)','QR'],
+      datasets:[{data:[cashTotal,qrTotal],backgroundColor:['rgba(35,131,226,0.8)','rgba(239,125,34,0.8)'],borderWidth:0,cutout:'65%'}]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom',labels:{boxWidth:10,padding:6,font:{size:11}}},
+        tooltip:{callbacks:{label:function(c){var t=cashTotal+qrTotal;var p=t?Math.round(c.raw/t*100):0;return c.label+': \\u00A5'+c.raw.toLocaleString()+' ('+p+'%)';}}}}
+    }
+  });
+
+  new Chart(document.getElementById('revenueChart'),{
+    type:'doughnut',
+    data:{
+      labels:['짐보관','렌탈'],
+      datasets:[{data:[luggageTotal,rentalSum],backgroundColor:['rgba(35,131,226,0.8)','rgba(18,184,134,0.8)'],borderWidth:0,cutout:'65%'}]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom',labels:{boxWidth:10,padding:6,font:{size:11}}},
+        tooltip:{callbacks:{label:function(c){var t=luggageTotal+rentalSum;var p=t?Math.round(c.raw/t*100):0;return c.label+': \\u00A5'+c.raw.toLocaleString()+' ('+p+'%)';}}}}
+    }
+  });
+})()`}} />
         </main>
       </body>
     </html>

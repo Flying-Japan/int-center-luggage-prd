@@ -1106,6 +1106,8 @@ code {
 
 /* ── Stat grid (admin sales) ── */
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 16px 0; }
+.chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+@media (max-width: 768px) { .chart-row { grid-template-columns: 1fr; } }
 .stat-card { padding: 12px; text-align: center; }
 .stat-card--highlight { background: #f0fdf4; border: 1px solid #86efac; }
 .stat-label { font-size: 11px; color: #787774; margin: 0; }
