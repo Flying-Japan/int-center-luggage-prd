@@ -6,7 +6,6 @@ import { Hono } from "hono";
 import type { AppType } from "../types";
 import { adminAuth, getStaff } from "../middleware/auth";
 import { createSupabaseAdmin } from "../lib/supabase";
-import { formatDateJST, nowJST } from "../services/storage";
 import { StaffMenu, StaffTopbar } from "../lib/components";
 import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
 
@@ -700,7 +699,6 @@ const ACTION_LABELS: Record<string, string> = {
 
 // GET /staff/admin/activity-logs — Audit log viewer
 admin.get("/staff/admin/activity-logs", async (c) => {
-  const today = formatDateJST(nowJST());
   const startDate = c.req.query("start_date") || "";
   const endDate = c.req.query("end_date") || "";
   const page = parseInt(c.req.query("page") || "1", 10);
@@ -717,8 +715,6 @@ admin.get("/staff/admin/activity-logs", async (c) => {
     dateFilter = " WHERE date(a.timestamp, '+9 hours') >= date('now', '-7 days')";
   }
 
-  const defaultStart = startDate || formatDateJST(new Date(Date.now() - 7 * 86400000));
-  const defaultEnd = endDate || today;
 
   // Fetch logs from D1 with pagination
   const [logs, countResult] = await Promise.all([
@@ -758,16 +754,32 @@ admin.get("/staff/admin/activity-logs", async (c) => {
         <StaffTopbar staff={staff} />
         <main class="container">
           <StaffMenu active="/staff/admin/activity-logs" role={staff.role} />
-        <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">활동 로그</h2></div></section>
+        <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">활동 로그</h2><p class="hero-desc">{totalCount.toLocaleString()}건</p></div></section>
 
-        <section class="card">
-          <form method="get" action="/staff/admin/activity-logs" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
-            <label class="field"><span class="field-label">시작일</span><input class="control" type="date" name="start_date" value={startDate || defaultStart} /></label>
-            <label class="field"><span class="field-label">종료일</span><input class="control" type="date" name="end_date" value={endDate || defaultEnd} /></label>
-            <button class="btn btn-primary" type="submit">조회</button>
-            <a class="btn btn-secondary" href="/staff/admin/activity-logs">초기화</a>
-          </form>
-        </section>
+        {(() => {
+          const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+          const todayStr = now.toISOString().slice(0, 10);
+          const presets = [
+            { label: "오늘", sd: todayStr, ed: todayStr },
+            { label: "최근 3일", sd: new Date(now.getTime() - 3 * 86400000).toISOString().slice(0, 10), ed: todayStr },
+            { label: "최근 7일", sd: new Date(now.getTime() - 7 * 86400000).toISOString().slice(0, 10), ed: todayStr },
+            { label: "최근 14일", sd: new Date(now.getTime() - 14 * 86400000).toISOString().slice(0, 10), ed: todayStr },
+            { label: "최근 30일", sd: new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10), ed: todayStr },
+          ];
+          const activePreset = presets.find(p => p.sd === startDate && p.ed === endDate);
+          const isDefault = !startDate && !endDate;
+          const displayLabel = activePreset ? activePreset.label : isDefault ? "최근 7일" : `${startDate} ~ ${endDate}`;
+          return (
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 12px">
+              {presets.map(p => {
+                const active = (p.sd === startDate && p.ed === endDate) || (isDefault && p.label === "최근 7일");
+                return <a class={`btn btn-sm${active ? " btn-primary" : " btn-secondary"}`} href={`/staff/admin/activity-logs?start_date=${p.sd}&end_date=${p.ed}`}>{p.label}</a>;
+              })}
+              {!isDefault && !activePreset && <span class="btn btn-sm btn-primary" style="cursor:default">{displayLabel}</span>}
+              {!isDefault && <a class="btn btn-sm btn-secondary" href="/staff/admin/activity-logs">초기화</a>}
+            </div>
+          );
+        })()}
 
         <section class="card">
         <div class="table-wrap">
