@@ -1547,7 +1547,7 @@ a { color: inherit; text-decoration: none; }
                   <p style="font-size:15px;font-weight:700;color:var(--text);margin:0" dangerouslySetInnerHTML={{__html: title
                     .replace(/(플라잉재팬만의 혜택|Flying Japan Exclusive Benefits|フライングジャパン限定特典)/g, '$1')
                   }} />
-                  <img src="/static/flying-pass-white.jpg" alt="Flying Pass White + EDION Coupon" style="width:100%;max-width:320px;margin:4px auto;border-radius:var(--radius-md);display:block" />
+                  <img src="/static/flying-pass-white.jpg" alt="Flying Pass White + EDION Coupon" style="width:100%;max-width:280px;margin:-4px auto -6px;border-radius:var(--radius-md);display:block" />
                   <p class="secondary-msg" style="margin:0" dangerouslySetInnerHTML={{__html: body
                     .replace(/\n/g, "<br/>")
                     .replace(/(최대 17% 할인!|up to 17% off|最大17%割引)/g, '<strong style="color:var(--primary)">$1</strong>')
