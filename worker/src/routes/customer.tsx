@@ -1612,19 +1612,12 @@ a { color: inherit; text-decoration: none; }
             </div>
           </div>
 
-          {/* Completion message */}
-          <div class="card" style="text-align:center; display: grid; gap: 16px;">
-            <p class="completion-msg">{primaryMsg}</p>
-            <hr style="border:none;border-top:1px solid var(--line);margin:0;" />
-            <p class="secondary-msg">{secondaryMsg}</p>
-          </div>
-
           {/* Rental suggestion */}
           {(() => {
             const rentalTitle: Record<string, string> = {
-              ko: "센터에서 대여도 가능해요!",
-              en: "Rentals available at our center!",
-              ja: "センターでレンタルもできます！",
+              ko: "편리한 여행을 위해 준비했어요 ✈️",
+              en: "We've prepared these for your trip ✈️",
+              ja: "快適な旅のためにご用意しました ✈️",
             };
             const rentalItems = [
               { emoji: "🎮", ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: "https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa" },
@@ -1648,6 +1641,13 @@ a { color: inherit; text-decoration: none; }
               </div>
             );
           })()}
+
+          {/* Completion message */}
+          <div class="card" style="text-align:center; display: grid; gap: 16px;">
+            <p class="completion-msg">{primaryMsg}</p>
+            <hr style="border:none;border-top:1px solid var(--line);margin:0;" />
+            <p class="secondary-msg">{secondaryMsg}</p>
+          </div>
 
         </main>
 
