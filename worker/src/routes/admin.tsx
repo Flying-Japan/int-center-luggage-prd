@@ -382,19 +382,24 @@ admin.get("/staff/admin/sales", async (c) => {
   // People chart
   var peopleVals = rows.map(function(r){return r.people;});
   var avgPeople = Math.round(peopleVals.reduce(function(a,b){return a+b;},0)/peopleVals.length);
+  var maxPeople = Math.max.apply(null,peopleVals);
+  var minPeople = Math.min.apply(null,peopleVals.filter(function(v){return v>0;}));
   new Chart(document.getElementById('peopleChart'),{
     type:'bar',
     data:{
       labels:labels,
       datasets:[
-        {label:'방문자 수',data:peopleVals,backgroundColor:'rgba(35,131,226,0.6)',borderRadius:3,barPercentage:0.65,datalabels:{display:false}},
-        {label:'평균 ('+avgPeople+'명)',data:peopleVals.map(function(){return avgPeople;}),type:'line',borderColor:'rgba(239,125,34,0.7)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,fill:false,datalabels:{display:false}}
+        {label:'방문자 수 · 来客数',data:peopleVals,backgroundColor:'rgba(35,131,226,0.6)',borderRadius:3,barPercentage:0.65,datalabels:{display:false}},
+        {label:'추세 · Trend',data:linReg(peopleVals),type:'line',borderColor:'rgba(234,67,53,0.6)',borderWidth:2,borderDash:[6,4],pointRadius:0,fill:false,datalabels:{display:false},spanGaps:true}
       ]
     },
     options:{
       responsive:true,maintainAspectRatio:false,
-      plugins:{legend:{position:'top',labels:{boxWidth:12,padding:12,usePointStyle:true,pointStyle:'circle'}},
-        tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+c.raw+'명';}}}},
+      plugins:{
+        legend:{position:'top',labels:{boxWidth:12,padding:12,usePointStyle:true,pointStyle:'circle'}},
+        tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+c.raw+'명';}}},
+        subtitle:{display:true,text:'평균 '+avgPeople+'명 · 최대 '+maxPeople+'명 · 최소 '+minPeople+'명',align:'end',font:{size:11,weight:'normal'},color:'#787774',padding:{bottom:8}}
+      },
       scales:{
         x:{grid:{display:false}},
         y:{ticks:{callback:function(v){return v+'명';}},grid:{color:'#f0f0ee'},beginAtZero:true}
