@@ -23,9 +23,9 @@ const SUCCESS_SECONDARY_MESSAGE_KEYS: Record<string, string> = {
 };
 
 export const DEFAULT_SUCCESS_PRIMARY_MESSAGES: Record<string, string> = {
-  ko: "짐보관신청서 작성이 완료 되었습니다.\n{amount} 금액 준비 해주시면, 순차적으로 성함 불러드리겠습니다.",
-  en: "Your luggage storage form has been completed.\nPlease prepare {amount}. We will call your name in order.",
-  ja: "手荷物保管申込書の作成が完了しました。\n{amount}をご用意ください。順番にお名前をお呼びします。",
+  ko: "짐보관신청서 작성이 완료 되었습니다.\n접수 된 순서대로 성함을 불러드리겠습니다.\n{amount} 금액 준비 해주시면 감사하겠습니다.\n(정확한 금액은 변동 될 수 있음)",
+  en: "Your luggage storage form has been completed.\nWe will call your name in the order received.\nPlease prepare {amount}.\n(The exact amount may vary.)",
+  ja: "手荷物保管申込書の作成が完了しました。\n受付順にお名前をお呼びします。\n{amount}をご用意ください。\n（正確な金額は変動する場合があります。）",
 };
 
 export const DEFAULT_SUCCESS_SECONDARY_MESSAGES: Record<string, string> = {

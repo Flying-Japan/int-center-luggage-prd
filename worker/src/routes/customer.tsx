@@ -1311,8 +1311,6 @@ customer.get("/customer/orders/:id", async (c) => {
     );
   }
 
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(order.order_id)}`;
-
   const completionMsgs = await loadCompletionMessages(c.env.DB);
   const finalAmountFormatted = `¥${order.final_amount.toLocaleString()}`;
   const primaryMsg = applyAmountTemplate(completionMsgs.primary[lang] ?? completionMsgs.primary["ko"], finalAmountFormatted);
@@ -1535,8 +1533,18 @@ a { color: inherit; text-decoration: none; }
             </div>
             <hr style="border:none;border-top:1px solid var(--line);margin:16px 0 12px" />
             <div style="text-align:center;display:grid;gap:14px">
-              <p class="completion-msg">{primaryMsg}</p>
-              <p class="secondary-msg">{secondaryMsg}</p>
+              <div class="completion-msg" dangerouslySetInnerHTML={{__html: primaryMsg
+                .replace(/\n/g, "<br/>")
+                .replace(/(¥[\d,]+)/g, '<strong style="color:var(--primary);font-size:110%">$1</strong>')
+                .replace(/(정확한 금액은 변동 될 수 있음|The exact amount may vary\.|正確な金額は変動する場合があります。)/g, '<span style="font-size:12px;color:var(--muted)">$1</span>')
+              }} />
+              <hr style="border:none;border-top:1px solid var(--line);margin:0" />
+              <div class="secondary-msg" dangerouslySetInnerHTML={{__html: secondaryMsg
+                .replace(/\n/g, "<br/>")
+                .replace(/(플라잉재팬만의 혜택|Flying Japan Exclusive Benefits|フライングジャパン限定特典)/g, '<strong style="font-size:15px;color:var(--text)">$1</strong>')
+                .replace(/(최대 17% 할인|up to 17% off|最大17%割引)/g, '<strong style="color:var(--primary)">$1</strong>')
+                .replace(/(플라잉 화이트패스|Flying White Pass|フライングホワイトパス)/g, '<strong>$1</strong>')
+              }} />
             </div>
           </div>
 
@@ -1643,15 +1651,6 @@ a { color: inherit; text-decoration: none; }
             </div>
           </div>
 
-          {/* QR Code */}
-          <div class="card">
-            <div class="qr-wrap">
-              <div class="qr-img-wrap">
-                <img src={qrUrl} alt={`QR: ${order.order_id}`} width="200" height="200" style="display:block;border-radius:8px;" />
-              </div>
-              <span class="qr-order-id">{order.order_id}</span>
-            </div>
-          </div>
 
 
         </main>
