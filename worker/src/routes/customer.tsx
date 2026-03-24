@@ -1531,12 +1531,12 @@ a { color: inherit; text-decoration: none; }
                 <span class="order-id-value">{order.order_id}</span>
               </div>
             </div>
-            <hr style="border:none;border-top:1px solid var(--line);margin:16px 0 12px" />
-            <div style="text-align:center;display:grid;gap:14px">
+            <div style="text-align:center;display:grid;gap:14px;padding-top:16px">
               <div class="completion-msg" dangerouslySetInnerHTML={{__html: primaryMsg
                 .replace(/\n/g, "<br/>")
-                .replace(/(¥[\d,]+)/g, '<strong style="color:var(--primary);font-size:110%">$1</strong>')
-                .replace(/(정확한 금액은 변동 될 수 있음|The exact amount may vary\.|正確な金額は変動する場合があります。)/g, '<span style="font-size:12px;color:var(--muted)">$1</span>')
+                .replace(/(접수 된 순서대로 성함을 불러드리겠습니다|We will call your name in the order received|受付順にお名前をお呼びします)/g, '<strong style="font-size:15px;color:var(--text)">$1</strong>')
+                .replace(/(¥[\d,]+)/g, '<strong style="color:var(--primary);font-size:115%">$1</strong>')
+                .replace(/(정확한 금액은 변동 될 수 있음|The exact amount may vary\.|正確な金額は変動する場合があります。)/g, '<span style="font-size:11px;color:var(--muted)">$1</span>')
               }} />
               <hr style="border:none;border-top:1px solid var(--line);margin:0" />
               <div class="secondary-msg" dangerouslySetInnerHTML={{__html: secondaryMsg
@@ -1569,9 +1569,9 @@ a { color: inherit; text-decoration: none; }
               { emoji: "🎫", ko: "플라잉패스 먹방패스", en: "Flying Food Pass", ja: "フライングフードパス", url: "https://mkt.shopping.naver.com/link/694123cd003f786e5c3c350e" },
             ];
             return (
-              <div class="card" style="padding:20px">
-                <h3 style="text-align:center;font-size:16px;font-weight:700;margin:0 0 4px;color:var(--text)">{rentalTitle[lang] || rentalTitle.ko}</h3>
-                <p style="text-align:center;font-size:12px;color:var(--muted);margin:0 0 16px">{rentalSub[lang] || rentalSub.ko}</p>
+              <div class="card" style="padding:20px;background:linear-gradient(135deg,rgba(234,242,255,0.9) 0%,rgba(255,255,255,0.95) 50%,rgba(234,242,255,0.9) 100%);border:1px solid rgba(47,128,248,0.15)">
+                <h3 style="text-align:center;font-size:17px;font-weight:800;margin:0 0 4px;color:var(--text)">{rentalTitle[lang] || rentalTitle.ko}</h3>
+                <p style="text-align:center;font-size:12px;color:var(--primary);margin:0 0 16px;font-weight:500">✨ {rentalSub[lang] || rentalSub.ko} ✨</p>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
                   {rentalItems.map(item => (
                     <a href={item.url} target="_blank" rel="noopener" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:var(--radius-md);border:1px solid var(--line);text-decoration:none;color:var(--text);transition:border-color .2s,box-shadow .2s;background:var(--surface)">
@@ -1643,11 +1643,15 @@ a { color: inherit; text-decoration: none; }
           <div class="card" style="padding: 16px 20px; display: grid; gap: 10px;">
             <div class="notice-row">
               <span class="notice-icon">🕐</span>
-              <p class="notice-muted">{t("pickup_note", lang)}</p>
+              <p class="notice-muted" dangerouslySetInnerHTML={{__html: t("pickup_note", lang)
+                .replace(/(09:00~21:00|09:00-21:00|09:00〜21:00)/g, '<strong style="color:var(--text)">$1</strong>')
+              }} />
             </div>
-            <div class="notice-row">
+            <div class="notice-row" style="background:rgba(239,125,34,0.06);border-radius:8px;padding:10px 12px">
               <span class="notice-icon">⚠️</span>
-              <p class="notice-warning">{t("pickup_late_warning", lang)}</p>
+              <p class="notice-warning" dangerouslySetInnerHTML={{__html: t("pickup_late_warning", lang)
+                .replace(/(추가 요금|additional charges|追加料金)/g, '<strong style="color:#dc2626">$1</strong>')
+              }} />
             </div>
           </div>
 
