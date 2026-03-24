@@ -153,6 +153,11 @@ admin.get("/staff/admin/sales", async (c) => {
           <div style="position:relative;height:320px"><canvas id="trendChart"></canvas></div>
         </section>
 
+        <section class="card" style="padding:16px">
+          <h3 class="card-title">일별 방문자 수</h3>
+          <div style="position:relative;height:200px"><canvas id="peopleChart"></canvas></div>
+        </section>
+
         <section class="card">
         <h3 class="card-title">일별 매출 상세</h3>
         <div style="overflow-x:auto">
@@ -298,7 +303,7 @@ admin.get("/staff/admin/sales", async (c) => {
     });
     renderCal();
   }
-  var rows = ${JSON.stringify(mergedRows.slice().reverse().map(r => ({ label: r.dateJP.slice(5), luggage: r.luggage, rental: r.rental, combined: r.combined })))};
+  var rows = ${JSON.stringify(mergedRows.slice().reverse().map(r => ({ label: r.dateJP.slice(5), luggage: r.luggage, rental: r.rental, combined: r.combined, people: r.orders })))};
 
   if(!rows.length){return;}
   var labels = rows.map(function(r){return r.label;});
@@ -364,6 +369,29 @@ admin.get("/staff/admin/sales", async (c) => {
       scales:{
         x:{grid:{display:false}},
         y:{ticks:{callback:function(v){return '\\u00A5'+v.toLocaleString();}},grid:{color:'#f0f0ee'},beginAtZero:true}
+      }
+    }
+  });
+
+  // People chart
+  var peopleVals = rows.map(function(r){return r.people;});
+  var avgPeople = Math.round(peopleVals.reduce(function(a,b){return a+b;},0)/peopleVals.length);
+  new Chart(document.getElementById('peopleChart'),{
+    type:'bar',
+    data:{
+      labels:labels,
+      datasets:[
+        {label:'방문자 수',data:peopleVals,backgroundColor:'rgba(35,131,226,0.6)',borderRadius:3,barPercentage:0.65,datalabels:{display:false}},
+        {label:'평균 ('+avgPeople+'명)',data:peopleVals.map(function(){return avgPeople;}),type:'line',borderColor:'rgba(239,125,34,0.7)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,fill:false,datalabels:{display:false}}
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'top',labels:{boxWidth:12,padding:12,usePointStyle:true,pointStyle:'circle'}},
+        tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+c.raw+'명';}}}},
+      scales:{
+        x:{grid:{display:false}},
+        y:{ticks:{callback:function(v){return v+'명';}},grid:{color:'#f0f0ee'},beginAtZero:true}
       }
     }
   });
