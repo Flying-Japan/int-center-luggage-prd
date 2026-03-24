@@ -1535,6 +1535,42 @@ a { color: inherit; text-decoration: none; }
             </div>
           </div>
 
+          {/* Rental suggestion */}
+          {(() => {
+            const rentalTitle: Record<string, string> = {
+              ko: "편리한 여행을 위해 준비했어요 ✈️",
+              en: "We've prepared these for your trip ✈️",
+              ja: "快適な旅のためにご用意しました ✈️",
+            };
+            const rentalSub: Record<string, string> = {
+              ko: "센터에서 바로 대여 가능한 렌탈 서비스",
+              en: "Rental services available right at our center",
+              ja: "センターですぐレンタルできるサービス",
+            };
+            const rentalItems = [
+              { emoji: "🎮", ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: "https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa" },
+              { emoji: "🪄", ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: "https://mkt.shopping.naver.com/link/68dce579a48a271c2018bb54" },
+              { emoji: "💇", ko: "다이슨 에어랩", en: "Dyson Airwrap", ja: "ダイソン エアラップ", url: "https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596" },
+              { emoji: "✨", ko: "다이슨 고데기", en: "Dyson Airstraight", ja: "ダイソン ストレートナー", url: "https://mkt.shopping.naver.com/link/6980349d3b9377397d436f46" },
+              { emoji: "👶", ko: "유모차 대여", en: "Stroller Rental", ja: "ベビーカーレンタル", url: "https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a" },
+              { emoji: "🎫", ko: "플라잉패스 먹방패스", en: "Flying Food Pass", ja: "フライングフードパス", url: "https://mkt.shopping.naver.com/link/694123cd003f786e5c3c350e" },
+            ];
+            return (
+              <div class="card" style="padding:20px">
+                <h3 style="text-align:center;font-size:16px;font-weight:700;margin:0 0 4px;color:var(--text)">{rentalTitle[lang] || rentalTitle.ko}</h3>
+                <p style="text-align:center;font-size:12px;color:var(--muted);margin:0 0 16px">{rentalSub[lang] || rentalSub.ko}</p>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+                  {rentalItems.map(item => (
+                    <a href={item.url} target="_blank" rel="noopener" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:var(--radius-md);border:1px solid var(--line);text-decoration:none;color:var(--text);transition:border-color .2s,box-shadow .2s;background:var(--surface)">
+                      <span style="font-size:28px">{item.emoji}</span>
+                      <span style="font-size:12px;font-weight:600;text-align:center;line-height:1.3">{lang === "en" ? item.en : lang === "ja" ? item.ja : item.ko}</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Order summary card */}
           <div class="card">
             <p class="summary-title">{summaryLabel[lang] || summaryLabel.ko}</p>
@@ -1618,42 +1654,6 @@ a { color: inherit; text-decoration: none; }
             <hr style="border:none;border-top:1px solid var(--line);margin:0;" />
             <p class="secondary-msg">{secondaryMsg}</p>
           </div>
-
-          {/* Rental suggestion */}
-          {(() => {
-            const rentalTitle: Record<string, string> = {
-              ko: "편리한 여행을 위해 준비했어요 ✈️",
-              en: "We've prepared these for your trip ✈️",
-              ja: "快適な旅のためにご用意しました ✈️",
-            };
-            const rentalSub: Record<string, string> = {
-              ko: "센터에서 바로 대여 가능한 렌탈 서비스",
-              en: "Rental services available right at our center",
-              ja: "センターですぐレンタルできるサービス",
-            };
-            const rentalItems = [
-              { emoji: "🎮", ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: "https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa" },
-              { emoji: "🪄", ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: "https://mkt.shopping.naver.com/link/68dce579a48a271c2018bb54" },
-              { emoji: "💇", ko: "다이슨 에어랩", en: "Dyson Airwrap", ja: "ダイソン エアラップ", url: "https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596" },
-              { emoji: "✨", ko: "다이슨 고데기", en: "Dyson Airstraight", ja: "ダイソン ストレートナー", url: "https://mkt.shopping.naver.com/link/6980349d3b9377397d436f46" },
-              { emoji: "👶", ko: "유모차 대여", en: "Stroller Rental", ja: "ベビーカーレンタル", url: "https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a" },
-              { emoji: "🎫", ko: "플라잉패스 먹방패스", en: "Flying Food Pass", ja: "フライングフードパス", url: "https://mkt.shopping.naver.com/link/694123cd003f786e5c3c350e" },
-            ];
-            return (
-              <div class="card" style="padding:20px">
-                <h3 style="text-align:center;font-size:16px;font-weight:700;margin:0 0 4px;color:var(--text)">{rentalTitle[lang] || rentalTitle.ko}</h3>
-                <p style="text-align:center;font-size:12px;color:var(--muted);margin:0 0 16px">{rentalSub[lang] || rentalSub.ko}</p>
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
-                  {rentalItems.map(item => (
-                    <a href={item.url} target="_blank" rel="noopener" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:var(--radius-md);border:1px solid var(--line);text-decoration:none;color:var(--text);transition:border-color .2s,box-shadow .2s;background:var(--surface)">
-                      <span style="font-size:28px">{item.emoji}</span>
-                      <span style="font-size:12px;font-weight:600;text-align:center;line-height:1.3">{lang === "en" ? item.en : lang === "ja" ? item.ja : item.ko}</span>
-                    </a>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
 
         </main>
 
