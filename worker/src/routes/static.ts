@@ -10,6 +10,17 @@ staticRoutes.get("/favicon.ico", (c) => {
 });
 
 // Serve logo from R2
+staticRoutes.get("/static/flying-pass-white.jpg", async (c) => {
+  const obj = await c.env.IMAGES.get("static/flying-pass-white.jpg");
+  if (!obj) return c.notFound();
+  return new Response(obj.body, {
+    headers: {
+      "Content-Type": "image/jpeg",
+      "Cache-Control": "public, max-age=86400",
+    },
+  });
+});
+
 staticRoutes.get("/static/logo-horizontal.png", async (c) => {
   const obj = await c.env.IMAGES.get("static/logo-horizontal.png");
   if (!obj) return c.notFound();

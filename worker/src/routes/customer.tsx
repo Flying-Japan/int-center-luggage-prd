@@ -1545,6 +1545,7 @@ a { color: inherit; text-decoration: none; }
                 .replace(/(최대 17% 할인|up to 17% off|最大17%割引)/g, '<strong style="color:var(--primary)">$1</strong>')
                 .replace(/(플라잉 화이트패스|Flying White Pass|フライングホワイトパス)/g, '<strong>$1</strong>')
               }} />
+              <img src="/static/flying-pass-white.jpg" alt="Flying Pass White + EDION Coupon" style="width:100%;max-width:360px;margin:8px auto 0;border-radius:var(--radius-md);display:block" />
             </div>
           </div>
 
