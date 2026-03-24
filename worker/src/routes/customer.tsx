@@ -1548,7 +1548,7 @@ a { color: inherit; text-decoration: none; }
             const body = lines.slice(1).join("\n");
             return (
               <div class="card" style="text-align:center;padding:16px 20px;display:grid;gap:8px">
-                <p style="font-size:16px;font-weight:700;color:var(--text);margin:0" dangerouslySetInnerHTML={{__html: title }} />
+                <p style="font-size:20px;font-weight:800;color:var(--text);margin:0;letter-spacing:-0.02em" dangerouslySetInnerHTML={{__html: title }} />
                 <p class="secondary-msg" style="margin:0;font-size:13px;line-height:1.6" dangerouslySetInnerHTML={{__html: body
                   .replace(/\n/g, "<br/>")
                   .replace(/(최대 17% 할인!|up to 17% off|最大17%割引)/g, '<strong style="color:var(--primary)">$1</strong>')
