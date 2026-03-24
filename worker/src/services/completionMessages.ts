@@ -29,9 +29,9 @@ export const DEFAULT_SUCCESS_PRIMARY_MESSAGES: Record<string, string> = {
 };
 
 export const DEFAULT_SUCCESS_SECONDARY_MESSAGES: Record<string, string> = {
-  ko: "플라잉재팬만의 혜택\n오사카 맛집 제휴할인되는 플라잉 화이트패스 증정!\n이건물 드럭스토어 에디온에서 플라잉패스 제시만 해도 최대 17% 할인되고,\n뒷면 QR코드로 오사카 제휴 맛집 리스트와 혜택도 확인 가능합니다!",
-  en: "Flying Japan Exclusive Benefits\nReceive the Flying White Pass with partner discounts at Osaka restaurants!\nShow the Flying Pass at EDION (drugstore in this building) for up to 17% off,\nand scan the QR code on the back to check Osaka partner restaurant lists and benefits!",
-  ja: "フライングジャパン限定特典\n大阪の提携飲食店で割引が受けられるフライングホワイトパスをプレゼント！\nこの建物内のドラッグストア・エディオンでフライングパスを提示すると最大17%割引、\n裏面QRコードで大阪の提携飲食店リストと特典も確認できます！",
+  ko: "플라잉재팬만의 혜택\n오사카 맛집 제휴할인되는\n플라잉 화이트패스 증정!\n이건물 드럭스토어 에디온에서\n플라잉패스 제시만 해도 최대 17% 할인!\n뒷면 QR코드로 오사카 제휴 맛집\n리스트와 혜택도 확인 가능합니다!",
+  en: "Flying Japan Exclusive Benefits\nReceive the Flying White Pass\nwith partner discounts at Osaka restaurants!\nShow the Flying Pass at EDION\nfor up to 17% off,\nand scan the QR code on the back\nto check partner restaurant lists and benefits!",
+  ja: "フライングジャパン限定特典\n大阪の提携飲食店で割引が受けられる\nフライングホワイトパスをプレゼント！\nエディオンでフライングパスを提示すると\n最大17%割引、\n裏面QRコードで大阪の提携飲食店\nリストと特典も確認できます！",
 };
 
 // ---------------------------------------------------------------------------
