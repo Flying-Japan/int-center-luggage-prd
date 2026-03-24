@@ -1670,4 +1670,26 @@ customer.get("/api/price-preview", (c) => {
   });
 });
 
+// Catch-all for /customer/* — return customer-friendly 404
+customer.all("/customer/*", (c) => {
+  const lang = normalizeLang(c.req.query("lang"));
+  const titles: Record<string, string> = { ko: "페이지를 찾을 수 없습니다", en: "Page not found", ja: "ページが見つかりません" };
+  const msgs: Record<string, string> = { ko: "요청하신 페이지가 존재하지 않습니다.", en: "The page you requested does not exist.", ja: "リクエストされたページは存在しません。" };
+  return c.html(
+    <html lang={lang}>
+      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>{titles[lang] || titles.ko}</title></head>
+      <body>
+        <div class="bg-orb bg-orb-left" /><div class="bg-orb bg-orb-right" />
+        <header class="topbar"><div class="topbar-inner"><a class="brand" href="/customer"><img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="36" /></a></div></header>
+        <main class="container" style="text-align:center;padding:60px 16px">
+          <h2 style="font-size:22px;margin-bottom:8px">{titles[lang] || titles.ko}</h2>
+          <p style="color:var(--muted);margin-bottom:24px">{msgs[lang] || msgs.ko}</p>
+          <a class="btn btn-primary" href="/customer">{lang === "ja" ? "受付フォームへ" : lang === "en" ? "Go to check-in form" : "접수 화면으로 이동"}</a>
+        </main>
+      </body>
+    </html>,
+    404
+  );
+});
+
 export default customer;
