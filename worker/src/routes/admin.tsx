@@ -165,24 +165,23 @@ admin.get("/staff/admin/sales", async (c) => {
             <th class="sales-th sales-th--right sales-td--luggage">Luggage</th>
             <th class="sales-th sales-th--right sales-td--rental">Rental</th>
             <th class="sales-th sales-th--right sales-td--bold">Luggage + Rental Daily</th>
-            <th class="sales-th sales-th--right">% (Luggage / Rental)</th>
           </tr></thead>
           <tbody>
           {mergedRows.length === 0 && (
-            <tr><td colspan={8} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
+            <tr><td colspan={7} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
           )}
           {mergedRows.map((r) => {
             const lPct = r.combined > 0 ? Math.round(r.luggage / r.combined * 100) : 0;
+            const rPct = r.combined > 0 ? 100 - lPct : 0;
             return (
               <tr style="border-bottom:1px solid var(--line)">
                 <td class="sales-td" style="white-space:nowrap">{r.dateJP}</td>
                 <td class="sales-td sales-td--right">{r.orders || "-"}</td>
                 <td class="sales-td sales-td--right">{r.cash ? `¥${r.cash.toLocaleString()}` : "-"}</td>
                 <td class="sales-td sales-td--right">{r.qr ? `¥${r.qr.toLocaleString()}` : "-"}</td>
-                <td class="sales-td sales-td--right sales-td--luggage">{r.luggage ? `¥${r.luggage.toLocaleString()}` : "-"}</td>
-                <td class="sales-td sales-td--right sales-td--rental">{r.rental ? `¥${r.rental.toLocaleString()}` : "-"}</td>
+                <td class="sales-td sales-td--right sales-td--luggage">{r.luggage ? <>{`¥${r.luggage.toLocaleString()}`} <span class="sales-td--muted">({lPct}%)</span></> : "-"}</td>
+                <td class="sales-td sales-td--right sales-td--rental">{r.rental ? <>{`¥${r.rental.toLocaleString()}`} <span class="sales-td--muted">({rPct}%)</span></> : "-"}</td>
                 <td class="sales-td sales-td--right sales-td--bold">¥{r.combined.toLocaleString()}</td>
-                <td class="sales-td sales-td--right sales-td--muted">{r.combined > 0 ? `${lPct}% / ${100 - lPct}%` : "-"}</td>
               </tr>
             );
           })}
@@ -192,10 +191,9 @@ admin.get("/staff/admin/sales", async (c) => {
               <td class="sales-td sales-td--right">{totalPeople.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{totalCash.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{totalQr.toLocaleString()}</td>
-              <td class="sales-td sales-td--right sales-td--luggage">¥{totalLuggage.toLocaleString()}</td>
-              <td class="sales-td sales-td--right sales-td--rental">¥{totalRental.toLocaleString()}</td>
+              <td class="sales-td sales-td--right sales-td--luggage">¥{totalLuggage.toLocaleString()} <span class="sales-td--muted">({totalCombined > 0 ? Math.round(totalLuggage / totalCombined * 100) : 0}%)</span></td>
+              <td class="sales-td sales-td--right sales-td--rental">¥{totalRental.toLocaleString()} <span class="sales-td--muted">({totalCombined > 0 ? Math.round(totalRental / totalCombined * 100) : 0}%)</span></td>
               <td class="sales-td sales-td--right">¥{totalCombined.toLocaleString()}</td>
-              <td class="sales-td sales-td--right sales-td--muted">{totalCombined > 0 ? `${Math.round(totalLuggage / totalCombined * 100)}% / ${Math.round(totalRental / totalCombined * 100)}%` : "-"}</td>
             </tr>
             <tr class="sales-avg-row">
               <td class="sales-td">Daily Avg</td>
@@ -205,7 +203,6 @@ admin.get("/staff/admin/sales", async (c) => {
               <td class="sales-td sales-td--right sales-td--luggage">¥{Math.round(totalLuggage / dayCount).toLocaleString()}</td>
               <td class="sales-td sales-td--right sales-td--rental">¥{Math.round(totalRental / dayCount).toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{Math.round(totalCombined / dayCount).toLocaleString()}</td>
-              <td class="sales-td sales-td--right sales-td--muted">{totalCombined > 0 ? `${Math.round(totalLuggage / totalCombined * 100)}% / ${Math.round(totalRental / totalCombined * 100)}%` : "-"}</td>
             </tr>
             {minMax && (<>
             <tr class="sales-max-row">
@@ -216,7 +213,6 @@ admin.get("/staff/admin/sales", async (c) => {
               <td class="sales-td sales-td--right">¥{minMax.luggage.max.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.rental.max.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.combined.max.toLocaleString()}</td>
-              <td></td>
             </tr>
             <tr class="sales-min-row">
               <td class="sales-td">Min</td>
@@ -226,7 +222,6 @@ admin.get("/staff/admin/sales", async (c) => {
               <td class="sales-td sales-td--right">¥{minMax.luggage.min.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.rental.min.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.combined.min.toLocaleString()}</td>
-              <td></td>
             </tr>
             </>)}
           </>)}
