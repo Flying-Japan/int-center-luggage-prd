@@ -121,32 +121,38 @@ admin.get("/staff/admin/sales", async (c) => {
           );
         })()}
 
+        {(() => {
+          const cashPct = totalCombined > 0 ? Math.round(totalCash / (totalCash + totalQr) * 100) : 0;
+          const qrPct = 100 - cashPct;
+          return (
         <div class="stat-grid">
           <div class="card stat-card">
-            <p class="stat-label">짐보관 매출</p>
+            <p class="stat-label">짐보관 매출 · 手荷物預かり</p>
             <p class="stat-value">¥{totalLuggage.toLocaleString()}</p>
           </div>
           <div class="card stat-card">
-            <p class="stat-label">렌탈 매출</p>
+            <p class="stat-label">렌탈 매출 · レンタル</p>
             <p class="stat-value">¥{totalRental.toLocaleString()}</p>
           </div>
           <div class="card stat-card stat-card--highlight">
-            <p class="stat-label stat-label--highlight">합계 (짐보관 + 렌탈)</p>
+            <p class="stat-label stat-label--highlight">합계 · 合計</p>
             <p class="stat-value stat-value--highlight">¥{totalCombined.toLocaleString()}</p>
           </div>
           <div class="card stat-card">
-            <p class="stat-label">총고객수</p>
+            <p class="stat-label">총고객수 · 来客数</p>
             <p class="stat-value">{totalPeople.toLocaleString()}명</p>
           </div>
           <div class="card stat-card">
-            <p class="stat-label">일평균</p>
+            <p class="stat-label">일평균 · 日平均</p>
             <p class="stat-value">¥{Math.round(totalCombined / dayCount).toLocaleString()}</p>
           </div>
           <div class="card stat-card">
-            <p class="stat-label">현금 / QR</p>
-            <p class="stat-value stat-value--sm">¥{totalCash.toLocaleString()} / ¥{totalQr.toLocaleString()}</p>
+            <p class="stat-label">현금 · QR</p>
+            <p class="stat-value stat-value--sm">¥{totalCash.toLocaleString()} <span class="sales-td--muted">({cashPct}%)</span> / ¥{totalQr.toLocaleString()} <span class="sales-td--muted">({qrPct}%)</span></p>
           </div>
         </div>
+          );
+        })()}
 
         <section class="card" style="padding:16px">
           <h3 class="card-title">일별 매출 추이</h3>
