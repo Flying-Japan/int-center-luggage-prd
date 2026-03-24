@@ -1612,12 +1612,24 @@ a { color: inherit; text-decoration: none; }
             </div>
           </div>
 
+          {/* Completion message */}
+          <div class="card" style="text-align:center; display: grid; gap: 16px;">
+            <p class="completion-msg">{primaryMsg}</p>
+            <hr style="border:none;border-top:1px solid var(--line);margin:0;" />
+            <p class="secondary-msg">{secondaryMsg}</p>
+          </div>
+
           {/* Rental suggestion */}
           {(() => {
             const rentalTitle: Record<string, string> = {
               ko: "편리한 여행을 위해 준비했어요 ✈️",
               en: "We've prepared these for your trip ✈️",
               ja: "快適な旅のためにご用意しました ✈️",
+            };
+            const rentalSub: Record<string, string> = {
+              ko: "센터에서 바로 대여 가능한 렌탈 서비스",
+              en: "Rental services available right at our center",
+              ja: "センターですぐレンタルできるサービス",
             };
             const rentalItems = [
               { emoji: "🎮", ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: "https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa" },
@@ -1629,7 +1641,8 @@ a { color: inherit; text-decoration: none; }
             ];
             return (
               <div class="card" style="padding:20px">
-                <h3 style="text-align:center;font-size:16px;font-weight:700;margin:0 0 16px;color:var(--text)">{rentalTitle[lang] || rentalTitle.ko}</h3>
+                <h3 style="text-align:center;font-size:16px;font-weight:700;margin:0 0 4px;color:var(--text)">{rentalTitle[lang] || rentalTitle.ko}</h3>
+                <p style="text-align:center;font-size:12px;color:var(--muted);margin:0 0 16px">{rentalSub[lang] || rentalSub.ko}</p>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
                   {rentalItems.map(item => (
                     <a href={item.url} target="_blank" rel="noopener" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:var(--radius-md);border:1px solid var(--line);text-decoration:none;color:var(--text);transition:border-color .2s,box-shadow .2s;background:var(--surface)">
@@ -1641,13 +1654,6 @@ a { color: inherit; text-decoration: none; }
               </div>
             );
           })()}
-
-          {/* Completion message */}
-          <div class="card" style="text-align:center; display: grid; gap: 16px;">
-            <p class="completion-msg">{primaryMsg}</p>
-            <hr style="border:none;border-top:1px solid var(--line);margin:0;" />
-            <p class="secondary-msg">{secondaryMsg}</p>
-          </div>
 
         </main>
 
