@@ -68,7 +68,7 @@ admin.get("/staff/admin/sales", async (c) => {
   const successMsg = c.req.query("success");
   return c.html(
     <html lang="ko">
-      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script><title>매출 분석</title></head>
+      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script><script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2/dist/chartjs-plugin-datalabels.min.js"></script><title>매출 분석</title></head>
       <body class="staff-site">
         <StaffTopbar staff={staff} />
         <main class="container">
@@ -331,17 +331,24 @@ admin.get("/staff/admin/sales", async (c) => {
     return vals.map(function(_,i){return i>=first&&i<=last?Math.round(m*i+b):null;});
   }
 
+  // Compute percentages for labels
+  var luggagePcts = luggageVals.map(function(_,i){var c=combinedVals[i];return c>0?Math.round(luggageVals[i]/c*100):0;});
+  var rentalPcts = rentalVals.map(function(_,i){var c=combinedVals[i];return c>0?Math.round(rentalVals[i]/c*100):0;});
+
+  Chart.register(ChartDataLabels);
   new Chart(document.getElementById('trendChart'),{
     type:'line',
     data:{
       labels: labels,
       datasets:[
-        {label:'짐보관 (Luggage)',data:luggageVals,borderColor:'#4285F4',backgroundColor:'rgba(66,133,244,0.08)',pointBackgroundColor:'#4285F4',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false},
-        {label:'Luggage Trend',data:linReg(luggageVals),borderColor:'rgba(66,133,244,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true},
-        {label:'렌탈 (Rental)',data:rentalVals,borderColor:'#EA4335',backgroundColor:'rgba(234,67,53,0.08)',pointBackgroundColor:'#EA4335',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false},
-        {label:'Rental Trend',data:linReg(rentalVals),borderColor:'rgba(234,67,53,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true},
-        {label:'합계 (Combined)',data:combinedVals,borderColor:'#FBBC05',backgroundColor:'rgba(251,188,5,0.08)',pointBackgroundColor:'#FBBC05',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false},
-        {label:'Combined Trend',data:linReg(combinedVals),borderColor:'rgba(251,188,5,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true}
+        {label:'짐보관 (Luggage)',data:luggageVals,borderColor:'#4285F4',backgroundColor:'rgba(66,133,244,0.08)',pointBackgroundColor:'#4285F4',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false,
+          datalabels:{align:'top',color:'#4285F4',font:{size:9,weight:'bold'},formatter:function(_,ctx){return luggagePcts[ctx.dataIndex]+'%';}}},
+        {label:'Luggage Trend',data:linReg(luggageVals),borderColor:'rgba(66,133,244,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true,datalabels:{display:false}},
+        {label:'렌탈 (Rental)',data:rentalVals,borderColor:'#EA4335',backgroundColor:'rgba(234,67,53,0.08)',pointBackgroundColor:'#EA4335',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false,
+          datalabels:{align:'bottom',color:'#EA4335',font:{size:9,weight:'bold'},formatter:function(_,ctx){return rentalPcts[ctx.dataIndex]+'%';}}},
+        {label:'Rental Trend',data:linReg(rentalVals),borderColor:'rgba(234,67,53,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true,datalabels:{display:false}},
+        {label:'합계 (Combined)',data:combinedVals,borderColor:'#FBBC05',backgroundColor:'rgba(251,188,5,0.08)',pointBackgroundColor:'#FBBC05',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false,datalabels:{display:false}},
+        {label:'Combined Trend',data:linReg(combinedVals),borderColor:'rgba(251,188,5,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true,datalabels:{display:false}}
       ]
     },
     options:{
@@ -351,7 +358,13 @@ admin.get("/staff/admin/sales", async (c) => {
         legend:{position:'top',labels:{boxWidth:12,padding:16,usePointStyle:true,pointStyle:'circle',
           filter:function(item){return item.text.indexOf('Trend')===-1;}}},
         tooltip:{filter:function(item){return item.dataset.label.indexOf('Trend')===-1;},
-          callbacks:{label:function(c){return c.dataset.label+': \\u00A5'+c.raw.toLocaleString();}}}
+          callbacks:{label:function(c){
+            var val='\\u00A5'+c.raw.toLocaleString();
+            var idx=c.dataIndex;
+            if(c.datasetIndex===0)val+=' ('+luggagePcts[idx]+'%)';
+            if(c.datasetIndex===2)val+=' ('+rentalPcts[idx]+'%)';
+            return c.dataset.label+': '+val;
+          }}}
       },
       scales:{
         x:{grid:{display:false}},
