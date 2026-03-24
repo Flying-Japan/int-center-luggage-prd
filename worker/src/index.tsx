@@ -163,11 +163,11 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     <input class="status-filter-input" type="checkbox" name="status_filter" value="CANCELLED" checked={statusFilters.includes("CANCELLED")} />
                     <span>취소 ({counts.cancelled_count})</span>
                   </label>
+                  <label class="status-filter-chip">
+                    <input class="status-filter-input" type="checkbox" name="show_all_picked_up" value="true" checked={showAllPickedUp} />
+                    <span>수령완료 전체보기</span>
+                  </label>
                 </div>
-                <label class="status-filter-chip" style="margin-left:8px">
-                  <input class="status-filter-input" type="checkbox" name="show_all_picked_up" value="true" checked={showAllPickedUp} />
-                  <span>수령완료 전체보기</span>
-                </label>
               </div>
 
               <div class="staff-search-row">

@@ -1089,7 +1089,7 @@ code {
 .cash-denom-grid {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 104px));
+  grid-template-columns: repeat(10, minmax(0, 1fr));
   justify-content: flex-start;
 }
 
