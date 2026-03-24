@@ -532,13 +532,14 @@ form { margin-top: 16px; }
               </div>
 
               {/* Rental banner 1 — USJ */}
-              <div style="background:linear-gradient(135deg,#eef3fb,#f5f9ff);border:1px solid var(--line);border-radius:var(--radius-md);padding:12px 16px;display:flex;align-items:center;gap:12px;margin:4px 0">
+              <a href="https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa" target="_blank" rel="noopener" style="background:linear-gradient(135deg,#eef3fb,#f5f9ff);border:1px solid var(--line);border-radius:var(--radius-md);padding:12px 16px;display:flex;align-items:center;gap:12px;margin:4px 0;text-decoration:none;color:inherit;transition:border-color .2s,box-shadow .2s">
                 <span style="font-size:24px">🎢</span>
-                <div>
+                <div style="flex:1">
                   <p style="font-size:13px;font-weight:600;color:var(--text);margin:0">{lang === "ja" ? "USJに行きますか？" : lang === "en" ? "Going to Universal Studios?" : "유니버셜 스튜디오 가시나요?"}</p>
                   <p style="font-size:11px;color:var(--muted);margin:2px 0 0">{lang === "ja" ? "マリオバンド・杖レンタル可能" : lang === "en" ? "Mario Band & Wand rentals available" : "마리오밴드 · 해리포터 지팡이 대여 가능"}</p>
                 </div>
-              </div>
+                <span style="font-size:14px;color:var(--primary)">→</span>
+              </a>
 
               {/* bag quantities */}
               <div class="grid2">
@@ -607,13 +608,14 @@ form { margin-top: 16px; }
               </div>
 
               {/* Rental banner 2 — Dyson */}
-              <div style="background:linear-gradient(135deg,#fff5f5,#fff9f5);border:1px solid #fde8d8;border-radius:var(--radius-md);padding:12px 16px;display:flex;align-items:center;gap:12px;margin:4px 0">
+              <a href="https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596" target="_blank" rel="noopener" style="background:linear-gradient(135deg,#fff5f5,#fff9f5);border:1px solid #fde8d8;border-radius:var(--radius-md);padding:12px 16px;display:flex;align-items:center;gap:12px;margin:4px 0;text-decoration:none;color:inherit;transition:border-color .2s,box-shadow .2s">
                 <span style="font-size:24px">💇</span>
-                <div>
+                <div style="flex:1">
                   <p style="font-size:13px;font-weight:600;color:var(--text);margin:0">{lang === "ja" ? "ダイソンレンタルできます" : lang === "en" ? "Dyson rentals available!" : "다이슨 에어랩 · 고데기 대여 가능!"}</p>
                   <p style="font-size:11px;color:var(--muted);margin:2px 0 0">{lang === "ja" ? "エアラップ・ストレートナーをセンターで" : lang === "en" ? "Airwrap & Straightener at our center" : "센터에서 바로 대여하세요"}</p>
                 </div>
-              </div>
+                <span style="font-size:14px;color:var(--primary)">→</span>
+              </a>
 
               {/* price preview */}
               <div class="preview preview-with-options" id="price-preview" aria-live="polite">
