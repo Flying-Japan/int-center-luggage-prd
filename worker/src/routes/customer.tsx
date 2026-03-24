@@ -1538,25 +1538,26 @@ a { color: inherit; text-decoration: none; }
                 .replace(/(¥[\d,]+)/g, '<strong style="color:var(--primary);font-size:115%">$1</strong>')
                 .replace(/(정확한 금액은 변동 될 수 있음|The exact amount may vary\.|正確な金額は変動する場合があります。)/g, '<span style="font-size:11px;color:var(--muted)">$1</span>')
               }} />
-              <hr style="border:none;border-top:1px solid var(--line);margin:0" />
-              {(() => {
-                const lines = secondaryMsg.split("\n");
-                const title = lines[0] || "";
-                const body = lines.slice(1).join("\n");
-                return (<>
-                  <p style="font-size:15px;font-weight:700;color:var(--text);margin:0" dangerouslySetInnerHTML={{__html: title
-                    .replace(/(플라잉재팬만의 혜택|Flying Japan Exclusive Benefits|フライングジャパン限定特典)/g, '$1')
-                  }} />
-                  <img src="/static/flying-pass-white.jpg" alt="Flying Pass White + EDION Coupon" style="width:100%;max-width:280px;margin:-4px auto -6px;border-radius:var(--radius-md);display:block" />
-                  <p class="secondary-msg" style="margin:0" dangerouslySetInnerHTML={{__html: body
-                    .replace(/\n/g, "<br/>")
-                    .replace(/(최대 17% 할인!|up to 17% off|最大17%割引)/g, '<strong style="color:var(--primary)">$1</strong>')
-                    .replace(/(플라잉 화이트패스|Flying White Pass|フライングホワイトパス)/g, '<strong>$1</strong>')
-                  }} />
-                </>);
-              })()}
             </div>
           </div>
+
+          {/* Benefits card — separate */}
+          {(() => {
+            const lines = secondaryMsg.split("\n");
+            const title = lines[0] || "";
+            const body = lines.slice(1).join("\n");
+            return (
+              <div class="card" style="text-align:center;padding:16px 20px;display:grid;gap:8px">
+                <p style="font-size:16px;font-weight:700;color:var(--text);margin:0" dangerouslySetInnerHTML={{__html: title }} />
+                <p class="secondary-msg" style="margin:0;font-size:13px;line-height:1.6" dangerouslySetInnerHTML={{__html: body
+                  .replace(/\n/g, "<br/>")
+                  .replace(/(최대 17% 할인!|up to 17% off|最大17%割引)/g, '<strong style="color:var(--primary)">$1</strong>')
+                  .replace(/(플라잉 화이트패스|Flying White Pass|フライングホワイトパス)/g, '<strong>$1</strong>')
+                }} />
+                <img src="/static/flying-pass-white.jpg" alt="Flying Pass White + EDION Coupon" style="width:100%;max-width:260px;margin:2px auto 0;display:block" />
+              </div>
+            );
+          })()}
 
           {/* Rental suggestion */}
           {(() => {
