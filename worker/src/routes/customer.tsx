@@ -1533,6 +1533,12 @@ a { color: inherit; text-decoration: none; }
                 <span class="order-id-value">{order.order_id}</span>
               </div>
             </div>
+            <hr style="border:none;border-top:1px solid var(--line);margin:12px 0" />
+            <div style="text-align:center;display:grid;gap:12px">
+              <p class="completion-msg">{primaryMsg}</p>
+              <hr style="border:none;border-top:1px solid var(--line);margin:0" />
+              <p class="secondary-msg">{secondaryMsg}</p>
+            </div>
           </div>
 
           {/* Rental suggestion */}
@@ -1648,12 +1654,6 @@ a { color: inherit; text-decoration: none; }
             </div>
           </div>
 
-          {/* Completion message */}
-          <div class="card" style="text-align:center; display: grid; gap: 16px;">
-            <p class="completion-msg">{primaryMsg}</p>
-            <hr style="border:none;border-top:1px solid var(--line);margin:0;" />
-            <p class="secondary-msg">{secondaryMsg}</p>
-          </div>
 
         </main>
 
