@@ -1095,7 +1095,7 @@ code {
 
 .cash-denom-item { margin: 0; display: grid; gap: 6px; justify-items: start; }
 .cash-denom-item span { font-size: 12px; color: #53637a; font-weight: 700; }
-.cash-denom-item .control { width: 88px; min-width: 88px; max-width: 88px; text-align: right; }
+.cash-denom-item .control { width: 100%; min-width: 0; text-align: right; }
 
 /* ── Account management ── */
 .account-list { margin-top: 12px; display: grid; gap: 10px; }
