@@ -20,6 +20,7 @@ export async function createBugTask(
       name: title,
       notes: description,
       projects: [projectGid],
+      assignee: "1211465522953332",
     },
   };
 
