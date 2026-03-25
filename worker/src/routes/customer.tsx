@@ -191,7 +191,7 @@ customer.get("/customer", (c) => {
   --shadow-lg: 0 22px 52px rgba(39, 103, 209, 0.2);
 }
 *, *::before, *::after { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; width: 100%; }
+html, body { margin: 0; padding: 0; width: 100%; overflow-x: hidden; }
 body {
   position: relative;
   font-family: "Pretendard", "Noto Sans KR", "Noto Sans JP", sans-serif;
@@ -1414,7 +1414,7 @@ customer.get("/customer/orders/:id", async (c) => {
   --shadow-lg: 0 22px 52px rgba(39,103,209,0.18);
 }
 *, *::before, *::after { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; width: 100%; }
+html, body { margin: 0; padding: 0; width: 100%; overflow-x: hidden; }
 body {
   position: relative;
   font-family: "Pretendard", "Noto Sans KR", "Noto Sans JP", sans-serif;
