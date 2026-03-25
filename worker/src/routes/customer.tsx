@@ -1201,37 +1201,69 @@ form { margin-top: 16px; }
     else{phoneInput.value=v.slice(0,3)+'-'+v.slice(3,7)+'-'+v.slice(7,11);}
   });}
 
-  /* submit */
+  /* submit validation */
+  var validationAttempts=0;
+  var validationBanner=null;
+
+  function getValidationMissing(){
+    var nEl=formEl.querySelector('[name="name"]');
+    var pEl=formEl.querySelector('[name="phone"]');
+    var eEl=formEl.querySelector('[name="email"]');
+    var iEl=formEl.querySelector('[name="id_image"]');
+    var lEl=formEl.querySelector('[name="luggage_image"]');
+    var cEl=formEl.querySelector('[name="consent_checked"]');
+    var m=[];
+    if(!nEl||!nEl.value.trim())m.push({el:nEl,msg:'${lang === "ja" ? "お名前" : lang === "en" ? "Name" : "이름"}'});
+    if(!pEl||!pEl.value.trim())m.push({el:pEl,msg:'${lang === "ja" ? "電話番号" : lang === "en" ? "Phone" : "전화번호"}'});
+    if(!eEl||!eEl.value.trim()||!eEl.value.includes('@'))m.push({el:eEl,msg:'${lang === "ja" ? "メール" : lang === "en" ? "Email" : "이메일"}'});
+    if(iEl&&!iEl.files.length)m.push({el:iEl,msg:'${lang === "ja" ? "身分証写真" : lang === "en" ? "ID Photo" : "신분증 사진"}'});
+    if(lEl&&!lEl.files.length)m.push({el:lEl,msg:'${lang === "ja" ? "荷物写真" : lang === "en" ? "Luggage Photo" : "짐 사진"}'});
+    if(cEl&&!cEl.checked)m.push({el:cEl,msg:'${lang === "ja" ? "同意" : lang === "en" ? "Consent" : "유의사항 동의"}'});
+    return m;
+  }
+
+  function showValidationBanner(missing){
+    if(validationBanner)validationBanner.remove();
+    var names=missing.map(function(m){return m.msg;}).join(' · ');
+    var div=document.createElement('div');
+    div.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:9999;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;padding:12px 20px;border-radius:12px;font-size:13px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,0.15);max-width:90%;text-align:center;animation:riseIn 0.3s ease';
+    var title=document.createElement('p');
+    title.style.cssText='margin:0;font-weight:700';
+    title.textContent='${ lang === "ja" ? "⚠️ 未入力の項目があります" : lang === "en" ? "⚠️ Please fill in the missing fields" : "⚠️ 아직 입력되지 않은 항목이 있어요"}';
+    var detail=document.createElement('p');
+    detail.style.cssText='margin:4px 0 0;font-size:12px';
+    detail.textContent=names;
+    div.appendChild(title);
+    div.appendChild(detail);
+    document.body.appendChild(div);
+    validationBanner=div;
+    setTimeout(function(){if(validationBanner===div){div.remove();validationBanner=null;}},5000);
+  }
+
+  formEl.addEventListener('input',function(e){
+    var f=e.target.closest('.field');if(f)f.classList.remove('field-error');
+    if(validationBanner){validationBanner.remove();validationBanner=null;}
+  });
+  formEl.addEventListener('change',function(e){
+    var f=e.target.closest('.field')||e.target.closest('.check-row');if(f)f.classList.remove('field-error');
+  });
+
   formEl.addEventListener("submit", async function(event){
     event.preventDefault();
     if (isSubmitting) return;
 
-    // Validate required fields with specific messages
-    var nameEl=formEl.querySelector('[name="name"]');
-    var phoneEl=formEl.querySelector('[name="phone"]');
-    var emailEl=formEl.querySelector('[name="email"]');
-    var idImgEl=formEl.querySelector('[name="id_image"]');
-    var lugImgEl=formEl.querySelector('[name="luggage_image"]');
-    var consentEl=formEl.querySelector('[name="consent_checked"]');
-
-    // Clear previous highlights
     formEl.querySelectorAll('.field-error').forEach(function(el){el.classList.remove('field-error');});
-
-    var missing=[];
-    if(!nameEl||!nameEl.value.trim()){missing.push({el:nameEl,msg:'${lang === "ja" ? "お名前" : lang === "en" ? "Name" : "이름"}'});};
-    if(!phoneEl||!phoneEl.value.trim()){missing.push({el:phoneEl,msg:'${lang === "ja" ? "電話番号" : lang === "en" ? "Phone" : "전화번호"}'});};
-    if(!emailEl||!emailEl.value.trim()||!emailEl.value.includes('@')){missing.push({el:emailEl,msg:'${lang === "ja" ? "メール" : lang === "en" ? "Email" : "이메일"}'});};
-    if(idImgEl&&!idImgEl.files.length){missing.push({el:idImgEl,msg:'${lang === "ja" ? "身分証写真" : lang === "en" ? "ID Photo" : "신분증 사진"}'});};
-    if(lugImgEl&&!lugImgEl.files.length){missing.push({el:lugImgEl,msg:'${lang === "ja" ? "荷物写真" : lang === "en" ? "Luggage Photo" : "짐 사진"}'});};
-    if(consentEl&&!consentEl.checked){missing.push({el:consentEl,msg:'${lang === "ja" ? "同意" : lang === "en" ? "Consent" : "유의사항 동의"}'});};
+    var missing=getValidationMissing();
 
     if(missing.length>0){
-      var names=missing.map(function(m){return m.msg;}).join(', ');
-      window.alert('${lang === "ja" ? "以下の項目を入力してください" : lang === "en" ? "Please fill in the following" : "다음 항목을 입력해주세요"}:\\n'+names);
+      validationAttempts++;
       missing.forEach(function(m){if(m.el){var f=m.el.closest('.field')||m.el.closest('.check-row');if(f)f.classList.add('field-error');}});
-      if(missing[0].el)missing[0].el.focus();
+      showValidationBanner(missing);
+      missing[0].el.scrollIntoView({behavior:'smooth',block:'center'});
+      if(validationAttempts===1)missing[0].el.focus();
       return;
     }
+    validationAttempts=0;
 
     syncPickupHiddenValue();
     var bagValid = syncBagQuantities();
