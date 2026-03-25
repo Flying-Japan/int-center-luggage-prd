@@ -1312,7 +1312,11 @@ customer.post("/customer/submit", async (c) => {
   if (!expectedPickupAt) return redirect(t("required", lang) + ": " + t("expected_pickup", lang));
   if (!consentChecked) return redirect(t("consent_label", lang));
 
-  const pickupDate = new Date(expectedPickupAt);
+  // Form sends JST time as "YYYY-MM-DDTHH:MM" — append +09:00 so JS treats it as JST
+  const pickupDateStr = expectedPickupAt.includes("+") || expectedPickupAt.includes("Z")
+    ? expectedPickupAt
+    : expectedPickupAt + ":00+09:00";
+  const pickupDate = new Date(pickupDateStr);
   if (isNaN(pickupDate.getTime())) {
     return redirect(t("error", lang));
   }
