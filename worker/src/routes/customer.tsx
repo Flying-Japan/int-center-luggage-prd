@@ -462,7 +462,6 @@ form { margin-top: 16px; }
   .notice-list li { margin-bottom: 6px; }
   .grid2 { grid-template-columns: 1fr; }
   .pickup-time-grid { grid-template-columns: 1fr 1fr; }
-  .pickup-time-grid .control { max-width: 100%; overflow: hidden; }
   .preview-with-options { grid-template-columns: 1fr; }
   .preview-head { font-size: 12px; }
   .preview-value { font-size: 28px; }
@@ -619,17 +618,40 @@ form { margin-top: 16px; }
               </div>
 
               {/* pickup date + time */}
-              <div class="pickup-time-grid">
-                <label class="field">
-                  <span class="field-label">{pickupDateLabel[lang] || pickupDateLabel.ko}</span>
-                  <input id="expected_pickup_date" class="control" type="date" required />
-                </label>
-
-                <label class="field">
-                  <span class="field-label">{pickupTimeLabel[lang] || pickupTimeLabel.ko}</span>
-                  <select id="expected_pickup_time" class="control" required></select>
-                </label>
-              </div>
+              {(() => {
+                const DOW_SHORT: Record<string, string[]> = {
+                  ko: ["일", "월", "화", "수", "목", "금", "토"],
+                  en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+                  ja: ["日", "月", "火", "水", "木", "金", "土"],
+                };
+                const dow = DOW_SHORT[lang] || DOW_SHORT.ko;
+                const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+                const dates: { value: string; label: string }[] = [];
+                for (let i = 0; i < 14; i++) {
+                  const d = new Date(now.getTime() + i * 86400000);
+                  const y = d.getUTCFullYear();
+                  const m = d.getUTCMonth() + 1;
+                  const day = d.getUTCDate();
+                  const value = `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                  const dayOfWeek = dow[d.getUTCDay()];
+                  const todayLabel = i === 0 ? (lang === "en" ? " (Today)" : lang === "ja" ? " (今日)" : " (오늘)") : "";
+                  dates.push({ value, label: `${m}/${day} (${dayOfWeek})${todayLabel}` });
+                }
+                return (
+                  <div class="pickup-time-grid">
+                    <label class="field">
+                      <span class="field-label">{pickupDateLabel[lang] || pickupDateLabel.ko}</span>
+                      <select id="expected_pickup_date" class="control" required>
+                        {dates.map(d => <option value={d.value}>{d.label}</option>)}
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span class="field-label">{pickupTimeLabel[lang] || pickupTimeLabel.ko}</span>
+                      <select id="expected_pickup_time" class="control" required></select>
+                    </label>
+                  </div>
+                );
+              })()}
 
               <div class="pickup-guide">
                 <p>{pickupFlexNote[lang] || pickupFlexNote.ko}</p>
