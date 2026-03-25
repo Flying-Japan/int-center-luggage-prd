@@ -101,7 +101,7 @@ export async function sendOrderConfirmation(
     <!-- KakaoTalk -->
     <div style="padding:16px 24px;background:#f7f7f5;text-align:center;border-top:1px solid #f0f0ee">
       <p style="margin:0;font-size:12px;color:#787774">${lang === "ja" ? "お問い合わせ" : lang === "en" ? "Questions?" : "문의사항이 있으시면"}</p>
-      <a href="https://pf.kakao.com/_haUIC" style="display:inline-block;margin-top:8px;padding:8px 20px;background:#FEE500;color:#3C1E1E;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none">💬 KakaoTalk</a>
+      <a href="https://pf.kakao.com/_Nrxbcj" style="display:inline-block;margin-top:8px;padding:8px 20px;background:#FEE500;color:#3C1E1E;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none">💬 KakaoTalk</a>
     </div>
 
     <!-- Footer -->
