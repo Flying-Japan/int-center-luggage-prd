@@ -438,8 +438,8 @@ form { margin-top: 16px; }
   .brand img { height: 28px !important; }
   .topbar-actions { gap: 6px; }
   .lang-switcher { gap: 2px; }
-  .lang-btn { padding: 8px 12px; font-size: 11px; min-height: 44px; display: inline-flex; align-items: center; }
-  .receipt-link { padding: 8px 12px; font-size: 11px; min-height: 44px; display: inline-flex; align-items: center; }
+  .lang-btn { padding: 7px 11px; font-size: 11px; }
+  .receipt-link { padding: 7px 11px; font-size: 11px; }
   .container { padding: 0 10px; gap: 12px; margin: 12px auto 28px; }
   .hero-title { font-size: 22px; }
   .hero-desc { font-size: 13px; }
