@@ -434,6 +434,11 @@ form { margin-top: 16px; }
   to { opacity: 1; transform: translateY(0); }
 }
 @media (max-width: 640px) {
+  .container { padding: 0 10px; gap: 12px; margin: 16px auto 32px; }
+  .card { padding: 16px 14px; border-radius: var(--radius-lg); }
+  .card-title { font-size: 18px; }
+  .notice-panel { padding: 12px; }
+  .notice-list { padding-left: 14px; font-size: 12px; }
   .grid2 { grid-template-columns: 1fr; }
   .pickup-time-grid { grid-template-columns: 1fr 1fr; }
   .preview-with-options { grid-template-columns: 1fr; }
