@@ -454,7 +454,7 @@ form { margin-top: 16px; }
   .notice-list { padding-left: 14px; font-size: 12px; line-height: 1.5; }
   .notice-list li { margin-bottom: 6px; }
   .grid2 { grid-template-columns: 1fr; }
-  .pickup-time-grid { grid-template-columns: 1fr 1fr; }
+  .pickup-time-grid { grid-template-columns: 1fr; }
   .preview-with-options { grid-template-columns: 1fr; }
   .preview-head { font-size: 12px; }
   .preview-value { font-size: 28px; }
