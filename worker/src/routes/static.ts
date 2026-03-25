@@ -945,6 +945,7 @@ tr.is-in-warehouse { border-left: 3px solid #94a3b8; }
 .price-popover label { display: flex; flex-direction: column; gap: 2px; font-weight: 600; font-size: 12px; color: #787774; }
 .price-popover select, .price-popover input[type="number"] { padding: 5px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
 .price-popover .btn-row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+.price-cell { overflow: visible !important; }
 
 /* ── Summary grid ── */
 .summary-grid {
@@ -1466,7 +1467,7 @@ body.staff-site .table-wrap {
   box-shadow: var(--shadow-sm);
   margin-top: 8px;
   min-height: 420px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 body.staff-site table { background: transparent; }
