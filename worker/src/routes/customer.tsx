@@ -1415,14 +1415,16 @@ customer.post("/customer/submit", async (c) => {
     return redirect(t("upload_error", lang));
   }
 
-  // Send confirmation email (best-effort, don't block redirect)
+  // Send confirmation email (best-effort, keep worker alive via waitUntil)
   if (email && c.env.BREVO_API_KEY) {
-    sendOrderConfirmation(c.env.BREVO_API_KEY, {
-      orderId, name, email, phone,
-      suitcaseQty, backpackQty,
-      expectedPickupAt, expectedStorageDays: storageDays,
-      finalAmount: finalPrepaid, lang,
-    }).catch(() => {});
+    c.executionCtx.waitUntil(
+      sendOrderConfirmation(c.env.BREVO_API_KEY, {
+        orderId, name, email, phone,
+        suitcaseQty, backpackQty,
+        expectedPickupAt, expectedStorageDays: storageDays,
+        finalAmount: finalPrepaid, lang,
+      }).catch((err) => console.error("Email send failed:", err))
+    );
   }
 
   return c.redirect(`/customer/orders/${orderId}?lang=${lang}`);
