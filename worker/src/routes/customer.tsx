@@ -1867,7 +1867,10 @@ customer.get("/api/price-preview", (c) => {
   const expectedPickupAtRaw = c.req.query("expected_pickup_at") || "";
   const flyingPassTier = normalizeFlyingPassTier(c.req.query("flying_pass_tier"));
 
-  const pickupDate = new Date(expectedPickupAtRaw);
+  const pickupStr = expectedPickupAtRaw.includes("+") || expectedPickupAtRaw.includes("Z")
+    ? expectedPickupAtRaw
+    : expectedPickupAtRaw + ":00+09:00";
+  const pickupDate = new Date(pickupStr);
   if (isNaN(pickupDate.getTime())) {
     return c.json({ error: "invalid expected_pickup_at" }, 400);
   }
