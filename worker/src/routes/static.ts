@@ -946,7 +946,7 @@ tr.is-in-warehouse { border-left: 3px solid #94a3b8; }
 .price-popover select, .price-popover input[type="number"] { padding: 5px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
 .price-popover .btn-row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .price-cell { overflow: visible !important; }
-.thumb { width: 100%; max-width: 100%; height: auto; border-radius: 8px; display: block; }
+.thumb { width: 100%; max-width: 100%; max-height: 300px; object-fit: contain; border-radius: 8px; display: block; background: #f7f7f5; }
 .muted { color: var(--muted); font-size: 13px; }
 
 /* ── Summary grid ── */
@@ -979,10 +979,12 @@ tr.is-in-warehouse { border-left: 3px solid #94a3b8; }
 }
 
 .detail-action-box {
-  border: 1px solid #e1e9f7;
-  border-radius: 16px;
-  background: #f9fbff;
-  padding: 14px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
 }
 
 .detail-action-title { margin: 0; font-size: 16px; font-weight: 700; }
