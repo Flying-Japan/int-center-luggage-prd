@@ -715,12 +715,12 @@ form { margin-top: 16px; }
                     <span class="field-label">{t("payment_method_label", lang)}</span>
                     <div class="payment-toggle">
                       <label class="payment-chip">
-                        <input type="radio" name="payment_method" value="PAY_QR" checked />
-                        <span>{t("payment_method_pay_qr", lang)}</span>
+                        <input type="radio" name="payment_method" value="CASH" checked />
+                        <span>{t("payment_method_cash", lang)}</span>
                       </label>
                       <label class="payment-chip">
-                        <input type="radio" name="payment_method" value="CASH" />
-                        <span>{t("payment_method_cash", lang)}</span>
+                        <input type="radio" name="payment_method" value="PAY_QR" />
+                        <span>{t("payment_method_pay_qr", lang)}</span>
                       </label>
                     </div>
                     <div style="margin-top:6px;padding:8px 10px;background:#fef2f2;border-radius:6px;font-size:11px;line-height:1.5">
@@ -1468,7 +1468,7 @@ customer.get("/customer/orders/:id", async (c) => {
             expected_pickup_at, expected_storage_days,
             price_per_day, discount_rate, prepaid_amount,
             flying_pass_tier, flying_pass_discount_amount, final_amount,
-            status, created_at
+            payment_method, status, created_at
      FROM luggage_orders WHERE order_id = ?`
   )
     .bind(orderId)
@@ -1486,6 +1486,7 @@ customer.get("/customer/orders/:id", async (c) => {
       flying_pass_tier: string;
       flying_pass_discount_amount: number;
       final_amount: number;
+      payment_method: string | null;
       status: string;
       created_at: string;
     }>();
@@ -1731,6 +1732,12 @@ a { color: inherit; text-decoration: none; }
                 <p style="margin:0;font-size:12px;font-weight:700;color:#dc2626">{lang === "ja" ? "⚠️ クレジットカード・デビットカード不可" : lang === "en" ? "⚠️ Credit/debit cards NOT accepted" : "⚠️ 신용카드/체크카드 결제 불가"}</p>
                 <p style="margin:4px 0 0;font-size:11px;font-weight:600;color:#166534;line-height:1.6">{lang === "ja" ? "✅ 現金 / PayPay / 楽天Pay" : lang === "en" ? "✅ Cash / KakaoPay / NaverPay" : "✅ 현금 / 카카오페이 / 네이버페이"}<br/>{lang === "ja" ? "d払い / auPay / メルペイ" : lang === "en" ? "TossPay / PayPay" : "토스페이 / PayPay"}</p>
               </div>
+              {order.payment_method === "PAY_QR" && (
+                <div style="margin-top:8px;text-align:center">
+                  <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:var(--text)">{lang === "ja" ? "📱 QR決済方法" : lang === "en" ? "📱 QR Payment Guide" : "📱 QR결제 방법 안내"}</p>
+                  <img src="/static/qr-payment-guide.jpg" alt="QR Payment Guide" style="width:100%;max-width:480px;border-radius:8px;display:block;margin:0 auto" />
+                </div>
+              )}
             </div>
           </div>
 
