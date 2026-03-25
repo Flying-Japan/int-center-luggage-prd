@@ -226,7 +226,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       </td>
                       <td data-col-key="tag_no"><span class={`editable tag-pill ${tagColorClass(o.tag_no)}`} data-field="tag_no" data-order-id={o.order_id}>{o.tag_no || "-"}</span></td>
                       <td data-col-key="created_time">{o.created_at ? new Date(o.created_at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
-                      <td data-col-key="price" class="price-cell" data-order-id={o.order_id} data-tier={o.flying_pass_tier || "NONE"} data-method={o.payment_method || "CASH"} style="cursor:pointer;position:relative"><span class="price-display">{`¥${o.prepaid_amount}`}</span></td>
+                      <td data-col-key="price" class="price-cell" data-order-id={o.order_id} data-tier={o.flying_pass_tier || "NONE"} data-method={o.payment_method || "CASH"} style="cursor:pointer;position:relative"><span class="price-display">{`¥${o.prepaid_amount.toLocaleString()}`}</span></td>
                       <td data-col-key="pickup_time"><span class="editable" data-field="expected_pickup_at" data-order-id={o.order_id} data-type="datetime-local" data-raw-value={o.expected_pickup_at ? new Date(new Date(o.expected_pickup_at).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16) : ""}>{o.expected_pickup_at ? new Date(o.expected_pickup_at).toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</span></td>
                       <td data-col-key="pay_status"><span class={`status-pill ${o.status === "PAID" || o.status === "PICKED_UP" ? "status-paid" : o.status === "CANCELLED" ? "status-cancelled" : "status-payment_pending"}`}>{o.status === "PAID" || o.status === "PICKED_UP" ? "결제완료" : o.status === "CANCELLED" ? "취소" : "결제대기"}</span></td>
                       <td data-col-key="pickup_status"><span class={`status-pill ${o.status === "PICKED_UP" ? "status-picked_up" : o.status === "CANCELLED" ? "status-cancelled" : "status-payment_pending"}`}>{o.status === "PICKED_UP" ? "수령완료" : o.status === "CANCELLED" ? "취소" : "미수령"}</span></td>
@@ -449,13 +449,15 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   '<label>Flying Pass<select name="tier"><option value="NONE"'+(tier==='NONE'?' selected':'')+'>없음</option><option value="BLUE"'+(tier==='BLUE'?' selected':'')+'>블루 (¥100)</option><option value="SILVER"'+(tier==='SILVER'?' selected':'')+'>실버 (¥200)</option><option value="GOLD"'+(tier==='GOLD'?' selected':'')+'>골드 (¥300)</option><option value="PLATINUM"'+(tier==='PLATINUM'?' selected':'')+'>플래티넘 (¥400)</option><option value="BLACK"'+(tier==='BLACK'?' selected':'')+'>블랙 (무료)</option></select></label>'+
                   '<label>직접입력 (¥)<input type="number" name="override" min="0" step="100" placeholder="자동계산"></label>'+
                   '<div class="btn-row"><button class="btn btn-secondary btn-sm" data-pop-cancel>취소</button><button class="btn btn-primary btn-sm" data-pop-save>저장</button></div>';
-                cell.appendChild(pop);
-                // Flip upward if popover extends below viewport
-                var rect=pop.getBoundingClientRect();
-                if(rect.bottom>window.innerHeight-20){
-                  pop.style.bottom='100%';pop.style.top='auto';pop.style.marginBottom='4px';
+                document.body.appendChild(pop);
+                // Position fixed relative to cell
+                var cellRect=cell.getBoundingClientRect();
+                if(cellRect.bottom+250>window.innerHeight){
+                  pop.style.bottom=(window.innerHeight-cellRect.top+4)+'px';
+                  pop.style.left=cellRect.left+'px';
                 }else{
-                  pop.style.top='100%';pop.style.bottom='auto';pop.style.marginTop='4px';
+                  pop.style.top=(cellRect.bottom+4)+'px';
+                  pop.style.left=cellRect.left+'px';
                 }
                 activePopover={pop:pop,cell:cell};
 
@@ -470,7 +472,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     cell.dataset.tier=d.flying_pass_tier;
                     cell.dataset.method=d.payment_method;
                     closePopover();
-                    var pd=cell.querySelector('.price-display');if(pd)pd.textContent='¥'+d.prepaid_amount;
+                    var pd=cell.querySelector('.price-display');if(pd)pd.textContent='¥'+Number(d.prepaid_amount).toLocaleString();
                   });
                 });
               });

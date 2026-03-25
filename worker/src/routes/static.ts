@@ -941,7 +941,7 @@ tr.is-in-warehouse { border-left: 3px solid #94a3b8; }
 .extension-badge { display: inline-block; background: #a78bfa; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
 
 /* ── Price popover ── */
-.price-popover { position: absolute; z-index: 999; background: #fff; border: 1px solid #dbe4f2; border-radius: 8px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); display: flex; flex-direction: column; gap: 8px; min-width: 220px; font-size: 13px; left: 0; }
+.price-popover { position: fixed; z-index: 9999; background: #fff; border: 1px solid #dbe4f2; border-radius: 8px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); display: flex; flex-direction: column; gap: 8px; min-width: 220px; font-size: 13px; }
 .price-popover label { display: flex; flex-direction: column; gap: 2px; font-weight: 600; font-size: 12px; color: #787774; }
 .price-popover select, .price-popover input[type="number"] { padding: 5px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
 .price-popover .btn-row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
