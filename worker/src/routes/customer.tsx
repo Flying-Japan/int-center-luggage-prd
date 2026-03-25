@@ -434,14 +434,31 @@ form { margin-top: 16px; }
   to { opacity: 1; transform: translateY(0); }
 }
 @media (max-width: 640px) {
-  .container { padding: 0 10px; gap: 12px; margin: 16px auto 32px; }
-  .card { padding: 16px 14px; border-radius: var(--radius-lg); }
-  .card-title { font-size: 18px; }
-  .notice-panel { padding: 12px; }
-  .notice-list { padding-left: 14px; font-size: 12px; }
+  .topbar-inner { padding: 10px 12px; gap: 8px; }
+  .brand img { height: 28px !important; }
+  .topbar-actions { gap: 6px; }
+  .lang-btn { padding: 5px 10px; font-size: 11px; }
+  .receipt-link { padding: 5px 10px; font-size: 11px; }
+  .container { padding: 0 10px; gap: 12px; margin: 12px auto 28px; }
+  .hero-title { font-size: 22px; }
+  .hero-desc { font-size: 13px; }
+  .card { padding: 14px 12px; border-radius: 16px; }
+  .card-primary { padding: 16px 14px; }
+  .card-title { font-size: 17px; }
+  .card-desc { font-size: 13px; }
+  .field-label { font-size: 12px; }
+  .control { font-size: 14px; padding: 10px 12px; min-height: 40px; }
+  .notice-card .card-title { font-size: 16px; }
+  .notice-panel { padding: 10px 12px; border-radius: 10px; }
+  .notice-panel h4 { font-size: 13px; }
+  .notice-list { padding-left: 14px; font-size: 12px; line-height: 1.5; }
+  .notice-list li { margin-bottom: 6px; }
   .grid2 { grid-template-columns: 1fr; }
   .pickup-time-grid { grid-template-columns: 1fr 1fr; }
   .preview-with-options { grid-template-columns: 1fr; }
+  .preview-head { font-size: 12px; }
+  .preview-value { font-size: 28px; }
+  .submit-dock { padding: 12px; }
 }
         `}} />
       </head>
