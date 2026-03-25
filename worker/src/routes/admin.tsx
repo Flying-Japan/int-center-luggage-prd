@@ -4,13 +4,19 @@
  */
 import { Hono } from "hono";
 import type { AppType } from "../types";
-import { adminAuth, getStaff } from "../middleware/auth";
+import { adminAuth, editorAuth, getStaff } from "../middleware/auth";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { StaffMenu, StaffTopbar } from "../lib/components";
 import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
 
 const admin = new Hono<AppType>();
-admin.use("/*", adminAuth);
+admin.use("/staff/admin/sales/*", editorAuth);
+admin.use("/staff/admin/sales", editorAuth);
+admin.use("/staff/admin/completion-message*", editorAuth);
+admin.use("/staff/admin/staff-accounts*", adminAuth);
+admin.use("/staff/admin/activity-logs*", adminAuth);
+admin.use("/staff/admin/retention*", adminAuth);
+admin.use("/staff/admin/extensions*", adminAuth);
 
 // GET /staff/admin/sales — Sales analytics
 admin.get("/staff/admin/sales", async (c) => {
@@ -446,21 +452,24 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
     const initial = name[0].toUpperCase();
     const isMe = a.id === staff.id;
     const isActive = a.is_active as boolean;
-    const isAdmin = (a.role as string) === "admin";
+    const role = a.role as string;
     const created = a.created_at ? new Date(a.created_at as string).toISOString().slice(0, 10) : "-";
+    const badgeClass = role === "admin" ? " acct-badge--admin" : "";
+    const badgeLabel = role === "admin" ? "관리자" : role === "editor" ? "편집자" : "뷰어";
+    const avatarClass = role === "admin" ? " acct-avatar--admin" : "";
 
     return (<>
       <tr class={`acct-row${!isActive ? " acct-row--dim" : ""}`}>
         <td class="acct-td">
           <div class="acct-name-cell">
-            <span class={`acct-avatar${isAdmin ? " acct-avatar--admin" : ""}`}>{initial}</span>
+            <span class={`acct-avatar${avatarClass}`}>{initial}</span>
             <div>
               <span class="acct-name">{name}{isMe && <span class="acct-me">나</span>}</span>
               <span class="acct-email">{(a.username as string) || (a.email as string) || ""}</span>
             </div>
           </div>
         </td>
-        <td class="acct-td"><span class={`acct-badge${isAdmin ? " acct-badge--admin" : ""}`}>{isAdmin ? "관리자" : "직원"}</span></td>
+        <td class="acct-td"><span class={`acct-badge${badgeClass}`}>{badgeLabel}</span></td>
         <td class="acct-td"><span class={`acct-status${isActive ? " acct-status--on" : " acct-status--off"}`}>{isActive ? "활성" : "잠금"}</span></td>
         <td class="acct-td acct-td--date">{created}</td>
         <td class="acct-td acct-td--actions">
@@ -488,7 +497,8 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
               <label class="field"><span class="field-label">표시 이름</span><input class="control" type="text" name="display_name" value={(a.display_name as string) || ""} required /></label>
               <label class="field"><span class="field-label">권한</span>
                 <select class="control" name="role">
-                  <option value="editor" selected={(a.role as string) !== "admin"}>직원</option>
+                  <option value="viewer" selected={(a.role as string) === "viewer"}>뷰어</option>
+                  <option value="editor" selected={(a.role as string) === "editor"}>편집자</option>
                   <option value="admin" selected={(a.role as string) === "admin"}>관리자</option>
                 </select>
               </label>
@@ -536,7 +546,8 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
               </label>
               <label class="field"><span class="field-label">권한</span>
                 <select class="control" name="role">
-                  <option value="editor" selected>직원</option>
+                  <option value="viewer">뷰어</option>
+                  <option value="editor" selected>편집자</option>
                   <option value="admin">관리자</option>
                 </select>
               </label>
@@ -631,6 +642,9 @@ admin.post("/staff/admin/staff-accounts", async (c) => {
   const password = String(body.password || "").trim();
   const displayName = String(body.display_name || "").trim();
   const role = String(body.role || "editor");
+  if (!["admin", "editor", "viewer"].includes(role)) {
+    return c.redirect("/staff/admin/staff-accounts?error=" + encodeURIComponent("잘못된 역할입니다."));
+  }
 
   if (!rawEmail || !password || !displayName) {
     return c.redirect("/staff/admin/staff-accounts?error=" + encodeURIComponent("모든 항목을 입력해주세요."));

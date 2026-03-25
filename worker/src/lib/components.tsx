@@ -27,16 +27,19 @@ export const StaffMenu: FC<{ active: string; role: string }> = ({ active, role }
     { href: "/staff/schedule", label: "스케줄" },
     { href: "/staff/bug-report", label: "버그신고" },
   ];
-  const adminLinks = [
+  const editorLinks = [
     { href: "/staff/admin/sales", label: "매출관리" },
+    { href: "/staff/admin/completion-message", label: "완료메시지" },
+  ];
+  const adminOnlyLinks = [
     { href: "/staff/admin/staff-accounts", label: "계정관리" },
     { href: "/staff/admin/activity-logs", label: "활동로그" },
-    { href: "/staff/admin/completion-message", label: "완료메시지" },
   ];
   return (
     <nav class="staff-menu" aria-label="직원 메뉴">
       {links.map(l => <a class={`staff-menu-link${l.href === active ? " is-active" : ""}`} href={l.href}>{l.label}</a>)}
-      {(role === "admin" || role === "editor") && adminLinks.map(l => <a class={`staff-menu-link${l.href === active ? " is-active" : ""}`} href={l.href}>{l.label}</a>)}
+      {(role === "admin" || role === "editor") && editorLinks.map(l => <a class={`staff-menu-link${l.href === active ? " is-active" : ""}`} href={l.href}>{l.label}</a>)}
+      {role === "admin" && adminOnlyLinks.map(l => <a class={`staff-menu-link${l.href === active ? " is-active" : ""}`} href={l.href}>{l.label}</a>)}
     </nav>
   );
 };

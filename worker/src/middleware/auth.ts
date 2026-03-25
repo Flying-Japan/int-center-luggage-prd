@@ -167,8 +167,23 @@ export async function adminAuth(c: AppContext, next: Next) {
   if (!staff) {
     return c.redirect("/staff/login");
   }
-  if (staff.role !== "admin" && staff.role !== "editor") {
+  if (staff.role !== "admin") {
     return c.json({ error: "Admin only" }, 403);
+  }
+  if (!existing) {
+    c.set("staff", staff);
+  }
+  await next();
+}
+
+export async function editorAuth(c: AppContext, next: Next) {
+  const existing = c.get("staff") as StaffUser | undefined;
+  const staff = existing ?? (await getCurrentStaff(c));
+  if (!staff) {
+    return c.redirect("/staff/login");
+  }
+  if (staff.role !== "admin" && staff.role !== "editor") {
+    return c.json({ error: "Editor or Admin required" }, 403);
   }
   if (!existing) {
     c.set("staff", staff);

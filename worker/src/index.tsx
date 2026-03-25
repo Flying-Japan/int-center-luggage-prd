@@ -135,7 +135,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             <div>
               <p class="hero-kicker">Operations</p>
               <h2 class="hero-title">직원 대시보드</h2>
-              <p class="hero-desc">{staff.display_name || staff.username} ({staff.role === "admin" ? "ADMIN" : "STAFF"}) · 전체 {counts.total_count}건</p>
+              <p class="hero-desc">{staff.display_name || staff.username} ({staff.role === "admin" ? "ADMIN" : staff.role === "editor" ? "EDITOR" : "VIEWER"}) · 전체 {counts.total_count}건</p>
             </div>
           </section>
 
