@@ -283,7 +283,7 @@ form { margin-top: 16px; }
   width: 100%; min-height: 44px; border: 1px solid #cfdcf0;
   background: linear-gradient(180deg, #ffffff 0%, #fdfefe 100%);
   color: var(--text); border-radius: var(--radius-md);
-  padding: 12px 14px; font-size: 15px;
+  padding: 12px 14px; font-size: 16px;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.85);
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
   font-family: inherit;
@@ -434,11 +434,12 @@ form { margin-top: 16px; }
   to { opacity: 1; transform: translateY(0); }
 }
 @media (max-width: 640px) {
-  .topbar-inner { padding: 10px 12px; gap: 8px; }
+  .topbar-inner { padding: 10px 12px; gap: 6px; }
   .brand img { height: 28px !important; }
   .topbar-actions { gap: 6px; }
-  .lang-btn { padding: 5px 10px; font-size: 11px; }
-  .receipt-link { padding: 5px 10px; font-size: 11px; }
+  .lang-switcher { gap: 2px; }
+  .lang-btn { padding: 8px 12px; font-size: 11px; min-height: 44px; display: inline-flex; align-items: center; }
+  .receipt-link { padding: 8px 12px; font-size: 11px; min-height: 44px; display: inline-flex; align-items: center; }
   .container { padding: 0 10px; gap: 12px; margin: 12px auto 28px; }
   .hero-title { font-size: 22px; }
   .hero-desc { font-size: 13px; }
@@ -447,11 +448,15 @@ form { margin-top: 16px; }
   .card-title { font-size: 17px; }
   .card-desc { font-size: 13px; }
   .field-label { font-size: 12px; }
-  .control { font-size: 14px; padding: 10px 12px; min-height: 40px; }
+  .control { font-size: 16px; padding: 10px 12px; min-height: 44px; }
+  .file-btn { min-height: 44px; padding: 12px 16px; }
+  .payment-chip span { min-height: 44px; display: flex; align-items: center; justify-content: center; }
+  .check-row { min-height: 44px; align-items: center; }
+  .check-row input[type="checkbox"] { width: 22px; height: 22px; }
   .notice-card .card-title { font-size: 16px; }
   .notice-panel { padding: 10px 12px; border-radius: 10px; }
   .notice-panel h4 { font-size: 13px; }
-  .notice-list { padding-left: 14px; font-size: 12px; line-height: 1.5; }
+  .notice-list { padding-left: 14px; font-size: 13px; line-height: 1.55; }
   .notice-list li { margin-bottom: 6px; }
   .grid2 { grid-template-columns: 1fr; }
   .pickup-time-grid { grid-template-columns: 1fr; }
@@ -459,6 +464,8 @@ form { margin-top: 16px; }
   .preview-head { font-size: 12px; }
   .preview-value { font-size: 28px; }
   .submit-dock { padding: 12px; }
+  .table-wrap { overflow-x: auto; }
+  .btn, button, a, label, select { touch-action: manipulation; }
 }
         `}} />
       </head>
