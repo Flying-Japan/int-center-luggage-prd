@@ -15,11 +15,10 @@ export async function createBugTask(
     return null;
   }
 
-  const notes = `**Reporter:** ${reporterName}\n**Priority:** ${priority}\n\n${description}`;
   const payload = {
     data: {
-      name: `[Bug] ${title}`,
-      notes,
+      name: title,
+      notes: description,
       projects: [projectGid],
     },
   };

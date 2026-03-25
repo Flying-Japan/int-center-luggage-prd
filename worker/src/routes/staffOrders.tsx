@@ -571,10 +571,22 @@ staffOrders.get("/staff/bug-report", (c) => {
           {error && <p class="error">신고 중 오류가 발생했습니다. 다시 시도해주세요.</p>}
           <section class="card">
             <h3 class="card-title">버그 신고</h3>
-            <form method="post" action="/staff/bug-report" class="grid2">
+            <form method="post" action="/staff/bug-report" enctype="multipart/form-data" class="grid2">
               <label class="field">
                 <span class="field-label">제목</span>
                 <input class="control" type="text" name="title" required />
+              </label>
+              <label class="field">
+                <span class="field-label">카테고리</span>
+                <select class="control" name="category" required>
+                  <option value="">선택</option>
+                  <option value="ui">UI/디자인</option>
+                  <option value="function">기능 오류</option>
+                  <option value="data">데이터/매출</option>
+                  <option value="auth">로그인/권한</option>
+                  <option value="performance">속도/성능</option>
+                  <option value="other">기타</option>
+                </select>
               </label>
               <label class="field">
                 <span class="field-label">우선순위</span>
@@ -585,12 +597,16 @@ staffOrders.get("/staff/bug-report", (c) => {
                 </select>
               </label>
               <label class="field">
-                <span class="field-label">신고자 이름</span>
+                <span class="field-label">신고자</span>
                 <input class="control" type="text" name="reporter_name" value={staff.display_name || staff.username || ""} required />
               </label>
               <label class="field" style="grid-column: 1 / -1">
                 <span class="field-label">내용</span>
-                <textarea class="control" name="description" required rows={6} />
+                <textarea class="control" name="description" required rows={6} placeholder="어떤 상황에서 어떤 문제가 발생했는지 자세히 적어주세요" />
+              </label>
+              <label class="field" style="grid-column: 1 / -1">
+                <span class="field-label">스크린샷 (선택)</span>
+                <input class="control" type="file" name="screenshot" accept="image/*" style="padding:8px" />
               </label>
               <div class="button-wrap">
                 <button class="btn btn-primary" type="submit">제출</button>
@@ -610,16 +626,29 @@ staffOrders.post("/staff/bug-report", async (c) => {
   const description = String(body.description || "").trim();
   const reporterName = String(body.reporter_name || "").trim();
   const priority = String(body.priority || "medium").trim();
+  const category = String(body.category || "other").trim();
+  const screenshot = body.screenshot as File | undefined;
 
-  if (!title || !description || !reporterName) {
+  if (!title || !description || !reporterName || !category) {
     return c.redirect("/staff/bug-report?error=1");
   }
+
+  // Upload screenshot to R2 if provided
+  let screenshotUrl = "";
+  if (screenshot && screenshot.size > 0) {
+    const ext = screenshot.name?.split(".").pop() || "png";
+    const key = `bug-reports/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    await c.env.IMAGES.put(key, await screenshot.arrayBuffer(), { httpMetadata: { contentType: screenshot.type } });
+    screenshotUrl = key;
+  }
+
+  const fullDescription = `**Category:** ${category}\n**Reporter:** ${reporterName}\n**Priority:** ${priority}${screenshotUrl ? `\n**Screenshot:** Uploaded (${screenshotUrl})` : ""}\n\n${description}`;
 
   const taskGid = await createBugTask(
     c.env.ASANA_PAT,
     c.env.ASANA_BUG_PROJECT_GID,
-    title,
-    description,
+    `[${category.toUpperCase()}] ${title}`,
+    fullDescription,
     reporterName,
     priority
   );
