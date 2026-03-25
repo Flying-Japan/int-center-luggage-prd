@@ -448,6 +448,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   '<label>결제수단<select name="pm"><option value="CASH"'+(method==='CASH'?' selected':'')+'>현금</option><option value="PAY_QR"'+(method==='PAY_QR'?' selected':'')+'>QR결제</option></select></label>'+
                   '<label>Flying Pass<select name="tier"><option value="NONE"'+(tier==='NONE'?' selected':'')+'>없음</option><option value="BLUE"'+(tier==='BLUE'?' selected':'')+'>블루 (¥100)</option><option value="SILVER"'+(tier==='SILVER'?' selected':'')+'>실버 (¥200)</option><option value="GOLD"'+(tier==='GOLD'?' selected':'')+'>골드 (¥300)</option><option value="PLATINUM"'+(tier==='PLATINUM'?' selected':'')+'>플래티넘 (¥400)</option><option value="BLACK"'+(tier==='BLACK'?' selected':'')+'>블랙 (무료)</option></select></label>'+
                   '<label>직접입력 (¥)<input type="number" name="override" min="0" step="100" placeholder="자동계산"></label>'+
+                  '<p style="margin:0;font-size:11px;font-weight:700;color:#dc2626">⚠️ 카드 결제 불가 (현금/QR만 가능)</p>'+
                   '<div class="btn-row"><button class="btn btn-secondary btn-sm" data-pop-cancel>취소</button><button class="btn btn-primary btn-sm" data-pop-save>저장</button></div>';
                 document.body.appendChild(pop);
                 // Position fixed relative to cell

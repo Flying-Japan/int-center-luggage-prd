@@ -70,7 +70,10 @@ customer.get("/customer", (c) => {
     ja: "荷物数量と受取日を入力すると見積もりが表示されます。",
   };
   const payQrNote: Record<string, string> = {
-    ko: "PayPay · LINE Pay 등", en: "PayPay, LINE Pay, etc.", ja: "PayPay・LINE Pay等",
+    ko: "카카오페이 · 네이버페이 · 토스페이 · PayPay · LINE Pay", en: "KakaoPay · NaverPay · TossPay · PayPay · LINE Pay", ja: "KakaoPay・NaverPay・TossPay・PayPay・LINE Pay",
+  };
+  const noCardWarning: Record<string, string> = {
+    ko: "⚠️ 신용카드/체크카드 결제 불가", en: "⚠️ Credit/debit cards NOT accepted", ja: "⚠️ クレジットカード・デビットカード不可",
   };
   const companionCustomOption: Record<string, string> = {
     ko: "직접입력", en: "Custom", ja: "直接入力",
@@ -701,7 +704,8 @@ form { margin-top: 16px; }
                         <span>{t("payment_method_cash", lang)}</span>
                       </label>
                     </div>
-                    <span class="field-hint">{t("payment_method_pay_qr", lang)} ({payQrNote[lang] || payQrNote.ko})</span>
+                    <span class="field-hint">{payQrNote[lang] || payQrNote.ko}</span>
+                    <span style="display:block;margin-top:4px;font-size:12px;font-weight:700;color:#dc2626">{noCardWarning[lang] || noCardWarning.ko}</span>
                   </label>
 
                   <label class="field field-compact">
