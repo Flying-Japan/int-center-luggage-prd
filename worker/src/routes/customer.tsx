@@ -574,15 +574,15 @@ form { margin-top: 16px; }
               {/* phone */}
               <label class="field">
                 <span class="field-label">{lang === "ja" ? "電話番号" : lang === "en" ? "Phone Number" : "전화번호"} <span style="color:#dc2626">*</span></span>
-                <input class="control" type="tel" name="phone" required maxlength={40} autocomplete="off" placeholder={lang === "ja" ? "例: 090-1234-5678" : lang === "en" ? "e.g. +1 234-567-8901" : "예: 010-1234-5678"} />
-                <span class="field-hint">{lang === "ja" ? "日本国外の電話番号もOK（国番号付き）" : lang === "en" ? "International numbers OK (with country code)" : "한국 전화번호도 괜찮아요"}</span>
+                <input class="control" type="tel" id="phone-input" name="phone" required maxlength={40} autocomplete="off" placeholder={lang === "ja" ? "例: 090-1234-5678" : lang === "en" ? "e.g. +1 234-567-8901" : "예: 010-1234-5678"} />
+                <span class="field-hint">{lang === "ja" ? "日本国外の電話番号もOK（国番号付き）- が自動入力されます" : lang === "en" ? "International numbers OK — dashes added automatically" : "한국 전화번호도 괜찮아요 — 자동으로 - 가 입력됩니다"}</span>
               </label>
 
               {/* email */}
               <label class="field">
                 <span class="field-label">{lang === "ja" ? "メールアドレス" : lang === "en" ? "Email" : "이메일"} <span style="color:#dc2626">*</span></span>
                 <input class="control" type="email" name="email" required maxlength={120} autocomplete="email" placeholder="example@email.com" />
-                <span class="field-hint">{lang === "ja" ? "受付完了メールをお送りします" : lang === "en" ? "Confirmation email will be sent" : "접수 완료 이메일이 발송됩니다"}</span>
+                <span class="field-hint" style="color:#dc2626;font-weight:600">{lang === "ja" ? "⚠️ 受付完了メールが届きます — 正確に入力してください" : lang === "en" ? "⚠️ Confirmation email will be sent — please double-check" : "⚠️ 접수 완료 이메일이 발송됩니다 — 정확하게 입력해주세요"}</span>
               </label>
 
               {/* images */}
@@ -1190,6 +1190,16 @@ form { margin-top: 16px; }
   initCompanionPicker();
   initBagQuantityPickers();
   initFilePickers();
+
+  /* phone auto-format with dashes */
+  var phoneInput=document.getElementById('phone-input');
+  if(phoneInput){phoneInput.addEventListener('input',function(){
+    var v=phoneInput.value.replace(/[^0-9+]/g,'');
+    if(v.startsWith('+')){phoneInput.value=v;return;}
+    if(v.length<=3){phoneInput.value=v;}
+    else if(v.length<=7){phoneInput.value=v.slice(0,3)+'-'+v.slice(3);}
+    else{phoneInput.value=v.slice(0,3)+'-'+v.slice(3,7)+'-'+v.slice(7,11);}
+  });}
 
   /* submit */
   formEl.addEventListener("submit", async function(event){
