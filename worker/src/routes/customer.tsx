@@ -558,7 +558,7 @@ form { margin-top: 16px; }
               data-file-optimized={t("file_optimized", lang)}
             >
               <input type="hidden" name="lang" value={lang} />
-              <input id="expected_pickup_at" type="hidden" name="expected_pickup_at" required />
+              <input id="expected_pickup_at" type="hidden" name="expected_pickup_at" />
 
               {/* name */}
               <label class="field">
@@ -569,7 +569,14 @@ form { margin-top: 16px; }
               {/* phone */}
               <label class="field">
                 <span class="field-label">{t("phone", lang)}</span>
-                <input class="control" type="text" name="phone" required maxlength={40} autocomplete="off" />
+                <input class="control" type="tel" name="phone" required maxlength={40} autocomplete="off" />
+                <span class="field-hint">{lang === "ja" ? "韓国の電話番号でもOK" : lang === "en" ? "Korean phone numbers are also OK" : "한국 전화번호도 괜찮아요"}</span>
+              </label>
+
+              {/* email */}
+              <label class="field">
+                <span class="field-label">{lang === "ja" ? "メールアドレス" : lang === "en" ? "Email" : "이메일"}</span>
+                <input class="control" type="email" name="email" required maxlength={120} autocomplete="email" placeholder={lang === "ja" ? "example@email.com" : "example@email.com"} />
               </label>
 
               {/* images */}
@@ -1243,6 +1250,7 @@ customer.post("/customer/submit", async (c) => {
   // --- Field extraction ---
   const name = String(body.name || "").trim();
   const phone = String(body.phone || "").trim();
+  const email = String(body.email || "").trim();
   const companionCount = parseInt(String(body.companion_count || "0"), 10) || 0;
   const suitcaseQty = Math.min(99, parseInt(String(body.suitcase_qty || "0"), 10) || 0);
   const backpackQty = Math.min(99, parseInt(String(body.backpack_qty || "0"), 10) || 0);
@@ -1253,6 +1261,7 @@ customer.post("/customer/submit", async (c) => {
   // --- Validation ---
   if (!name) return redirect(t("required", lang) + ": " + t("name", lang));
   if (!phone || !/^[\d\s\-+()]{6,20}$/.test(phone)) return redirect(t("required", lang) + ": " + t("phone", lang));
+  if (!email || !email.includes("@")) return redirect(t("required", lang) + ": Email");
   if (suitcaseQty <= 0 && backpackQty <= 0) {
     return redirect(t("required", lang) + ": " + t("suitcase_qty", lang) + "/" + t("backpack_qty", lang));
   }
@@ -1322,20 +1331,21 @@ customer.post("/customer/submit", async (c) => {
   try {
     await c.env.DB.prepare(
       `INSERT INTO luggage_orders (
-        order_id, tag_no, name, phone, companion_count,
+        order_id, tag_no, name, phone, email, companion_count,
         suitcase_qty, backpack_qty, set_qty,
         expected_pickup_at, expected_storage_days,
         price_per_day, discount_rate, prepaid_amount,
         flying_pass_tier, flying_pass_discount_amount, final_amount,
         id_image_url, luggage_image_url,
         consent_checked, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING')`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING')`
     )
       .bind(
         orderId,
         tagNo,
         name,
         phone,
+        email,
         companionCount,
         suitcaseQty,
         backpackQty,

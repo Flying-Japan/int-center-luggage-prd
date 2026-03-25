@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS luggage_orders (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   name TEXT,
   phone TEXT,
+  email TEXT,
   companion_count INTEGER NOT NULL DEFAULT 0,
   suitcase_qty INTEGER NOT NULL DEFAULT 0,
   backpack_qty INTEGER NOT NULL DEFAULT 0,
