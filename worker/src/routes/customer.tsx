@@ -599,7 +599,7 @@ form { margin-top: 16px; }
               {rentalBanners[0]}
 
               {/* bag quantities */}
-              <div class="grid2">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                 <label class="field">
                   <span class="field-label">{t("suitcase_qty", lang)}</span>
                   <div class="companion-picker bag-qty-picker">
