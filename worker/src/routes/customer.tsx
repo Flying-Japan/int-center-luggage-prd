@@ -500,9 +500,6 @@ form { margin-top: 16px; }
           )}
 
           <section class="card card-primary">
-            <h3 class="card-title">{receptionTitle[lang] || receptionTitle.ko}</h3>
-            <p class="card-desc">{receptionDesc[lang] || receptionDesc.ko}</p>
-
             <form
               id="customer-form"
               action="/customer/submit"
@@ -541,7 +538,7 @@ form { margin-top: 16px; }
                 <label class="field">
                   <span class="field-label">{t("id_image", lang)} <em class="inline-note">{idImageHint[lang] || idImageHint.ko}</em></span>
                   <div class="file-picker">
-                    <input id="id_image" class="file-input" type="file" name="id_image" accept="image/*" capture="environment" required />
+                    <input id="id_image" class="file-input" type="file" name="id_image" accept="image/*" required />
                     <button class="file-btn" type="button" data-file-trigger="id_image">{t("file_select", lang)}</button>
                     <span id="id_image_name" class="file-name" data-file-empty={fileNone[lang] || fileNone.ko}>{fileNone[lang] || fileNone.ko}</span>
                   </div>
@@ -551,7 +548,7 @@ form { margin-top: 16px; }
                 <label class="field">
                   <span class="field-label">{t("luggage_image", lang)}</span>
                   <div class="file-picker">
-                    <input id="luggage_image" class="file-input" type="file" name="luggage_image" accept="image/*" capture="environment" required />
+                    <input id="luggage_image" class="file-input" type="file" name="luggage_image" accept="image/*" required />
                     <button class="file-btn" type="button" data-file-trigger="luggage_image">{t("file_select", lang)}</button>
                     <span id="luggage_image_name" class="file-name" data-file-empty={fileNone[lang] || fileNone.ko}>{fileNone[lang] || fileNone.ko}</span>
                   </div>
@@ -695,8 +692,8 @@ form { margin-top: 16px; }
               </div>
 
               {/* notice */}
-              <section class="notice-card" id="consent-notice">
-                <h3 class="card-title">{noticeTitle[lang] || noticeTitle.ko}</h3>
+              <div id="consent-notice" style="margin-top:8px">
+                <h3 style="font-size:15px;font-weight:700;margin:0 0 8px;color:var(--text)">{noticeTitle[lang] || noticeTitle.ko}</h3>
                 {lang === "en" ? (
                   <article class="notice-panel notice-panel-static">
                     <h4>&#x1F9F3; Baggage Storage Guidelines</h4>
@@ -797,7 +794,7 @@ form { margin-top: 16px; }
                     </ul>
                   </article>
                 )}
-              </section>
+              </div>
 
               {/* Rental banner 3 — Stroller */}
               <a href="https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a" target="_blank" rel="noopener" style="background:linear-gradient(135deg,#f0fdf4,#f5fff9);border:1px solid #bbf7d0;border-radius:var(--radius-md);padding:12px 16px;display:flex;align-items:center;gap:12px;margin:4px 0;text-decoration:none;color:inherit;transition:border-color .2s,box-shadow .2s">
