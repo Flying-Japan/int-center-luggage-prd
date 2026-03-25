@@ -638,16 +638,6 @@ form { margin-top: 16px; }
                 <span style="font-size:14px;color:var(--primary)">→</span>
               </a>
 
-              {/* Rental banner 3 — Stroller */}
-              <a href="https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a" target="_blank" rel="noopener" style="background:linear-gradient(135deg,#f0fdf4,#f5fff9);border:1px solid #bbf7d0;border-radius:var(--radius-md);padding:12px 16px;display:flex;align-items:center;gap:12px;margin:4px 0;text-decoration:none;color:inherit;transition:border-color .2s,box-shadow .2s">
-                <span style="font-size:24px">👶</span>
-                <div style="flex:1">
-                  <p style="font-size:13px;font-weight:600;color:var(--text);margin:0">{lang === "ja" ? "ベビーカーレンタルできます！" : lang === "en" ? "Stroller rentals available!" : "유모차 대여 가능!"}</p>
-                  <p style="font-size:11px;color:var(--muted);margin:2px 0 0">{lang === "ja" ? "サイベックス・トライクをセンターで" : lang === "en" ? "Cybex & Trike strollers at our center" : "싸이벡스 · 트라이크 센터에서 바로 대여"}</p>
-                </div>
-                <span style="font-size:14px;color:var(--positive)">→</span>
-              </a>
-
               {/* price preview */}
               <div class="preview preview-with-options" id="price-preview" aria-live="polite">
                 <div class="preview-main">
@@ -801,6 +791,16 @@ form { margin-top: 16px; }
                   </article>
                 )}
               </section>
+
+              {/* Rental banner 3 — Stroller */}
+              <a href="https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a" target="_blank" rel="noopener" style="background:linear-gradient(135deg,#f0fdf4,#f5fff9);border:1px solid #bbf7d0;border-radius:var(--radius-md);padding:12px 16px;display:flex;align-items:center;gap:12px;margin:4px 0;text-decoration:none;color:inherit;transition:border-color .2s,box-shadow .2s">
+                <span style="font-size:24px">👶</span>
+                <div style="flex:1">
+                  <p style="font-size:13px;font-weight:600;color:var(--text);margin:0">{lang === "ja" ? "ベビーカーレンタルできます！" : lang === "en" ? "Stroller rentals available!" : "유모차 대여 가능!"}</p>
+                  <p style="font-size:11px;color:var(--muted);margin:2px 0 0">{lang === "ja" ? "サイベックス・トライクをセンターで" : lang === "en" ? "Cybex & Trike strollers at our center" : "싸이벡스 · 트라이크 센터에서 바로 대여"}</p>
+                </div>
+                <span style="font-size:14px;color:var(--positive)">→</span>
+              </a>
 
               {/* consent */}
               <label class="check-row check-row-strong">
