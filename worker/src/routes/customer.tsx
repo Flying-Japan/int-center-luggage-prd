@@ -164,15 +164,18 @@ customer.get("/customer", (c) => {
 
   // Rental banners — shuffled randomly on each render
   const bannerDefs = [
-    { emoji: "🎢", bg: "linear-gradient(135deg,#eef3fb,#f5f9ff)", border: "var(--line)", arrow: "var(--primary)", url: "https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa",
+    { emoji: "🎮", bg: "linear-gradient(135deg,#4285F4 0%,#1b6ec2 100%)", color: "#fff", tag: "USJ", url: "https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa",
       title: { ko: "유니버셜 스튜디오 가시나요?", en: "Going to Universal Studios?", ja: "USJに行きますか？" },
-      sub: { ko: "마리오밴드 · 해리포터 지팡이 대여 가능", en: "Mario Band & Wand rentals available", ja: "マリオバンド・杖レンタル可能" } },
-    { emoji: "💇", bg: "linear-gradient(135deg,#fff5f5,#fff9f5)", border: "#fde8d8", arrow: "var(--primary)", url: "https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596",
-      title: { ko: "다이슨 에어랩 · 고데기 대여 가능!", en: "Dyson rentals available!", ja: "ダイソンレンタルできます" },
-      sub: { ko: "센터에서 바로 대여하세요", en: "Airwrap & Straightener at our center", ja: "エアラップ・ストレートナーをセンターで" } },
-    { emoji: "👶", bg: "linear-gradient(135deg,#f0fdf4,#f5fff9)", border: "#bbf7d0", arrow: "var(--positive)", url: "https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a",
-      title: { ko: "유모차 대여 가능!", en: "Stroller rentals available!", ja: "ベビーカーレンタルできます！" },
-      sub: { ko: "싸이벡스 · 트라이크 센터에서 바로 대여", en: "Cybex & Trike strollers at our center", ja: "サイベックス・トライクをセンターで" } },
+      sub: { ko: "마리오밴드 · 해리포터 지팡이 대여", en: "Mario Band & Wand rentals", ja: "マリオバンド・杖レンタル" },
+      cta: { ko: "대여하기", en: "Rent now", ja: "レンタル" } },
+    { emoji: "✨", bg: "linear-gradient(135deg,#ec4899 0%,#be185d 100%)", color: "#fff", tag: "HOT", url: "https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596",
+      title: { ko: "다이슨 에어랩 · 고데기", en: "Dyson Airwrap & Straightener", ja: "ダイソン エアラップ" },
+      sub: { ko: "센터에서 바로 대여 가능!", en: "Available right at our center!", ja: "センターですぐレンタル！" },
+      cta: { ko: "대여하기", en: "Rent now", ja: "レンタル" } },
+    { emoji: "👶", bg: "linear-gradient(135deg,#22c55e 0%,#15803d 100%)", color: "#fff", tag: "NEW", url: "https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a",
+      title: { ko: "유모차 대여 가능!", en: "Stroller rentals!", ja: "ベビーカーレンタル！" },
+      sub: { ko: "싸이벡스 · 트라이크 바로 대여", en: "Cybex & Trike at our center", ja: "サイベックス・トライク" },
+      cta: { ko: "대여하기", en: "Rent now", ja: "レンタル" } },
   ];
   // Fisher-Yates shuffle
   for (let i = bannerDefs.length - 1; i > 0; i--) {
@@ -180,13 +183,16 @@ customer.get("/customer", (c) => {
     [bannerDefs[i], bannerDefs[j]] = [bannerDefs[j], bannerDefs[i]];
   }
   const rentalBanners = bannerDefs.map(b => (
-    <a href={b.url} target="_blank" rel="noopener" style={`background:${b.bg};border:1px solid ${b.border};border-radius:var(--radius-md);padding:12px 16px;display:flex;align-items:center;gap:12px;margin:4px 0;text-decoration:none;color:inherit;transition:border-color .2s,box-shadow .2s`}>
-      <span style="font-size:24px">{b.emoji}</span>
-      <div style="flex:1">
-        <p style="font-size:13px;font-weight:600;color:var(--text);margin:0">{b.title[lang] || b.title.ko}</p>
-        <p style="font-size:11px;color:var(--muted);margin:2px 0 0">{b.sub[lang] || b.sub.ko}</p>
+    <a href={b.url} target="_blank" rel="noopener" style={`background:${b.bg};border:none;border-radius:var(--radius-md);padding:14px 16px;display:flex;align-items:center;gap:14px;margin:6px 0;text-decoration:none;color:${b.color};transition:transform .15s,box-shadow .15s;box-shadow:0 4px 14px rgba(0,0,0,0.12)`}>
+      <span style="font-size:32px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.2))">{b.emoji}</span>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+          <span style="font-size:9px;font-weight:800;background:rgba(255,255,255,0.25);padding:2px 6px;border-radius:4px;letter-spacing:0.05em">{b.tag}</span>
+          <p style="font-size:14px;font-weight:700;margin:0;line-height:1.2">{b.title[lang] || b.title.ko}</p>
+        </div>
+        <p style="font-size:11px;opacity:0.85;margin:0">{b.sub[lang] || b.sub.ko}</p>
       </div>
-      <span style={`font-size:14px;color:${b.arrow}`}>→</span>
+      <span style="font-size:12px;font-weight:700;background:rgba(255,255,255,0.2);padding:6px 12px;border-radius:999px;white-space:nowrap;border:1px solid rgba(255,255,255,0.3)">{b.cta[lang] || b.cta.ko} →</span>
     </a>
   ));
 
