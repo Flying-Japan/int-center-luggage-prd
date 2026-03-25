@@ -871,6 +871,7 @@ form { margin-top: 16px; }
 
               {/* submit */}
               <div class="submit-dock">
+                <div id="validation-msg" style="display:none;margin-bottom:10px;padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;font-size:13px;color:#dc2626;text-align:center"></div>
                 <button id="customer-submit-btn" class="btn btn-primary btn-lg" type="submit">{t("submit", lang)}</button>
                 <p class="submit-dock-hint">{mobileSubmitHint[lang] || mobileSubmitHint.ko}</p>
               </div>
@@ -1203,7 +1204,6 @@ form { margin-top: 16px; }
 
   /* submit validation */
   var validationAttempts=0;
-  var validationBanner=null;
 
   function getValidationMissing(){
     var nEl=formEl.querySelector('[name="name"]');
@@ -1222,27 +1222,19 @@ form { margin-top: 16px; }
     return m;
   }
 
+  var validationMsgEl=document.getElementById('validation-msg');
+
   function showValidationBanner(missing){
-    if(validationBanner)validationBanner.remove();
+    if(!validationMsgEl)return;
     var names=missing.map(function(m){return m.msg;}).join(' · ');
-    var div=document.createElement('div');
-    div.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:9999;background:#fef2f2;border:1px solid #fca5a5;color:#dc2626;padding:12px 20px;border-radius:12px;font-size:13px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,0.15);max-width:90%;text-align:center;animation:riseIn 0.3s ease';
-    var title=document.createElement('p');
-    title.style.cssText='margin:0;font-weight:700';
-    title.textContent='${ lang === "ja" ? "⚠️ 未入力の項目があります" : lang === "en" ? "⚠️ Please fill in the missing fields" : "⚠️ 아직 입력되지 않은 항목이 있어요"}';
-    var detail=document.createElement('p');
-    detail.style.cssText='margin:4px 0 0;font-size:12px';
-    detail.textContent=names;
-    div.appendChild(title);
-    div.appendChild(detail);
-    document.body.appendChild(div);
-    validationBanner=div;
-    setTimeout(function(){if(validationBanner===div){div.remove();validationBanner=null;}},5000);
+    validationMsgEl.textContent='${ lang === "ja" ? "⚠️ 未入力: " : lang === "en" ? "⚠️ Missing: " : "⚠️ 미입력: "}'+names;
+    validationMsgEl.style.display='block';
+    validationMsgEl.scrollIntoView({behavior:'smooth',block:'center'});
   }
 
   formEl.addEventListener('input',function(e){
     var f=e.target.closest('.field');if(f)f.classList.remove('field-error');
-    if(validationBanner){validationBanner.remove();validationBanner=null;}
+    if(validationMsgEl)validationMsgEl.style.display='none';
   });
   formEl.addEventListener('change',function(e){
     var f=e.target.closest('.field')||e.target.closest('.check-row');if(f)f.classList.remove('field-error');
@@ -1259,8 +1251,6 @@ form { margin-top: 16px; }
       validationAttempts++;
       missing.forEach(function(m){if(m.el){var f=m.el.closest('.field')||m.el.closest('.check-row');if(f)f.classList.add('field-error');}});
       showValidationBanner(missing);
-      missing[0].el.scrollIntoView({behavior:'smooth',block:'center'});
-      if(validationAttempts===1)missing[0].el.focus();
       return;
     }
     validationAttempts=0;
