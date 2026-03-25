@@ -167,7 +167,7 @@ export async function adminAuth(c: AppContext, next: Next) {
   if (!staff) {
     return c.redirect("/staff/login");
   }
-  if (staff.role !== "admin") {
+  if (staff.role !== "admin" && staff.role !== "editor") {
     return c.json({ error: "Admin only" }, 403);
   }
   if (!existing) {
