@@ -357,12 +357,11 @@ form { margin-top: 16px; }
   box-shadow: 0 8px 18px rgba(31,104,232,0.24);
 }
 .notice-card {
-  margin-top: 16px; border: 1px solid #dce8ff; border-radius: 18px;
-  background: #f7faff; padding: 16px;
+  margin-top: 16px; padding: 0; background: transparent; border: none;
 }
 .notice-panel {
   display: block; margin-top: 10px; border-radius: 14px;
-  background: #fff; border: 1px solid #e0e9f8; padding: 12px;
+  background: #f7faff; border: 1px solid #dce8ff; padding: 14px 16px;
 }
 .notice-panel h4 { margin: 4px 0 8px; font-size: 14px; }
 .notice-list {
