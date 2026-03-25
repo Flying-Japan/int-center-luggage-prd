@@ -60,9 +60,9 @@ customer.get("/customer", (c) => {
     ko: "수령 예정 시간", en: "Expected Pickup Time", ja: "受取予定時間",
   };
   const pickupFlexNote: Record<string, string> = {
-    ko: "수령 시간은 변경될 수 있으며, 영업시간(09:00~21:00) 내 수령 가능합니다.",
-    en: "Pickup time may change. Collection is available during business hours (09:00-21:00).",
-    ja: "受取時間は変更可能です。営業時間（09:00〜21:00）内に受け取りいただけます。",
+    ko: "대략적인 수령 시간을 알려주세요. 정확하지 않아도 괜찮습니다! 영업시간: 09:00~21:00",
+    en: "Please let us know your approximate pickup time. It doesn't have to be exact! Hours: 09:00-21:00",
+    ja: "おおよその受取時間を教えてください。正確でなくても大丈夫です！営業時間: 09:00〜21:00",
   };
   const previewMetaDefault: Record<string, string> = {
     ko: "짐 수량과 수령일을 입력하면 예상 요금이 표시됩니다.",
@@ -710,8 +710,10 @@ form { margin-top: 16px; }
                         <span>{t("payment_method_cash", lang)}</span>
                       </label>
                     </div>
-                    <span class="field-hint">{payQrNote[lang] || payQrNote.ko}</span>
-                    <span style="display:block;margin-top:4px;font-size:12px;font-weight:700;color:#dc2626">{noCardWarning[lang] || noCardWarning.ko}</span>
+                    <div style="margin-top:6px;padding:8px 10px;background:#fef2f2;border-radius:6px;font-size:11px;line-height:1.5">
+                      <p style="margin:0;font-weight:700;color:#dc2626">{noCardWarning[lang] || noCardWarning.ko}</p>
+                      <p style="margin:3px 0 0;font-weight:600;color:#166534">✅ {payQrNote[lang] || payQrNote.ko}</p>
+                    </div>
                   </label>
 
                   <label class="field field-compact">
