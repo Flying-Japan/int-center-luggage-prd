@@ -450,6 +450,13 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   '<label>직접입력 (¥)<input type="number" name="override" min="0" step="100" placeholder="자동계산"></label>'+
                   '<div class="btn-row"><button class="btn btn-secondary btn-sm" data-pop-cancel>취소</button><button class="btn btn-primary btn-sm" data-pop-save>저장</button></div>';
                 cell.appendChild(pop);
+                // Flip upward if popover extends below viewport
+                var rect=pop.getBoundingClientRect();
+                if(rect.bottom>window.innerHeight-20){
+                  pop.style.bottom='100%';pop.style.top='auto';pop.style.marginBottom='4px';
+                }else{
+                  pop.style.top='100%';pop.style.bottom='auto';pop.style.marginTop='4px';
+                }
                 activePopover={pop:pop,cell:cell};
 
                 pop.querySelector('[data-pop-cancel]').addEventListener('click',function(ev){ev.stopPropagation();closePopover();});
