@@ -17,6 +17,9 @@ export type Env = {
   // Google Sheets (rental revenue sync)
   GOOGLE_SHEETS_CREDENTIALS?: string;
 
+  // Brevo (email)
+  BREVO_API_KEY: string;
+
   // App config
   APP_ENV: string;
   APP_SECRET_KEY: string;

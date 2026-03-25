@@ -4,6 +4,7 @@ import { t, normalizeLang } from "../lib/i18n";
 import { FLYING_PASS_TIERS, type FlyingPassTier } from "../services/pricing";
 import { loadCompletionMessages, applyAmountTemplate } from "../services/completionMessages";
 import { uploadImage, buildImageKey, extFromContentType, validateImageUpload } from "../lib/r2";
+import { sendOrderConfirmation } from "../lib/brevo";
 import {
   calculatePricePerDay,
   calculatePrepaidAmount,
@@ -1369,6 +1370,16 @@ customer.post("/customer/submit", async (c) => {
     if (luggageImageUrl) try { await c.env.IMAGES.delete(luggageImageUrl); } catch { /* best-effort */ }
     console.error("Order insert failed:", e);
     return redirect(t("upload_error", lang));
+  }
+
+  // Send confirmation email (best-effort, don't block redirect)
+  if (email && c.env.BREVO_API_KEY) {
+    sendOrderConfirmation(c.env.BREVO_API_KEY, {
+      orderId, name, email, phone,
+      suitcaseQty, backpackQty,
+      expectedPickupAt, expectedStorageDays: storageDays,
+      finalAmount: finalPrepaid, lang,
+    }).catch(() => {});
   }
 
   return c.redirect(`/customer/orders/${orderId}?lang=${lang}`);
