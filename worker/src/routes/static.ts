@@ -21,6 +21,14 @@ staticRoutes.get("/static/flying-pass-white.jpg", async (c) => {
   });
 });
 
+staticRoutes.get("/static/logo-horizontal-white.png", async (c) => {
+  const obj = await c.env.IMAGES.get("static/logo-horizontal-white.png");
+  if (!obj) return c.notFound();
+  return new Response(obj.body, {
+    headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" },
+  });
+});
+
 staticRoutes.get("/static/logo-horizontal.png", async (c) => {
   const obj = await c.env.IMAGES.get("static/logo-horizontal.png");
   if (!obj) return c.notFound();

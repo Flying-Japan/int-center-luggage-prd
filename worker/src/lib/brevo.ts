@@ -41,6 +41,7 @@ export async function sendOrderConfirmation(
 
     <!-- Header -->
     <div style="background:linear-gradient(135deg,#2f80f8,#1e63da);padding:28px 24px;text-align:center">
+      <img src="https://luggage.flyingjp.com/static/logo-horizontal-white.png" alt="Flying Japan" height="32" style="display:block;margin:0 auto 12px" />
       <h1 style="margin:0;color:#fff;font-size:20px;font-weight:800">${lang === "ja" ? "受付完了" : lang === "en" ? "Check-in Complete" : "접수 완료"} ✓</h1>
       <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:13px">${lang === "ja" ? "接収番号" : lang === "en" ? "Order No." : "접수 번호"}: <strong style="color:#fff;font-size:16px">${orderId}</strong></p>
     </div>
