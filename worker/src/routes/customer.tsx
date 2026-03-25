@@ -563,21 +563,22 @@ form { margin-top: 16px; }
 
               {/* name */}
               <label class="field">
-                <span class="field-label">{t("name", lang)}</span>
+                <span class="field-label">{t("name", lang)} <span style="color:#dc2626">*</span></span>
                 <input class="control" type="text" name="name" required maxlength={120} autocomplete="off" />
               </label>
 
               {/* phone */}
               <label class="field">
-                <span class="field-label">{t("phone", lang)}</span>
+                <span class="field-label">{t("phone", lang)} <span style="color:#dc2626">*</span></span>
                 <input class="control" type="tel" name="phone" required maxlength={40} autocomplete="off" />
                 <span class="field-hint">{lang === "ja" ? "韓国の電話番号でもOK" : lang === "en" ? "Korean phone numbers are also OK" : "한국 전화번호도 괜찮아요"}</span>
               </label>
 
               {/* email */}
               <label class="field">
-                <span class="field-label">{lang === "ja" ? "メールアドレス" : lang === "en" ? "Email" : "이메일"}</span>
-                <input class="control" type="email" name="email" required maxlength={120} autocomplete="email" placeholder={lang === "ja" ? "example@email.com" : "example@email.com"} />
+                <span class="field-label">{lang === "ja" ? "メールアドレス" : lang === "en" ? "Email" : "이메일"} <span style="color:#dc2626">*</span></span>
+                <input class="control" type="email" name="email" required maxlength={120} autocomplete="email" placeholder="example@email.com" />
+                <span class="field-hint">{lang === "ja" ? "受付完了メールをお送りします" : lang === "en" ? "Confirmation email will be sent" : "접수 완료 이메일이 발송됩니다"}</span>
               </label>
 
               {/* images */}
