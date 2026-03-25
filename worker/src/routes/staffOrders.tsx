@@ -586,7 +586,7 @@ staffOrders.get("/staff/bug-report", (c) => {
               </label>
               <label class="field">
                 <span class="field-label">신고자 이름</span>
-                <input class="control" type="text" name="reporter_name" required />
+                <input class="control" type="text" name="reporter_name" value={staff.display_name || staff.username || ""} required />
               </label>
               <label class="field" style="grid-column: 1 / -1">
                 <span class="field-label">내용</span>
