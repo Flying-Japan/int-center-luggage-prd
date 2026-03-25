@@ -1635,7 +1635,7 @@ a { color: inherit; text-decoration: none; }
               }} />
               <div style="margin:0;padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;text-align:center">
                 <p style="margin:0;font-size:12px;font-weight:700;color:#dc2626">{lang === "ja" ? "⚠️ クレジットカード・デビットカード不可" : lang === "en" ? "⚠️ Credit/debit cards NOT accepted" : "⚠️ 신용카드/체크카드 결제 불가"}</p>
-                <p style="margin:4px 0 0;font-size:11px;font-weight:600;color:#166534">{lang === "ja" ? "✅ 現金 / PayPay / LINE Pay / 楽天Pay / d払い / auPay / メルペイ" : lang === "en" ? "✅ Cash / KakaoPay / NaverPay / TossPay / PayPay / LINE Pay" : "✅ 현금 / 카카오페이 / 네이버페이 / 토스페이 / PayPay / LINE Pay"}</p>
+                <p style="margin:4px 0 0;font-size:11px;font-weight:600;color:#166534;line-height:1.6">{lang === "ja" ? "✅ 現金 / PayPay / LINE Pay" : lang === "en" ? "✅ Cash / KakaoPay / NaverPay" : "✅ 현금 / 카카오페이 / 네이버페이"}<br/>{lang === "ja" ? "楽天Pay / d払い / auPay / メルペイ" : lang === "en" ? "TossPay / PayPay / LINE Pay" : "토스페이 / PayPay / LINE Pay"}</p>
               </div>
             </div>
           </div>
