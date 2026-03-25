@@ -39,7 +39,7 @@ customer.get("/customer", (c) => {
     ko: "아래 양식을 작성해 주세요.", en: "Please fill in the form below.", ja: "以下のフォームにご記入ください。",
   };
   const idImageHint: Record<string, string> = {
-    ko: "(여권 등)", en: "(passport etc.)", ja: "(パスポート等)",
+    ko: "(여권 등 — 얼굴과 이름만 보이면 OK)", en: "(passport etc. — face & name visible is enough)", ja: "(パスポート等 — 顔と名前が見えればOK)",
   };
   const suitcaseHint: Record<string, string> = {
     ko: "기내용 포함 모든 캐리어", en: "All suitcases incl. carry-on", ja: "機内持込を含む全スーツケース",
@@ -88,9 +88,9 @@ customer.get("/customer", (c) => {
     ko: "선택된 파일 없음", en: "No file selected", ja: "ファイル未選択",
   };
   const photoRetention: Record<string, string> = {
-    ko: "사진은 14일 이내 자동 삭제됩니다.",
-    en: "Photos are automatically deleted within 14 days.",
-    ja: "写真は14日以内に自動削除されます。",
+    ko: "🔒 사진은 본인 확인용이며, 2주 후 자동 삭제됩니다.",
+    en: "🔒 Photos are for ID verification only and auto-deleted after 2 weeks.",
+    ja: "🔒 写真は本人確認用で、2週間後に自動削除されます。",
   };
   const mobileSubmitHint: Record<string, string> = {
     ko: "접수 후 직원이 안내해 드립니다.",
@@ -158,6 +158,34 @@ customer.get("/customer", (c) => {
     { days: "30 ~ 59", rate: "15%" },
     { days: "60+", rate: "20%" },
   ];
+
+  // Rental banners — shuffled randomly on each render
+  const bannerDefs = [
+    { emoji: "🎢", bg: "linear-gradient(135deg,#eef3fb,#f5f9ff)", border: "var(--line)", arrow: "var(--primary)", url: "https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa",
+      title: { ko: "유니버셜 스튜디오 가시나요?", en: "Going to Universal Studios?", ja: "USJに行きますか？" },
+      sub: { ko: "마리오밴드 · 해리포터 지팡이 대여 가능", en: "Mario Band & Wand rentals available", ja: "マリオバンド・杖レンタル可能" } },
+    { emoji: "💇", bg: "linear-gradient(135deg,#fff5f5,#fff9f5)", border: "#fde8d8", arrow: "var(--primary)", url: "https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596",
+      title: { ko: "다이슨 에어랩 · 고데기 대여 가능!", en: "Dyson rentals available!", ja: "ダイソンレンタルできます" },
+      sub: { ko: "센터에서 바로 대여하세요", en: "Airwrap & Straightener at our center", ja: "エアラップ・ストレートナーをセンターで" } },
+    { emoji: "👶", bg: "linear-gradient(135deg,#f0fdf4,#f5fff9)", border: "#bbf7d0", arrow: "var(--positive)", url: "https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a",
+      title: { ko: "유모차 대여 가능!", en: "Stroller rentals available!", ja: "ベビーカーレンタルできます！" },
+      sub: { ko: "싸이벡스 · 트라이크 센터에서 바로 대여", en: "Cybex & Trike strollers at our center", ja: "サイベックス・トライクをセンターで" } },
+  ];
+  // Fisher-Yates shuffle
+  for (let i = bannerDefs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [bannerDefs[i], bannerDefs[j]] = [bannerDefs[j], bannerDefs[i]];
+  }
+  const rentalBanners = bannerDefs.map(b => (
+    <a href={b.url} target="_blank" rel="noopener" style={`background:${b.bg};border:1px solid ${b.border};border-radius:var(--radius-md);padding:12px 16px;display:flex;align-items:center;gap:12px;margin:4px 0;text-decoration:none;color:inherit;transition:border-color .2s,box-shadow .2s`}>
+      <span style="font-size:24px">{b.emoji}</span>
+      <div style="flex:1">
+        <p style="font-size:13px;font-weight:600;color:var(--text);margin:0">{b.title[lang] || b.title.ko}</p>
+        <p style="font-size:11px;color:var(--muted);margin:2px 0 0">{b.sub[lang] || b.sub.ko}</p>
+      </div>
+      <span style={`font-size:14px;color:${b.arrow}`}>→</span>
+    </a>
+  ));
 
   return c.html(
     <html lang={lang}>
@@ -558,15 +586,8 @@ form { margin-top: 16px; }
                 </label>
               </div>
 
-              {/* Rental banner 1 — USJ */}
-              <a href="https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa" target="_blank" rel="noopener" style="background:linear-gradient(135deg,#eef3fb,#f5f9ff);border:1px solid var(--line);border-radius:var(--radius-md);padding:12px 16px;display:flex;align-items:center;gap:12px;margin:4px 0;text-decoration:none;color:inherit;transition:border-color .2s,box-shadow .2s">
-                <span style="font-size:24px">🎢</span>
-                <div style="flex:1">
-                  <p style="font-size:13px;font-weight:600;color:var(--text);margin:0">{lang === "ja" ? "USJに行きますか？" : lang === "en" ? "Going to Universal Studios?" : "유니버셜 스튜디오 가시나요?"}</p>
-                  <p style="font-size:11px;color:var(--muted);margin:2px 0 0">{lang === "ja" ? "マリオバンド・杖レンタル可能" : lang === "en" ? "Mario Band & Wand rentals available" : "마리오밴드 · 해리포터 지팡이 대여 가능"}</p>
-                </div>
-                <span style="font-size:14px;color:var(--primary)">→</span>
-              </a>
+              {/* Rental banner — randomized */}
+              {rentalBanners[0]}
 
               {/* bag quantities */}
               <div class="grid2">
@@ -657,15 +678,7 @@ form { margin-top: 16px; }
                 <p>{pickupFlexNote[lang] || pickupFlexNote.ko}</p>
               </div>
 
-              {/* Rental banner 2 — Dyson */}
-              <a href="https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596" target="_blank" rel="noopener" style="background:linear-gradient(135deg,#fff5f5,#fff9f5);border:1px solid #fde8d8;border-radius:var(--radius-md);padding:12px 16px;display:flex;align-items:center;gap:12px;margin:4px 0;text-decoration:none;color:inherit;transition:border-color .2s,box-shadow .2s">
-                <span style="font-size:24px">💇</span>
-                <div style="flex:1">
-                  <p style="font-size:13px;font-weight:600;color:var(--text);margin:0">{lang === "ja" ? "ダイソンレンタルできます" : lang === "en" ? "Dyson rentals available!" : "다이슨 에어랩 · 고데기 대여 가능!"}</p>
-                  <p style="font-size:11px;color:var(--muted);margin:2px 0 0">{lang === "ja" ? "エアラップ・ストレートナーをセンターで" : lang === "en" ? "Airwrap & Straightener at our center" : "센터에서 바로 대여하세요"}</p>
-                </div>
-                <span style="font-size:14px;color:var(--primary)">→</span>
-              </a>
+              {rentalBanners[1]}
 
               {/* price preview */}
               <div class="preview preview-with-options" id="price-preview" aria-live="polite">
@@ -715,6 +728,8 @@ form { margin-top: 16px; }
                   </label>
                 </div>
               </div>
+
+              {rentalBanners[2]}
 
               {/* notice */}
               <div id="consent-notice" style="margin-top:8px">
@@ -820,16 +835,6 @@ form { margin-top: 16px; }
                   </article>
                 )}
               </div>
-
-              {/* Rental banner 3 — Stroller */}
-              <a href="https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a" target="_blank" rel="noopener" style="background:linear-gradient(135deg,#f0fdf4,#f5fff9);border:1px solid #bbf7d0;border-radius:var(--radius-md);padding:12px 16px;display:flex;align-items:center;gap:12px;margin:4px 0;text-decoration:none;color:inherit;transition:border-color .2s,box-shadow .2s">
-                <span style="font-size:24px">👶</span>
-                <div style="flex:1">
-                  <p style="font-size:13px;font-weight:600;color:var(--text);margin:0">{lang === "ja" ? "ベビーカーレンタルできます！" : lang === "en" ? "Stroller rentals available!" : "유모차 대여 가능!"}</p>
-                  <p style="font-size:11px;color:var(--muted);margin:2px 0 0">{lang === "ja" ? "サイベックス・トライクをセンターで" : lang === "en" ? "Cybex & Trike strollers at our center" : "싸이벡스 · 트라이크 센터에서 바로 대여"}</p>
-                </div>
-                <span style="font-size:14px;color:var(--positive)">→</span>
-              </a>
 
               {/* consent */}
               <label class="check-row check-row-strong">
