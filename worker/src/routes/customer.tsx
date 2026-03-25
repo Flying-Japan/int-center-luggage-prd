@@ -564,14 +564,15 @@ form { margin-top: 16px; }
               {/* name */}
               <label class="field">
                 <span class="field-label">{t("name", lang)} <span style="color:#dc2626">*</span></span>
-                <input class="control" type="text" name="name" required maxlength={120} autocomplete="off" />
+                <input class="control" type="text" name="name" required maxlength={120} autocomplete="off" placeholder={lang === "ja" ? "例: 田中太郎" : lang === "en" ? "e.g. John Smith" : "예: 홍길동"} />
+                <span class="field-hint">{lang === "ja" ? "本名をフルネームで入力してください" : lang === "en" ? "Please enter your full name" : "한글 이름을 입력해주세요 (예: 홍길동)"}</span>
               </label>
 
               {/* phone */}
               <label class="field">
-                <span class="field-label">{t("phone", lang)} <span style="color:#dc2626">*</span></span>
-                <input class="control" type="tel" name="phone" required maxlength={40} autocomplete="off" />
-                <span class="field-hint">{lang === "ja" ? "韓国の電話番号でもOK" : lang === "en" ? "Korean phone numbers are also OK" : "한국 전화번호도 괜찮아요"}</span>
+                <span class="field-label">{lang === "ja" ? "電話番号" : lang === "en" ? "Phone Number" : "전화번호"} <span style="color:#dc2626">*</span></span>
+                <input class="control" type="tel" name="phone" required maxlength={40} autocomplete="off" placeholder={lang === "ja" ? "例: 090-1234-5678" : lang === "en" ? "e.g. +1 234-567-8901" : "예: 010-1234-5678"} />
+                <span class="field-hint">{lang === "ja" ? "日本国外の電話番号もOK（国番号付き）" : lang === "en" ? "International numbers OK (with country code)" : "한국 전화번호도 괜찮아요"}</span>
               </label>
 
               {/* email */}
