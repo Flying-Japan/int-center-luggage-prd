@@ -10,6 +10,7 @@ import { buildOrderId, buildTagNo } from "../services/orderNumber";
 import { calculatePricePerDay, calculatePrepaidAmount, normalizeFlyingPassTier, flyingPassDiscountAmount, calculateExtraAmount } from "../services/pricing";
 import { calculateStorageDays, calculateExtraDays } from "../services/storage";
 import { createBugTask } from "../lib/asana";
+import { createSupabaseAdmin } from "../lib/supabase";
 import { displayOrderStatus, displayPaymentMethod, displayFlyingPassTier } from "../lib/display";
 import { fmtJST } from "../lib/dateFormat";
 import { StaffMenu, StaffTopbar } from "../lib/components";
@@ -65,9 +66,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
   // Run independent queries in parallel
   const [auditLogs, extensions] = await Promise.all([
     c.env.DB.prepare(
-      `SELECT a.*, u.display_name, u.username
-       FROM luggage_audit_logs a
-       LEFT JOIN user_profiles u ON a.staff_id = u.id
+      `SELECT a.* FROM luggage_audit_logs a
        WHERE a.order_id = ? ORDER BY a.timestamp DESC LIMIT 50`
     )
       .bind(orderId)
@@ -78,6 +77,17 @@ staffOrders.get("/staff/orders/:id", async (c) => {
       .bind(orderId)
       .all(),
   ]);
+
+  // Bulk-fetch staff names from Supabase PG
+  const staffIds = [...new Set(auditLogs.results.map((l: Record<string, unknown>) => l.staff_id as string).filter(Boolean))];
+  const staffNameMap: Record<string, string> = {};
+  if (staffIds.length > 0) {
+    const supabaseAdmin = createSupabaseAdmin(c.env);
+    const { data: profiles } = await supabaseAdmin.from("user_profiles").select("id, display_name, username").in("id", staffIds);
+    if (profiles) {
+      for (const p of profiles) staffNameMap[p.id] = p.display_name || p.username || p.id;
+    }
+  }
 
   const staff = getStaff(c);
 
@@ -293,7 +303,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
                   {auditLogs.results.map((l: Record<string, unknown>) => (
                     <tr>
                       <td style="white-space:nowrap">{l.timestamp ? new Date(l.timestamp as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
-                      <td>{(l.display_name as string) || (l.username as string) || (l.staff_id as string) || "-"}</td>
+                      <td>{staffNameMap[l.staff_id as string] || (l.staff_id as string) || "-"}</td>
                       <td><span class="status-pill" style="font-size:10px">{l.action as string}</span></td>
                       <td>{(l.details as string) || "-"}</td>
                     </tr>
