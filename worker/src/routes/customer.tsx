@@ -313,7 +313,9 @@ form { margin-top: 16px; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.pickup-time-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pickup-time-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
+.pickup-time-grid .field { min-width: 0; }
+.pickup-time-grid .control { min-width: 0; max-width: 100%; }
 .pickup-guide {
   margin-top: 4px; margin-bottom: 12px;
   border-left: 4px solid #2f80ed; background: #f2f7ff;
@@ -459,7 +461,8 @@ form { margin-top: 16px; }
   .notice-list { padding-left: 14px; font-size: 13px; line-height: 1.55; }
   .notice-list li { margin-bottom: 6px; }
   .grid2 { grid-template-columns: 1fr; }
-  .pickup-time-grid { grid-template-columns: 1fr; }
+  .pickup-time-grid { grid-template-columns: 1fr 1fr; }
+  .pickup-time-grid .control { max-width: 100%; overflow: hidden; }
   .preview-with-options { grid-template-columns: 1fr; }
   .preview-head { font-size: 12px; }
   .preview-value { font-size: 28px; }
