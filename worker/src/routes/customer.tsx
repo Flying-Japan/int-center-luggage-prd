@@ -468,6 +468,9 @@ form { margin-top: 16px; }
   background: #fff2f2; border: 1px solid #ffd4d4;
   color: #bd3030; font-size: 14px; font-weight: 600;
 }
+.field-error .control, .field-error .file-picker { border-color: #dc2626 !important; box-shadow: 0 0 0 2px rgba(220,38,38,0.15) !important; }
+.field-error .field-label { color: #dc2626 !important; }
+.check-row.field-error { border-color: #dc2626; background: #fef2f2; }
 .late-pickup { border-color: #f7c3c3 !important; background: #fff4f4 !important; }
 @keyframes riseIn {
   from { opacity: 0; transform: translateY(18px); }
@@ -1192,6 +1195,34 @@ form { margin-top: 16px; }
   formEl.addEventListener("submit", async function(event){
     event.preventDefault();
     if (isSubmitting) return;
+
+    // Validate required fields with specific messages
+    var nameEl=formEl.querySelector('[name="name"]');
+    var phoneEl=formEl.querySelector('[name="phone"]');
+    var emailEl=formEl.querySelector('[name="email"]');
+    var idImgEl=formEl.querySelector('[name="id_image"]');
+    var lugImgEl=formEl.querySelector('[name="luggage_image"]');
+    var consentEl=formEl.querySelector('[name="consent_checked"]');
+
+    // Clear previous highlights
+    formEl.querySelectorAll('.field-error').forEach(function(el){el.classList.remove('field-error');});
+
+    var missing=[];
+    if(!nameEl||!nameEl.value.trim()){missing.push({el:nameEl,msg:'${lang === "ja" ? "お名前" : lang === "en" ? "Name" : "이름"}'});};
+    if(!phoneEl||!phoneEl.value.trim()){missing.push({el:phoneEl,msg:'${lang === "ja" ? "電話番号" : lang === "en" ? "Phone" : "전화번호"}'});};
+    if(!emailEl||!emailEl.value.trim()||!emailEl.value.includes('@')){missing.push({el:emailEl,msg:'${lang === "ja" ? "メール" : lang === "en" ? "Email" : "이메일"}'});};
+    if(idImgEl&&!idImgEl.files.length){missing.push({el:idImgEl,msg:'${lang === "ja" ? "身分証写真" : lang === "en" ? "ID Photo" : "신분증 사진"}'});};
+    if(lugImgEl&&!lugImgEl.files.length){missing.push({el:lugImgEl,msg:'${lang === "ja" ? "荷物写真" : lang === "en" ? "Luggage Photo" : "짐 사진"}'});};
+    if(consentEl&&!consentEl.checked){missing.push({el:consentEl,msg:'${lang === "ja" ? "同意" : lang === "en" ? "Consent" : "유의사항 동의"}'});};
+
+    if(missing.length>0){
+      var names=missing.map(function(m){return m.msg;}).join(', ');
+      window.alert('${lang === "ja" ? "以下の項目を入力してください" : lang === "en" ? "Please fill in the following" : "다음 항목을 입력해주세요"}:\\n'+names);
+      missing.forEach(function(m){if(m.el){var f=m.el.closest('.field')||m.el.closest('.check-row');if(f)f.classList.add('field-error');}});
+      if(missing[0].el)missing[0].el.focus();
+      return;
+    }
+
     syncPickupHiddenValue();
     var bagValid = syncBagQuantities();
     if (!bagValid) {
