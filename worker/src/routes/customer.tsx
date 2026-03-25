@@ -614,7 +614,7 @@ form { margin-top: 16px; }
               {/* bag quantities */}
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                 <label class="field">
-                  <span class="field-label">{t("suitcase_qty", lang)}</span>
+                  <span class="field-label">{t("suitcase_qty", lang)} <span style="color:#dc2626">*</span></span>
                   <div class="companion-picker bag-qty-picker">
                     <select id="suitcase_qty_select" class="control control-compact" required>
                       {qtyOptions.map((n) => (
@@ -637,7 +637,7 @@ form { margin-top: 16px; }
                 </label>
 
                 <label class="field">
-                  <span class="field-label">{t("backpack_qty", lang)}</span>
+                  <span class="field-label">{t("backpack_qty", lang)} <span style="color:#dc2626">*</span></span>
                   <div class="companion-picker bag-qty-picker">
                     <select id="backpack_qty_select" class="control control-compact" required>
                       {qtyOptions.map((n) => (
@@ -1216,6 +1216,8 @@ form { margin-top: 16px; }
     if(!nEl||!nEl.value.trim())m.push({el:nEl,msg:'${lang === "ja" ? "お名前" : lang === "en" ? "Name" : "이름"}'});
     if(!pEl||!pEl.value.trim())m.push({el:pEl,msg:'${lang === "ja" ? "電話番号" : lang === "en" ? "Phone" : "전화번호"}'});
     if(!eEl||!eEl.value.trim()||!eEl.value.includes('@'))m.push({el:eEl,msg:'${lang === "ja" ? "メール" : lang === "en" ? "Email" : "이메일"}'});
+    var sVal=Number(suitcaseEl&&suitcaseEl.value||0),bVal=Number(backpackEl&&backpackEl.value||0);
+    if(sVal<=0&&bVal<=0)m.push({el:suitcaseSelectEl,msg:'${lang === "ja" ? "荷物数量" : lang === "en" ? "Bag quantity" : "짐 수량"}'});
     if(iEl&&!iEl.files.length)m.push({el:iEl,msg:'${lang === "ja" ? "身分証写真" : lang === "en" ? "ID Photo" : "신분증 사진"}'});
     if(lEl&&!lEl.files.length)m.push({el:lEl,msg:'${lang === "ja" ? "荷物写真" : lang === "en" ? "Luggage Photo" : "짐 사진"}'});
     if(cEl&&!cEl.checked)m.push({el:cEl,msg:'${lang === "ja" ? "同意" : lang === "en" ? "Consent" : "유의사항 동의"}'});
