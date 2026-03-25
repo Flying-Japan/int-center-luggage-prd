@@ -358,7 +358,7 @@ form { margin-top: 16px; }
   border-left: 4px solid #2f80ed; background: #f2f7ff;
   border-radius: 12px; padding: 12px;
 }
-.pickup-guide p { margin: 0; color: #1e3a8a; font-weight: 700; line-height: 1.5; font-size: 13px; }
+.pickup-guide p { margin: 0; color: #1e3a8a; font-weight: 700; line-height: 1.5; font-size: 13px; word-break: keep-all; overflow-wrap: break-word; }
 .companion-picker { display: grid; gap: 8px; }
 .companion-picker .control-compact { max-width: 100%; }
 .bag-qty-picker { max-width: 100%; }
@@ -1565,8 +1565,8 @@ a { color: inherit; text-decoration: none; }
 .summary-val { font-size: 14px; font-weight: 700; color: var(--text); text-align: right; }
 .summary-val-final { font-size: 18px; font-weight: 900; color: var(--primary); }
 .notice-row { display: flex; align-items: flex-start; gap: 8px; }
-.notice-muted { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.5; }
-.notice-warning { font-size: 13px; color: var(--warning); margin: 0; font-weight: 600; line-height: 1.5; }
+.notice-muted { font-size: 13px; color: var(--muted); margin: 0; line-height: 1.5; word-break: keep-all; overflow-wrap: break-word; }
+.notice-warning { font-size: 13px; color: var(--warning); margin: 0; font-weight: 600; line-height: 1.5; word-break: keep-all; overflow-wrap: break-word; }
 .notice-icon { font-size: 15px; flex-shrink: 0; line-height: 1.5; }
 .qr-wrap {
   display: flex; flex-direction: column; align-items: center; gap: 12px;
@@ -1578,11 +1578,11 @@ a { color: inherit; text-decoration: none; }
 .qr-order-id { font-size: 13px; color: var(--subtext); font-weight: 600; letter-spacing: 0.04em; }
 .completion-msg {
   font-size: 14px; line-height: 1.7; color: var(--text);
-  white-space: pre-line; text-align: center;
+  white-space: pre-line; text-align: center; word-break: keep-all; overflow-wrap: break-word;
 }
 .secondary-msg {
   font-size: 13px; line-height: 1.7; color: var(--subtext);
-  white-space: pre-line; text-align: center;
+  white-space: pre-line; text-align: center; word-break: keep-all; overflow-wrap: break-word;
 }
 .site-footer {
   padding: 28px 16px 24px; text-align: center;
