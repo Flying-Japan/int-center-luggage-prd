@@ -184,9 +184,15 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
             <p class="card-desc">접수 순서대로(오래된 순) 정렬됩니다.</p>
 
+            <div class="bulk-action-bar" id="bulk-bar">
+              <span class="bulk-action-label" id="bulk-count">0건 선택</span>
+              <button class="btn btn-sm btn-primary" id="bulk-paid">일괄 결제완료</button>
+              <button class="btn btn-sm" id="bulk-cancel" style="background:#dc2626;color:#fff;border-color:#dc2626">일괄 취소</button>
+            </div>
             <div class="table-wrap">
               <table id="staff-orders-table">
                 <colgroup>
+                  <col data-col-key="checkbox" />
                   <col data-col-key="name" />
                   <col data-col-key="tag_no" />
                   <col data-col-key="created_time" />
@@ -200,6 +206,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 </colgroup>
                 <thead>
                   <tr>
+                    <th data-col-key="checkbox"><input type="checkbox" id="select-all" style="width:16px;height:16px;cursor:pointer" /></th>
                     <th data-col-key="name">이름<span class="col-resize"></span></th>
                     <th data-col-key="tag_no">짐번호<span class="col-resize"></span></th>
                     <th data-col-key="created_time">접수 시각<span class="col-resize"></span></th>
@@ -220,6 +227,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     ].filter(Boolean).join(" ");
                     return (
                     <tr data-order-id={o.order_id} data-status={o.status} class={rowClasses || undefined}>
+                      <td data-col-key="checkbox"><input type="checkbox" class="row-select" data-order-id={o.order_id} style="width:16px;height:16px;cursor:pointer" /></td>
                       <td data-col-key="name">
                         <span class="editable" data-field="name" data-order-id={o.order_id}>{o.name || "-"}</span>
                         {o.parent_order_id && <span class="extension-badge">연장</span>}
@@ -487,6 +495,39 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             }
             document.addEventListener('click',function(e){
               if(activePopover&&!activePopover.cell.contains(e.target)) closePopover();
+            });
+
+            /* ── Bulk actions ── */
+            var selectAll=document.getElementById('select-all');
+            var bulkBar=document.getElementById('bulk-bar');
+            var bulkCount=document.getElementById('bulk-count');
+            var rowChecks=Array.from(document.querySelectorAll('.row-select'));
+
+            function getSelected(){return rowChecks.filter(function(c){return c.checked;}).map(function(c){return c.dataset.orderId;});}
+            function updateBulkBar(){
+              var sel=getSelected();
+              if(sel.length>0){bulkBar.classList.add('is-visible');bulkCount.textContent=sel.length+'건 선택';}
+              else{bulkBar.classList.remove('is-visible');}
+            }
+            if(selectAll){selectAll.addEventListener('change',function(){
+              rowChecks.forEach(function(c){c.checked=selectAll.checked;});
+              updateBulkBar();
+            });}
+            rowChecks.forEach(function(c){c.addEventListener('change',updateBulkBar);});
+
+            document.getElementById('bulk-paid').addEventListener('click',function(){
+              var ids=getSelected();if(!ids.length)return;
+              if(!confirm(ids.length+'건을 일괄 결제완료 처리하시겠습니까?'))return;
+              apiPost('/staff/api/orders/bulk-action',{order_ids:ids,action:'mark_paid'}).then(function(r){return r.json();}).then(function(d){
+                if(d.success)window.location.reload();else alert('처리 실패');
+              });
+            });
+            document.getElementById('bulk-cancel').addEventListener('click',function(){
+              var ids=getSelected();if(!ids.length)return;
+              if(!confirm(ids.length+'건을 일괄 취소 처리하시겠습니까? 이 작업은 되돌릴 수 없습니다.'))return;
+              apiPost('/staff/api/orders/bulk-action',{order_ids:ids,action:'cancel'}).then(function(r){return r.json();}).then(function(d){
+                if(d.success)window.location.reload();else alert('처리 실패');
+              });
             });
 
             /* ── Column resize ── */
