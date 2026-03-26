@@ -200,15 +200,15 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 </colgroup>
                 <thead>
                   <tr>
-                    <th data-col-key="name">이름</th>
-                    <th data-col-key="tag_no">짐번호</th>
-                    <th data-col-key="created_time">접수 시각</th>
-                    <th data-col-key="price">짐보관가격</th>
-                    <th data-col-key="pickup_time">짐 찾는 시각</th>
-                    <th data-col-key="pay_status">결제상태</th>
-                    <th data-col-key="pickup_status">수령상태</th>
-                    <th data-col-key="actions">업무처리</th>
-                    <th data-col-key="note">비고</th>
+                    <th data-col-key="name">이름<span class="col-resize"></span></th>
+                    <th data-col-key="tag_no">짐번호<span class="col-resize"></span></th>
+                    <th data-col-key="created_time">접수 시각<span class="col-resize"></span></th>
+                    <th data-col-key="price">짐보관가격<span class="col-resize"></span></th>
+                    <th data-col-key="pickup_time">짐 찾는 시각<span class="col-resize"></span></th>
+                    <th data-col-key="pay_status">결제상태<span class="col-resize"></span></th>
+                    <th data-col-key="pickup_status">수령상태<span class="col-resize"></span></th>
+                    <th data-col-key="actions">업무처리<span class="col-resize"></span></th>
+                    <th data-col-key="note">비고<span class="col-resize"></span></th>
                     <th data-col-key="detail">상세</th>
                   </tr>
                 </thead>
@@ -487,6 +487,50 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             document.addEventListener('click',function(e){
               if(activePopover&&!activePopover.cell.contains(e.target)) closePopover();
             });
+
+            /* ── Column resize ── */
+            var table=document.getElementById('staff-orders-table');
+            if(table){
+              var cols=table.querySelectorAll('colgroup col');
+              table.querySelectorAll('th .col-resize').forEach(function(handle){
+                var th=handle.parentElement;
+                var colKey=th.getAttribute('data-col-key');
+                var col=table.querySelector('col[data-col-key="'+colKey+'"]');
+                var startX,startW;
+                handle.addEventListener('mousedown',function(e){
+                  e.preventDefault();e.stopPropagation();
+                  startX=e.pageX;startW=th.offsetWidth;
+                  table.style.tableLayout='fixed';
+                  function onMove(ev){
+                    var diff=ev.pageX-startX;
+                    var newW=Math.max(40,startW+diff);
+                    if(col)col.style.width=newW+'px';
+                  }
+                  function onUp(){
+                    document.removeEventListener('mousemove',onMove);
+                    document.removeEventListener('mouseup',onUp);
+                  }
+                  document.addEventListener('mousemove',onMove);
+                  document.addEventListener('mouseup',onUp);
+                });
+                handle.addEventListener('touchstart',function(e){
+                  e.stopPropagation();
+                  var touch=e.touches[0];startX=touch.pageX;startW=th.offsetWidth;
+                  table.style.tableLayout='fixed';
+                  function onMove(ev){
+                    var diff=ev.touches[0].pageX-startX;
+                    var newW=Math.max(40,startW+diff);
+                    if(col)col.style.width=newW+'px';
+                  }
+                  function onUp(){
+                    document.removeEventListener('touchmove',onMove);
+                    document.removeEventListener('touchend',onUp);
+                  }
+                  document.addEventListener('touchmove',onMove,{passive:true});
+                  document.addEventListener('touchend',onUp);
+                },{passive:true});
+              });
+            }
 
           })();
         ` }} />

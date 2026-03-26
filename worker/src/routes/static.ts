@@ -544,6 +544,11 @@ tbody tr:hover { background: #eef5ff; }
 #staff-orders-table td[data-col-key="note"] { white-space: normal; word-break: break-word; overflow: visible; }
 #staff-orders-table td[data-col-key="tag_no"] { overflow: visible; }
 
+#staff-orders-table th .col-resize {
+  position: absolute; right: 0; top: 0; bottom: 0; width: 5px;
+  cursor: col-resize; background: transparent; z-index: 5;
+}
+#staff-orders-table th .col-resize:hover { background: var(--primary); opacity: 0.3; }
 #staff-orders-table th {
   position: relative;
   padding-right: 14px;
