@@ -1319,6 +1319,7 @@ customer.post("/customer/submit", async (c) => {
   const name = String(body.name || "").trim();
   const phone = String(body.phone || "").trim();
   const email = String(body.email || "").trim();
+  const paymentMethod = String(body.payment_method || "CASH").trim();
   const companionCount = parseInt(String(body.companion_count || "0"), 10) || 0;
   const suitcaseQty = Math.min(99, parseInt(String(body.suitcase_qty || "0"), 10) || 0);
   const backpackQty = Math.min(99, parseInt(String(body.backpack_qty || "0"), 10) || 0);
@@ -1403,14 +1404,14 @@ customer.post("/customer/submit", async (c) => {
   try {
     await c.env.DB.prepare(
       `INSERT INTO luggage_orders (
-        order_id, tag_no, name, phone, email, companion_count,
+        order_id, tag_no, name, phone, email, payment_method, companion_count,
         suitcase_qty, backpack_qty, set_qty,
         expected_pickup_at, expected_storage_days,
         price_per_day, discount_rate, prepaid_amount,
         flying_pass_tier, flying_pass_discount_amount, final_amount,
         id_image_url, luggage_image_url,
         consent_checked, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING')`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING')`
     )
       .bind(
         orderId,
@@ -1418,6 +1419,7 @@ customer.post("/customer/submit", async (c) => {
         name,
         phone,
         email,
+        paymentMethod,
         companionCount,
         suitcaseQty,
         backpackQty,
