@@ -522,15 +522,15 @@ tbody tr:hover { background: #eef5ff; }
 
 /* ── Staff orders table ── */
 #staff-orders-table { table-layout: fixed; min-width: 100%; }
-#staff-orders-table col[data-col-key="name"] { width: 8%; }
-#staff-orders-table col[data-col-key="tag_no"] { width: 5%; }
+#staff-orders-table col[data-col-key="name"] { width: 12%; }
+#staff-orders-table col[data-col-key="tag_no"] { width: 6%; }
 #staff-orders-table col[data-col-key="created_time"] { width: 8%; }
 #staff-orders-table col[data-col-key="price"] { width: 7%; }
 #staff-orders-table col[data-col-key="pickup_time"] { width: 7%; }
 #staff-orders-table col[data-col-key="pay_status"] { width: 6%; }
 #staff-orders-table col[data-col-key="pickup_status"] { width: 6%; }
-#staff-orders-table col[data-col-key="actions"] { width: 18%; }
-#staff-orders-table col[data-col-key="note"] { width: 32%; }
+#staff-orders-table col[data-col-key="actions"] { width: 16%; }
+#staff-orders-table col[data-col-key="note"] { width: 29%; }
 #staff-orders-table col[data-col-key="detail"] { width: 3%; }
 
 #staff-orders-table th, #staff-orders-table td {
@@ -540,6 +540,9 @@ tbody tr:hover { background: #eef5ff; }
   line-height: 1.3;
   border-bottom: 1px solid #e2e9f3;
 }
+#staff-orders-table td[data-col-key="name"] { white-space: normal; word-break: break-all; overflow: visible; }
+#staff-orders-table td[data-col-key="note"] { white-space: normal; word-break: break-word; overflow: visible; }
+#staff-orders-table td[data-col-key="tag_no"] { overflow: visible; }
 
 #staff-orders-table th {
   position: relative;
@@ -931,7 +934,8 @@ tbody tr:hover { background: #eef5ff; }
 .editable { cursor: pointer; border-bottom: 1px dashed transparent; transition: border-color 0.15s; }
 .editable:hover { border-bottom-color: #cbd5e1; }
 .editable.editing { background: #f8faff; border-bottom: 2px solid var(--primary, #2383e2); outline: none; padding: 2px 4px; min-width: 30px; }
-.edit-input { font: inherit; color: inherit; border: 1px solid var(--primary, #2383e2); border-radius: 4px; padding: 3px 6px; background: #fff; outline: none; width: 100%; }
+.edit-input { font: inherit; color: inherit; border: 1px solid var(--primary, #2383e2); border-radius: 4px; padding: 3px 6px; background: #fff; outline: none; width: 100%; min-width: 60px; z-index: 10; position: relative; }
+#staff-orders-table td:has(.edit-input) { overflow: visible; }
 
 /* ── Inline action buttons ── */
 .inline-actions { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
