@@ -91,7 +91,7 @@ ops.get("/staff/cash-closing", async (c) => {
                       <td><a href={`/staff/cash-closing/${cl.closing_id}`}>{cl.business_date as string}</a></td>
                       <td>{CLOSING_TYPE_LABELS[cl.closing_type as string] || cl.closing_type as string}</td>
                       <td><span class="status-pill">{WORKFLOW_LABELS[cl.workflow_status as string] || cl.workflow_status as string}</span></td>
-                      <td>¥{cl.total_amount as number}</td>
+                      <td>¥{(cl.total_amount as number).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -199,26 +199,26 @@ ops.get("/staff/cash-closing/:id", async (c) => {
             <div class="stat-grid" style="margin-bottom:16px">
               <div class="card stat-card">
                 <p class="stat-label">현금 합계</p>
-                <p class="stat-value">¥{cl.total_amount as number}</p>
+                <p class="stat-value">¥{(cl.total_amount as number).toLocaleString()}</p>
               </div>
               <div class="card stat-card">
                 <p class="stat-label">QR 실제</p>
-                <p class="stat-value">¥{cl.actual_qr_amount as number}</p>
+                <p class="stat-value">¥{(cl.actual_qr_amount as number).toLocaleString()}</p>
               </div>
               <div class="card stat-card">
                 <p class="stat-label">자동매출</p>
-                <p class="stat-value">¥{cl.check_auto_amount as number}</p>
+                <p class="stat-value">¥{(cl.check_auto_amount as number).toLocaleString()}</p>
               </div>
               <div class="card stat-card">
                 <p class="stat-label">차액</p>
-                <p class="stat-value" style={`color:${(cl.difference_amount as number) === 0 ? '#166534' : '#dc2626'}`}>¥{cl.difference_amount as number}</p>
+                <p class="stat-value" style={`color:${(cl.difference_amount as number) === 0 ? '#166534' : '#dc2626'}`}>¥{(cl.difference_amount as number).toLocaleString()}</p>
               </div>
             </div>
 
             <div class="summary-grid" style="font-size:13px">
-              <p><strong>PayPay</strong><span>¥{cl.paypay_amount as number}</span></p>
-              <p><strong>총 실제액</strong><span>¥{cl.actual_amount as number}</span></p>
-              <p><strong>QR 차액</strong><span style={`color:${(cl.qr_difference_amount as number) === 0 ? '#166534' : '#dc2626'}`}>¥{cl.qr_difference_amount as number}</span></p>
+              <p><strong>PayPay</strong><span>¥{(cl.paypay_amount as number).toLocaleString()}</span></p>
+              <p><strong>총 실제액</strong><span>¥{(cl.actual_amount as number).toLocaleString()}</span></p>
+              <p><strong>QR 차액</strong><span style={`color:${(cl.qr_difference_amount as number) === 0 ? '#166534' : '#dc2626'}`}>¥{(cl.qr_difference_amount as number).toLocaleString()}</span></p>
               <p><strong>메모</strong><span>{(cl.note as string) || "-"}</span></p>
             </div>
 

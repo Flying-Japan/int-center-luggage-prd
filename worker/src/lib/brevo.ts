@@ -85,6 +85,18 @@ export async function sendOrderConfirmation(
       <p style="margin:12px 0;padding:10px 12px;background:#eaf2ff;border-radius:8px;font-size:12px;color:#1e3a8a;font-weight:600;text-align:center">
         ${lang === "ja" ? "営業時間 09:00〜21:00 内にお受け取りください" : lang === "en" ? "Pickup available during business hours: 09:00-21:00" : "영업시간 09:00~21:00 내 수령 가능합니다"}
       </p>
+
+      <!-- Notices / Cautions -->
+      <div style="margin:12px 0;padding:12px 14px;background:#f0f7ff;border:1px solid #bfdbfe;border-radius:8px">
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#1e3a8a">${lang === "ja" ? "ご注意事項" : lang === "en" ? "Important Notices" : "주의사항"}</p>
+        <ul style="margin:0;padding:0 0 0 16px;font-size:11px;color:#1e3a8a;line-height:1.6">
+          <li>${lang === "ja" ? "料金は前払いです" : lang === "en" ? "Payment must be made in advance" : "요금은 선불 결제입니다"}</li>
+          <li>${lang === "ja" ? "営業時間(09:00〜21:00)内に受け取りください" : lang === "en" ? "Pickup available during hours: 09:00-21:00" : "영업시간(09:00~21:00) 내 수령 가능"}</li>
+          <li>${lang === "ja" ? "受取遅延の場合、追加料金が発生します" : lang === "en" ? "Late pickup incurs additional charges" : "수령 지연 시 추가 요금 발생"}</li>
+          <li>${lang === "ja" ? "保管期限が過ぎた物品は2週間保管後に処分されます" : lang === "en" ? "Items past storage period disposed after 2 weeks" : "보관기한이 지난 물품은 2주간 보관 후 폐기"}</li>
+          <li>${lang === "ja" ? "写真は本人確認用で、2週間後に自動削除されます" : lang === "en" ? "Photos for ID verification only, auto-deleted after 2 weeks" : "사진은 본인 확인용이며, 2주 후 자동 삭제"}</li>
+        </ul>
+      </div>
     </div>
 
     <!-- Rental suggestions -->
