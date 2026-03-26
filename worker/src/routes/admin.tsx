@@ -232,7 +232,7 @@ admin.get("/staff/admin/sales", async (c) => {
             const rowBg = isHoliday ? "background:#fef9ee" : "";
             return (
               <tr style={`border-bottom:1px solid var(--line);${rowBg}`}>
-                <td class="sales-td" style="white-space:nowrap">{r.dateJP}{r.isWeekend && !r.jpHoliday && !r.krHoliday ? " (주말)" : ""}{r.jpHoliday ? " (JP)" : ""}{r.krHoliday ? " (KR)" : ""}</td>
+                <td class="sales-td" style={`white-space:nowrap;${r.jpHoliday || r.krHoliday ? "color:#dc2626;font-weight:600" : r.isWeekend ? "color:#2383e2;font-weight:600" : ""}`}>{r.dateJP}{r.isWeekend && !r.jpHoliday && !r.krHoliday ? " 🔵" : ""}{r.jpHoliday ? ` 🇯🇵` : ""}{r.krHoliday ? ` 🇰🇷` : ""}</td>
                 <td class="sales-td sales-td--right">{r.orders || "-"}</td>
                 <td class="sales-td sales-td--right">{r.cash ? `¥${r.cash.toLocaleString()}` : "-"}</td>
                 <td class="sales-td sales-td--right">{r.qr ? `¥${r.qr.toLocaleString()}` : "-"}</td>
