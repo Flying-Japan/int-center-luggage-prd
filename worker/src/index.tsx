@@ -318,7 +318,9 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 if(orig==='-') orig='';
                 var inp = document.createElement('input');
                 inp.className='edit-input';
+                var field=el.dataset.field;
                 inp.type = el.dataset.type || 'text';
+                if(field==='tag_no'){inp.inputMode='numeric';inp.pattern='[0-9]*';}
                 inp.value = el.dataset.type==='datetime-local' ? (el.dataset.rawValue||'') : orig;
                 el.textContent='';
                 el.appendChild(inp);

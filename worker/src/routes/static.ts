@@ -934,7 +934,7 @@ tbody tr:hover { background: #eef5ff; }
 .editable { cursor: pointer; border-bottom: 1px dashed transparent; transition: border-color 0.15s; }
 .editable:hover { border-bottom-color: #cbd5e1; }
 .editable.editing { background: #f8faff; border-bottom: 2px solid var(--primary, #2383e2); outline: none; padding: 2px 4px; min-width: 30px; }
-.edit-input { font: inherit; color: inherit; border: 1px solid var(--primary, #2383e2); border-radius: 4px; padding: 3px 6px; background: #fff; outline: none; width: 100%; min-width: 60px; z-index: 10; position: relative; }
+.edit-input { font: inherit; color: #191f28 !important; border: 1px solid var(--primary, #2383e2); border-radius: 4px; padding: 3px 6px; background: #fff !important; outline: none; width: 100%; min-width: 60px; z-index: 10; position: relative; }
 #staff-orders-table td:has(.edit-input) { overflow: visible; }
 
 /* ── Inline action buttons ── */
