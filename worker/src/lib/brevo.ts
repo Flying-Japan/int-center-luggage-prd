@@ -59,7 +59,7 @@ export async function sendOrderConfirmation(
         </tr>
         <tr style="border-bottom:1px solid #f0f0ee">
           <td style="padding:10px 0;color:#787774">${lang === "ja" ? "荷物" : lang === "en" ? "Luggage" : "짐 수량"}</td>
-          <td style="padding:10px 0;font-weight:600;text-align:right">${lang === "ja" ? `スーツケース ${suitcaseQty} / バッグ ${backpackQty}` : lang === "en" ? `Suitcase ${suitcaseQty} / Bag ${backpackQty}` : `캐리어 ${suitcaseQty} / 배낭 ${backpackQty}`}</td>
+          <td style="padding:10px 0;font-weight:600;text-align:right">${lang === "ja" ? `スーツケース ${suitcaseQty} / バッグ ${backpackQty}` : lang === "en" ? `Suitcase ${suitcaseQty} / Backpack ${backpackQty}` : `캐리어 ${suitcaseQty} / 배낭/백팩 ${backpackQty}`}</td>
         </tr>
         <tr style="border-bottom:1px solid #f0f0ee">
           <td style="padding:10px 0;color:#787774">${lang === "ja" ? "受取予定" : lang === "en" ? "Pickup" : "수령 예정"}</td>
@@ -94,7 +94,12 @@ export async function sendOrderConfirmation(
         <tr>
           <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🎮 ${lang === "ja" ? "マリオバンド" : lang === "en" ? "Mario Band" : "마리오밴드"}</a></td>
           <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/68dce579a48a271c2018bb54" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🪄 ${lang === "ja" ? "HP杖" : lang === "en" ? "HP Wand" : "해리포터 지팡이"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">💇 ${lang === "ja" ? "ダイソン" : lang === "en" ? "Dyson" : "다이슨 에어랩"}</a></td>
+          <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">💇 ${lang === "ja" ? "エアラップ" : lang === "en" ? "Airwrap" : "다이슨 에어랩"}</a></td>
+        </tr>
+        <tr>
+          <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/6980349d3b9377397d436f46" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">✨ ${lang === "ja" ? "ストレートナー" : lang === "en" ? "Straightener" : "다이슨 고데기"}</a></td>
+          <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">👶 ${lang === "ja" ? "ベビーカー" : lang === "en" ? "Stroller" : "유모차"}</a></td>
+          <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/694123cd003f786e5c3c350e" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🎫 ${lang === "ja" ? "フードパス" : lang === "en" ? "Food Pass" : "먹방패스"}</a></td>
         </tr>
       </table>
     </div>
