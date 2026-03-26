@@ -545,10 +545,11 @@ tbody tr:hover { background: #eef5ff; }
 #staff-orders-table td[data-col-key="tag_no"] { overflow: visible; }
 
 #staff-orders-table th .col-resize {
-  position: absolute; right: 0; top: 0; bottom: 0; width: 5px;
-  cursor: col-resize; background: transparent; z-index: 5;
+  position: absolute; right: -1px; top: 4px; bottom: 4px; width: 4px;
+  cursor: col-resize; background: #d0d5dd; border-radius: 2px; z-index: 5;
+  opacity: 0.5; transition: opacity .15s, background .15s;
 }
-#staff-orders-table th .col-resize:hover { background: var(--primary); opacity: 0.3; }
+#staff-orders-table th .col-resize:hover { background: var(--primary); opacity: 1; }
 #staff-orders-table th {
   position: relative;
   padding-right: 14px;
