@@ -10,6 +10,7 @@ import staticRoutes from "./routes/static";
 import { securityHeaders, errorHandler, notFoundHandler, createRateLimiter } from "./middleware/security";
 import { staffAuth, getStaff } from "./middleware/auth";
 import { runRetentionCleanup } from "./services/retention";
+import { syncDailySales } from "./services/dailySalesSync";
 import { tagColorClass, TAG_COLOR_RANGES } from "./lib/tagColors";
 import { StaffMenu, StaffTopbar } from "./lib/components";
 
@@ -587,9 +588,13 @@ export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(
       (async () => {
-        console.log(`Scheduled retention cleanup triggered: ${event.cron}`);
+        console.log(`Scheduled tasks triggered: ${event.cron}`);
         const result = await runRetentionCleanup(env.DB, env.IMAGES);
         console.log(`Retention cleanup complete: ${JSON.stringify(result)}`);
+        if (env.GOOGLE_SHEETS_CREDENTIALS) {
+          const syncResult = await syncDailySales(env.DB, env.GOOGLE_SHEETS_CREDENTIALS);
+          console.log(`Daily sales sync complete: ${JSON.stringify(syncResult)}`);
+        }
       })()
     );
   },
