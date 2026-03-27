@@ -1514,9 +1514,9 @@ customer.get("/customer/orders/:id", async (c) => {
   if (!order || !token || order.view_token !== token || tokenExpired) {
     const titles: Record<string, string> = { ko: "접수가 완료되었습니다", en: "Submission complete", ja: "受付が完了しました" };
     const msgs: Record<string, string> = {
-      ko: "접수 확인 내용은 이메일로 발송되었습니다.\n이메일을 확인해주세요.",
-      en: "Your confirmation details have been sent to your email.\nPlease check your inbox.",
-      ja: "受付確認の内容はメールで送信されました。\nメールをご確認ください。",
+      ko: "접수 확인 내용은 신청서 작성 시 입력하신\n이메일로 발송되었습니다.\n이메일을 확인해주세요.",
+      en: "Confirmation details have been sent to\nthe email you entered on the form.\nPlease check your inbox.",
+      ja: "受付確認の内容は申請時にご入力いただいた\nメールアドレスに送信されました。\nメールをご確認ください。",
     };
     return c.html(
       <html lang={lang}>
