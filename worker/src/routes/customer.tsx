@@ -1459,7 +1459,11 @@ customer.post("/customer/submit", async (c) => {
     );
   }
 
-  return c.redirect(`/customer/orders/${orderId}?lang=${lang}`);
+  // Generate one-time view token
+  const viewToken = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+  await c.env.DB.prepare("UPDATE luggage_orders SET view_token = ? WHERE order_id = ?").bind(viewToken, orderId).run();
+
+  return c.redirect(`/customer/orders/${orderId}?lang=${lang}&token=${viewToken}`);
 });
 
 // ---------------------------------------------------------------------------
@@ -1468,13 +1472,14 @@ customer.post("/customer/submit", async (c) => {
 customer.get("/customer/orders/:id", async (c) => {
   const orderId = c.req.param("id");
   const lang = normalizeLang(c.req.query("lang"));
+  const token = c.req.query("token") || "";
 
   const order = await c.env.DB.prepare(
     `SELECT order_id, name, suitcase_qty, backpack_qty, set_qty,
             expected_pickup_at, expected_storage_days,
             price_per_day, discount_rate, prepaid_amount,
             flying_pass_tier, flying_pass_discount_amount, final_amount,
-            payment_method, status, created_at
+            payment_method, status, created_at, view_token
      FROM luggage_orders WHERE order_id = ?`
   )
     .bind(orderId)
@@ -1495,17 +1500,37 @@ customer.get("/customer/orders/:id", async (c) => {
       payment_method: string | null;
       status: string;
       created_at: string;
+      view_token: string | null;
     }>();
 
-  if (!order) {
+  if (!order || !token || order.view_token !== token) {
+    const titles: Record<string, string> = { ko: "접수가 완료되었습니다", en: "Submission complete", ja: "受付が完了しました" };
+    const msgs: Record<string, string> = {
+      ko: "접수 확인 내용은 이메일로 발송되었습니다.\n이메일을 확인해주세요.",
+      en: "Your confirmation details have been sent to your email.\nPlease check your inbox.",
+      ja: "受付確認の内容はメールで送信されました。\nメールをご確認ください。",
+    };
     return c.html(
-      <html>
-        <head><meta charset="UTF-8" /><title>Not Found</title></head>
-        <body><h1>Order not found</h1></body>
-      </html>,
-      404
+      <html lang={lang}>
+        <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><link rel="stylesheet" href="/static/styles.css" /><title>{titles[lang]}</title></head>
+        <body>
+          <div class="bg-orb bg-orb-left" /><div class="bg-orb bg-orb-right" />
+          <header class="topbar"><div class="topbar-inner"><a class="brand" href="/customer"><img class="brand-logo-horizontal" src="/static/logo-horizontal.png?v=2" alt="Flying" height="26" style="mix-blend-mode:multiply" /></a></div></header>
+          <main style="max-width:420px;margin:60px auto;padding:0 16px;text-align:center">
+            <div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#22c87a,#0fa966);display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
+              <svg width="24" height="24" viewBox="0 0 32 32" fill="none"><path d="M7 16.5L13 22.5L25 10" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <h2 style="font-size:20px;font-weight:800;margin:0 0 12px">{titles[lang]}</h2>
+            <p style="font-size:14px;color:var(--muted);line-height:1.7;white-space:pre-line">{msgs[lang]}</p>
+          </main>
+        </body>
+      </html>
     );
   }
+
+  // Token is valid — clear it after 10 minutes (allows lang switching)
+  // The retention cron also clears old tokens
+
 
   const completionMsgs = await loadCompletionMessages(c.env.DB);
   const finalAmountFormatted = `¥${order.final_amount.toLocaleString()}`;
@@ -1717,9 +1742,9 @@ a { color: inherit; text-decoration: none; }
               <img src="/static/logo-horizontal.png?v=2" alt={t("brand_name", lang)} height="26" style="mix-blend-mode:multiply" />
             </a>
             <nav class="lang-switcher">
-              <a href={`/customer/orders/${orderId}?lang=ko`} class={`lang-btn${lang === "ko" ? " lang-btn-active" : ""}`}>한국어</a>
-              <a href={`/customer/orders/${orderId}?lang=en`} class={`lang-btn${lang === "en" ? " lang-btn-active" : ""}`}>EN</a>
-              <a href={`/customer/orders/${orderId}?lang=ja`} class={`lang-btn${lang === "ja" ? " lang-btn-active" : ""}`}>日本語</a>
+              <a href={`/customer/orders/${orderId}?lang=ko&token=${token}`} class={`lang-btn${lang === "ko" ? " lang-btn-active" : ""}`}>한국어</a>
+              <a href={`/customer/orders/${orderId}?lang=en&token=${token}`} class={`lang-btn${lang === "en" ? " lang-btn-active" : ""}`}>EN</a>
+              <a href={`/customer/orders/${orderId}?lang=ja&token=${token}`} class={`lang-btn${lang === "ja" ? " lang-btn-active" : ""}`}>日本語</a>
             </nav>
           </div>
         </header>
