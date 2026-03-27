@@ -9,6 +9,29 @@ staticRoutes.get("/favicon.ico", (c) => {
   return c.body(svg, 200, { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=86400" });
 });
 
+// robots.txt for search engines
+staticRoutes.get("/robots.txt", (c) => {
+  const txt = `User-agent: *
+Allow: /customer
+Disallow: /staff/
+Disallow: /admin/
+Disallow: /api/
+
+User-agent: Googlebot
+Allow: /
+
+User-agent: Yeti
+Allow: /
+Crawl-delay: 5
+
+User-agent: Daum
+Allow: /
+
+Sitemap: https://luggage.flyingjp.com/sitemap.xml
+`;
+  return c.text(txt, 200, { "Content-Type": "text/plain", "Cache-Control": "public, max-age=86400" });
+});
+
 // Sitemap for search engines
 staticRoutes.get("/sitemap.xml", (c) => {
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
