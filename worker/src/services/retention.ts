@@ -1,14 +1,12 @@
 /**
  * Data retention and cleanup service.
- * Ported from Python: app/services/retention.py
  *
- * Two-pass cleanup:
- * 1. 14-day pass: Delete ID/luggage images from R2, clear URL fields in DB
- * 2. 60-day pass: Delete entire order record + associated audit logs
+ * Image cleanup only:
+ * - 14-day pass: Delete ID/luggage images from R2, clear URL fields in DB
+ * - Customer order data is kept permanently for service and marketing purposes
  */
 
 const ID_IMAGE_RETENTION_DAYS = 14;
-const ORDER_RETENTION_DAYS = 60;
 
 export type RetentionResult = {
   imagesCleared: number;
@@ -74,29 +72,7 @@ export async function runRetentionCleanup(
     result.imagesCleared = clearedOrderIds.length;
   }
 
-  // Pass 2: Delete orders older than 60 days
-  const orderCutoff = daysAgoISO(ORDER_RETENTION_DAYS);
-  const oldOrders = await db
-    .prepare("SELECT order_id FROM luggage_orders WHERE created_at < ?")
-    .bind(orderCutoff)
-    .all<{ order_id: string }>();
-
-  if (oldOrders.results.length > 0) {
-    const orderIds = oldOrders.results.map((o) => o.order_id);
-    const placeholders = orderIds.map(() => "?").join(",");
-
-    const batchResults = await db.batch([
-      db
-        .prepare(`DELETE FROM luggage_audit_logs WHERE order_id IN (${placeholders})`)
-        .bind(...orderIds),
-      db
-        .prepare(`DELETE FROM luggage_orders WHERE order_id IN (${placeholders})`)
-        .bind(...orderIds),
-    ]);
-
-    result.auditLogsDeleted = batchResults[0].meta.changes;
-    result.ordersDeleted = batchResults[1].meta.changes;
-  }
+  // Customer order data kept permanently — no deletion pass
 
   return result;
 }
