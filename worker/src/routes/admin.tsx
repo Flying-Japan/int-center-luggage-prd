@@ -1099,6 +1099,9 @@ admin.get("/staff/admin/customers", async (c) => {
               <span style="font-size:13px;color:var(--muted)">총 {total.toLocaleString()}명</span>
             </div>
 
+            <div style="margin-bottom:12px;padding:10px 14px;background:#f0f4f8;border-radius:8px;font-size:11px;color:#475569;line-height:1.6">
+              🔒 개인정보 보호를 위해 이름은 마스킹 처리되며, 전화번호·이메일은 표시되지 않습니다. 본 페이지는 데이터 분석 목적으로만 사용됩니다.
+            </div>
             <form method="get" action="/staff/admin/customers" style="margin-bottom:12px;display:flex;gap:8px">
               <input type="text" name="q" value={q} placeholder="이름 검색" class="table-control" style="flex:1;max-width:300px" />
               <button type="submit" class="btn btn-sm btn-primary">검색</button>
