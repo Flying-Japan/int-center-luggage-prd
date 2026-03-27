@@ -166,7 +166,7 @@ customer.get("/customer", (c) => {
   // Rental banners — shuffled randomly on each render
   const bannerDefs = [
     { emoji: "🎮", bg: "linear-gradient(135deg,#4285F4 0%,#1b6ec2 100%)", color: "#fff", tag: "USJ", url: "https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa",
-      title: { ko: "유니버셜 스튜디오 가시나요?", en: "Going to Universal Studios?", ja: "USJに行きますか？" },
+      title: { ko: "USJ 가시나요?", en: "Going to USJ?", ja: "USJに行きますか？" },
       sub: { ko: "마리오밴드 · 해리포터 지팡이 대여", en: "Mario Band & Wand rentals", ja: "マリオバンド・杖レンタル" },
       cta: { ko: "대여하기", en: "Rent now", ja: "レンタル" } },
     { emoji: "✨", bg: "linear-gradient(135deg,#ec4899 0%,#be185d 100%)", color: "#fff", tag: "HOT", url: "https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596",
@@ -189,7 +189,7 @@ customer.get("/customer", (c) => {
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
           <span style="font-size:9px;font-weight:800;background:rgba(255,255,255,0.25);padding:2px 6px;border-radius:4px;letter-spacing:0.05em">{b.tag}</span>
-          <p style="font-size:14px;font-weight:700;margin:0;line-height:1.2">{b.title[lang] || b.title.ko}</p>
+          <p style="font-size:14px;font-weight:700;margin:0;line-height:1.3;word-break:keep-all">{b.title[lang] || b.title.ko}</p>
         </div>
         <p style="font-size:11px;opacity:0.85;margin:0">{b.sub[lang] || b.sub.ko}</p>
       </div>
