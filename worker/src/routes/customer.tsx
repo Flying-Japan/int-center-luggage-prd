@@ -1506,9 +1506,9 @@ customer.get("/customer/orders/:id", async (c) => {
       updated_at: string | null;
     }>();
 
-  // Token valid for 1 hour after creation
+  // Token valid for 5 minutes after creation
   const tokenExpired = order?.view_token && order.updated_at
-    ? (Date.now() - new Date(order.updated_at).getTime()) > 60 * 60 * 1000
+    ? (Date.now() - new Date(order.updated_at).getTime()) > 5 * 60 * 1000
     : false;
 
   if (!order || !token || order.view_token !== token || tokenExpired) {
