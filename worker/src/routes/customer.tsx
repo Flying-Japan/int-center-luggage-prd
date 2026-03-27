@@ -1506,31 +1506,36 @@ customer.get("/customer/orders/:id", async (c) => {
       updated_at: string | null;
     }>();
 
-  // Token valid for 10 minutes after creation
+  // Token valid for 1 hour after creation
   const tokenExpired = order?.view_token && order.updated_at
-    ? (Date.now() - new Date(order.updated_at).getTime()) > 10 * 60 * 1000
+    ? (Date.now() - new Date(order.updated_at).getTime()) > 60 * 60 * 1000
     : false;
 
   if (!order || !token || order.view_token !== token || tokenExpired) {
-    const titles: Record<string, string> = { ko: "접수가 완료되었습니다", en: "Submission complete", ja: "受付が完了しました" };
-    const msgs: Record<string, string> = {
-      ko: "접수 확인 내용은 신청서 작성 시 입력하신\n이메일로 발송되었습니다.\n이메일을 확인해주세요.",
-      en: "Confirmation details have been sent to\nthe email you entered on the form.\nPlease check your inbox.",
-      ja: "受付確認の内容は申請時にご入力いただいた\nメールアドレスに送信されました。\nメールをご確認ください。",
-    };
     return c.html(
       <html lang={lang}>
-        <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><link rel="stylesheet" href="/static/styles.css" /><title>{titles[lang]}</title></head>
-        <body>
-          <div class="bg-orb bg-orb-left" /><div class="bg-orb bg-orb-right" />
+        <head>
+          <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+          <link rel="stylesheet" href="/static/styles.css" />
+          <title>{lang === "ja" ? "受付完了" : lang === "en" ? "Complete" : "접수 완료"}</title>
+          <style>{`
+            .fb-card { max-width:380px; margin:80px auto; padding:32px 24px; background:#fff; border-radius:20px; box-shadow:0 4px 24px rgba(0,0,0,0.06); text-align:center; }
+            .fb-icon { width:56px; height:56px; margin:0 auto 20px; border-radius:50%; background:linear-gradient(135deg,#3b82f6,#2563eb); display:flex; align-items:center; justify-content:center; }
+            .fb-title { font-size:17px; font-weight:700; color:#1e293b; margin:0 0 10px; }
+            .fb-msg { font-size:13px; color:#64748b; line-height:1.8; margin:0 0 20px; }
+            .fb-btn { display:inline-block; padding:10px 28px; background:#2383e2; color:#fff; border-radius:10px; text-decoration:none; font-size:13px; font-weight:600; }
+          `}</style>
+        </head>
+        <body style="background:#f1f5f9">
           <header class="topbar"><div class="topbar-inner"><a class="brand" href="/customer"><img class="brand-logo-horizontal" src="/static/logo-horizontal.png?v=2" alt="Flying" height="26" style="mix-blend-mode:multiply" /></a></div></header>
-          <main style="max-width:420px;margin:60px auto;padding:0 16px;text-align:center">
-            <div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#22c87a,#0fa966);display:flex;align-items:center;justify-content:center;margin:0 auto 16px">
-              <svg width="24" height="24" viewBox="0 0 32 32" fill="none"><path d="M7 16.5L13 22.5L25 10" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div class="fb-card">
+            <div class="fb-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M3 8l9 6 9-6" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2" y="5" width="20" height="14" rx="3" stroke="white" stroke-width="1.8"/></svg>
             </div>
-            <h2 style="font-size:20px;font-weight:800;margin:0 0 12px">{titles[lang]}</h2>
-            <p style="font-size:14px;color:var(--muted);line-height:1.7;white-space:pre-line">{msgs[lang]}</p>
-          </main>
+            <p class="fb-title">{lang === "ja" ? "メールをご確認ください" : lang === "en" ? "Check your email" : "이메일을 확인해주세요"}</p>
+            <p class="fb-msg">{lang === "ja" ? "受付確認の内容は申請時にご入力いただいた\nメールアドレスに送信されました。" : lang === "en" ? "Confirmation details have been sent to\nthe email you entered on the form." : "접수 확인 내용은 신청서 작성 시\n입력하신 이메일로 발송되었습니다."}</p>
+            <a href="/customer" class="fb-btn">{lang === "ja" ? "受付フォームへ" : lang === "en" ? "Back to form" : "접수 화면으로"}</a>
+          </div>
         </body>
       </html>
     );
