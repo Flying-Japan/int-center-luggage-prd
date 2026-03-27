@@ -1100,7 +1100,7 @@ admin.get("/staff/admin/customers", async (c) => {
             </div>
 
             <form method="get" action="/staff/admin/customers" style="margin-bottom:12px;display:flex;gap:8px">
-              <input type="text" name="q" value={q} placeholder="이름, 전화번호, 이메일 검색" class="table-control" style="flex:1;max-width:300px" />
+              <input type="text" name="q" value={q} placeholder="이름 검색" class="table-control" style="flex:1;max-width:300px" />
               <button type="submit" class="btn btn-sm btn-primary">검색</button>
               {q && <a href="/staff/admin/customers" class="btn btn-sm" style="font-size:11px">초기화</a>}
             </form>
@@ -1109,31 +1109,33 @@ admin.get("/staff/admin/customers", async (c) => {
               <table id="staff-orders-table" style="table-layout:auto">
                 <thead>
                   <tr>
-                    <th style="width:14%">이름</th>
-                    <th style="width:14%">전화번호</th>
-                    <th style="width:18%">이메일</th>
-                    <th style="width:8%;text-align:right">방문횟수</th>
-                    <th style="width:12%;text-align:right">총 이용금액</th>
-                    <th style="width:10%;text-align:right">캐리어</th>
-                    <th style="width:10%;text-align:right">배낭/백팩</th>
-                    <th style="width:14%">최근 방문</th>
+                    <th style="width:20%">이름</th>
+                    <th style="width:12%;text-align:right">방문횟수</th>
+                    <th style="width:18%;text-align:right">총 이용금액</th>
+                    <th style="width:14%;text-align:right">캐리어</th>
+                    <th style="width:14%;text-align:right">배낭/백팩</th>
+                    <th style="width:22%">최근 방문</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(rows.results || []).map((r) => (
+                  {(rows.results || []).map((r) => {
+                    const name = r.name || "-";
+                    const masked = name.length <= 1 ? name
+                      : name.length === 2 ? name[0] + "*"
+                      : name[0] + "*".repeat(name.length - 2) + name[name.length - 1];
+                    return (
                     <tr style="border-bottom:1px solid var(--line)">
-                      <td style="padding:8px;font-weight:600">{r.name || "-"}</td>
-                      <td style="padding:8px;font-size:12px">{r.phone || "-"}</td>
-                      <td style="padding:8px;font-size:12px;word-break:break-all">{r.email || "-"}</td>
+                      <td style="padding:8px;font-weight:600">{masked}</td>
                       <td style="padding:8px;text-align:right">{r.order_count}회</td>
                       <td style="padding:8px;text-align:right;font-weight:600">¥{(r.total_spent || 0).toLocaleString()}</td>
                       <td style="padding:8px;text-align:right">{r.total_suitcases || 0}</td>
                       <td style="padding:8px;text-align:right">{r.total_backpacks || 0}</td>
                       <td style="padding:8px;font-size:12px;color:var(--muted)">{r.last_visit ? new Date(r.last_visit).toLocaleDateString("ko-KR", { timeZone: "Asia/Tokyo" }) : "-"}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                   {(!rows.results || rows.results.length === 0) && (
-                    <tr><td colspan={8} style="padding:24px;text-align:center;color:var(--muted)">고객 데이터가 없습니다</td></tr>
+                    <tr><td colspan={6} style="padding:24px;text-align:center;color:var(--muted)">고객 데이터가 없습니다</td></tr>
                   )}
                 </tbody>
               </table>
