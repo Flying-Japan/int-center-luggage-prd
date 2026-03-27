@@ -27,6 +27,13 @@ export function errorHandler(err: Error, c: Context) {
  * Not found handler (notFound): returns 404 JSON.
  */
 export function notFoundHandler(c: Context) {
+  const path = new URL(c.req.url).pathname;
+  if (path.startsWith("/staff")) {
+    return c.html(
+      `<html><head><meta charset="UTF-8"><title>404</title></head><body style="font-family:sans-serif;text-align:center;padding:80px 16px;background:#f8fafc"><h1 style="font-size:64px;color:#1e293b;margin:0">404</h1><p style="color:#64748b;margin:12px 0 24px">페이지를 찾을 수 없습니다</p><a href="/staff/dashboard" style="display:inline-block;padding:10px 24px;background:#2383e2;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">대시보드로 이동</a></body></html>`,
+      404
+    );
+  }
   return c.json({ error: "Not found" }, 404);
 }
 
