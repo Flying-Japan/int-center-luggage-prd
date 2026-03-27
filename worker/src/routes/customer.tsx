@@ -202,6 +202,8 @@ customer.get("/customer", (c) => {
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="naver-site-verification" content="281f09e72fa3900dfffbd57ee5fd208a7872f818" />
+        <meta name="google-site-verification" content="_IzvQgZRjJtht2Gfv7iEaIOJXGvq574QDs-SXYQONYU" />
         <title>{customerTitle[lang] || customerTitle.ko} — {t("brand_name", lang)}</title>
         <link rel="preconnect" href="https://cdn.jsdelivr.net" />
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
