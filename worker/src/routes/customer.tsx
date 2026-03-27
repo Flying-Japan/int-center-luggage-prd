@@ -1532,8 +1532,8 @@ customer.get("/customer/orders/:id", async (c) => {
             <div class="fb-icon">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M3 8l9 6 9-6" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="2" y="5" width="20" height="14" rx="3" stroke="white" stroke-width="1.8"/></svg>
             </div>
-            <p class="fb-title">{lang === "ja" ? "メールをご確認ください" : lang === "en" ? "Check your email" : "이메일을 확인해주세요"}</p>
-            <p class="fb-msg">{lang === "ja" ? "受付確認の内容は申請時にご入力いただいた\nメールアドレスに送信されました。" : lang === "en" ? "Confirmation details have been sent to\nthe email you entered on the form." : "접수 확인 내용은 신청서 작성 시\n입력하신 이메일로 발송되었습니다."}</p>
+            <p class="fb-title">{lang === "ja" ? "申請時にご入力いただいた\nメールをご確認ください" : lang === "en" ? "Please check the email\nyou entered on the form" : "신청 시 입력하신\n이메일을 확인해주세요"}</p>
+            <p class="fb-msg">{lang === "ja" ? "受付確認の詳細内容がメールで送信されました。" : lang === "en" ? "Your confirmation details have been sent." : "접수 확인 상세 내용이 발송되었습니다."}</p>
             <a href="/customer" class="fb-btn">{lang === "ja" ? "受付フォームへ" : lang === "en" ? "Back to form" : "접수 화면으로"}</a>
           </div>
         </body>
