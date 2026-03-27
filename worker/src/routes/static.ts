@@ -9,6 +9,11 @@ staticRoutes.get("/favicon.ico", (c) => {
   return c.body(svg, 200, { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=86400" });
 });
 
+// IndexNow verification key
+staticRoutes.get("/fj-indexnow-2026-key.txt", (c) => {
+  return c.text("fj-indexnow-2026-key", 200, { "Cache-Control": "public, max-age=86400" });
+});
+
 // Serve logo from R2
 staticRoutes.get("/static/flying-pass-white.jpg", async (c) => {
   const obj = await c.env.IMAGES.get("static/flying-pass-white.jpg");
