@@ -1739,7 +1739,11 @@ a { color: inherit; text-decoration: none; }
               {order.payment_method === "PAY_QR" && (
                 <div style="margin-top:8px;text-align:center">
                   <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:var(--text)">{lang === "ja" ? "📱 QR決済方法" : lang === "en" ? "📱 QR Payment Guide" : "📱 QR결제 방법 안내"}</p>
-                  <img src="/static/qr-payment-guide.jpg" alt="QR Payment Guide" style="width:100%;max-width:480px;border-radius:8px;display:block;margin:0 auto" />
+                  <p style="margin:0 0 6px;font-size:11px;color:var(--muted)">{lang === "ja" ? "タップして拡大表示" : lang === "en" ? "Tap to enlarge" : "클릭해서 확대해서 보세요"}</p>
+                  <img src="/static/qr-payment-guide.jpg" alt="QR Payment Guide" style="width:100%;max-width:480px;border-radius:8px;display:block;margin:0 auto;cursor:pointer" onclick="document.getElementById('qr-overlay').style.display='flex'" />
+                  <div id="qr-overlay" onclick="this.style.display='none'" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;cursor:pointer">
+                    <img src="/static/qr-payment-guide.jpg" alt="QR Payment Guide" style="max-width:95vw;max-height:95vh;border-radius:8px" />
+                  </div>
                 </div>
               )}
             </div>
