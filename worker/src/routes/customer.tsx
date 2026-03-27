@@ -1925,6 +1925,13 @@ a { color: inherit; text-decoration: none; }
             </div>
           </div>
 
+          {/* Email sent notice */}
+          <div style="text-align:center;padding:12px 16px;background:rgba(37,99,235,0.06);border-radius:12px">
+            <p style="margin:0;font-size:12px;color:#2563eb;font-weight:600">
+              ✉️ {lang === "ja" ? "上記の内容はご入力いただいたメールアドレスにも送信されました" : lang === "en" ? "The above details have also been sent to your email" : "위 내용은 입력하신 이메일로도 발송되었습니다"}
+            </p>
+          </div>
+
         </main>
 
         <footer class="site-footer">
