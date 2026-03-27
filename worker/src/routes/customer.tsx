@@ -1690,6 +1690,19 @@ a { color: inherit; text-decoration: none; }
 .footer-logo { display: block; margin: 0 auto 12px; }
 .footer-info { display: grid; gap: 3px; font-size: 12px; color: var(--muted); line-height: 1.6; }
 .footer-copy { margin-top: 10px; font-size: 11px; color: var(--muted); }
+@media (max-width: 480px) {
+  .page-wrap { margin: 16px auto 32px; padding: 0 10px; gap: 12px; }
+  .card { padding: 16px 14px; border-radius: 16px; }
+  .success-title { font-size: 18px; }
+  .order-id-value { font-size: 15px; }
+  .order-id-chip { padding: 5px 12px; }
+  .check-badge { width: 52px; height: 52px; }
+  .completion-msg { font-size: 13px; }
+  .secondary-msg { font-size: 12px; }
+  .summary-key { font-size: 12px; }
+  .summary-val { font-size: 13px; }
+  .summary-val-final { font-size: 16px; }
+}
         `}} />
       </head>
       <body>
