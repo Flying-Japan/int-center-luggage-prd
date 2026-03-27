@@ -1321,7 +1321,8 @@ customer.post("/customer/submit", async (c) => {
   const name = String(body.name || "").trim();
   const phone = String(body.phone || "").trim();
   const email = String(body.email || "").trim();
-  const paymentMethod = String(body.payment_method || "CASH").trim();
+  const rawPayment = String(body.payment_method || "").trim().toUpperCase();
+  const paymentMethod = ["CASH", "PAY_QR"].includes(rawPayment) ? rawPayment : "CASH";
   const companionCount = parseInt(String(body.companion_count || "0"), 10) || 0;
   const suitcaseQty = Math.min(99, parseInt(String(body.suitcase_qty || "0"), 10) || 0);
   const backpackQty = Math.min(99, parseInt(String(body.backpack_qty || "0"), 10) || 0);
@@ -1459,9 +1460,10 @@ customer.post("/customer/submit", async (c) => {
     );
   }
 
-  // Generate one-time view token
-  const viewToken = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-  await c.env.DB.prepare("UPDATE luggage_orders SET view_token = ? WHERE order_id = ?").bind(viewToken, orderId).run();
+  // Generate 128-bit cryptographically random view token
+  const rawToken = crypto.getRandomValues(new Uint8Array(16));
+  const viewToken = btoa(String.fromCharCode(...rawToken)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  await c.env.DB.prepare("UPDATE luggage_orders SET view_token = ?, updated_at = datetime('now') WHERE order_id = ?").bind(viewToken, orderId).run();
 
   return c.redirect(`/customer/orders/${orderId}?lang=${lang}&token=${viewToken}`);
 });
@@ -1528,9 +1530,7 @@ customer.get("/customer/orders/:id", async (c) => {
     );
   }
 
-  // Token is valid — clear it after 10 minutes (allows lang switching)
-  // The retention cron also clears old tokens
-
+  // Token is valid — retention cron clears old tokens
 
   const completionMsgs = await loadCompletionMessages(c.env.DB);
   const finalAmountFormatted = `¥${order.final_amount.toLocaleString()}`;
@@ -1913,8 +1913,6 @@ a { color: inherit; text-decoration: none; }
               }} />
             </div>
           </div>
-
-
 
         </main>
 

@@ -817,7 +817,6 @@ admin.get("/staff/admin/activity-logs", async (c) => {
     dateFilter = " WHERE date(a.timestamp, '+9 hours') >= date('now', '-7 days')";
   }
 
-
   // Fetch logs from D1 with pagination
   const [logs, countResult] = await Promise.all([
     c.env.DB.prepare(
@@ -1080,6 +1079,7 @@ admin.get("/staff/admin/customers", async (c) => {
   }>();
 
   const totalPages = Math.ceil(total / pageSize);
+  const qParam = q ? `&q=${encodeURIComponent(q)}` : "";
 
   return c.html(
     <html lang="ko">
@@ -1133,7 +1133,7 @@ admin.get("/staff/admin/customers", async (c) => {
                     </tr>
                   ))}
                   {(!rows.results || rows.results.length === 0) && (
-                    <tr><td colSpan={8} style="padding:24px;text-align:center;color:var(--muted)">고객 데이터가 없습니다</td></tr>
+                    <tr><td colspan={8} style="padding:24px;text-align:center;color:var(--muted)">고객 데이터가 없습니다</td></tr>
                   )}
                 </tbody>
               </table>
@@ -1141,9 +1141,9 @@ admin.get("/staff/admin/customers", async (c) => {
 
             {totalPages > 1 && (
               <div style="display:flex;gap:4px;justify-content:center;margin-top:12px">
-                {page > 1 && <a href={`/staff/admin/customers?page=${page - 1}${q ? `&q=${encodeURIComponent(q)}` : ""}`} class="btn btn-sm">← 이전</a>}
+                {page > 1 && <a href={`/staff/admin/customers?page=${page - 1}${qParam}`} class="btn btn-sm">← 이전</a>}
                 <span style="font-size:12px;padding:6px 12px;color:var(--muted)">{page} / {totalPages}</span>
-                {page < totalPages && <a href={`/staff/admin/customers?page=${page + 1}${q ? `&q=${encodeURIComponent(q)}` : ""}`} class="btn btn-sm">다음 →</a>}
+                {page < totalPages && <a href={`/staff/admin/customers?page=${page + 1}${qParam}`} class="btn btn-sm">다음 →</a>}
               </div>
             )}
           </main>

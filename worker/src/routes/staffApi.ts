@@ -165,6 +165,10 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
   const body = await c.req.json<{ order_ids: string[]; action: string }>();
   const staff = getStaff(c);
 
+  if (staff.role === "viewer") {
+    return c.json({ error: "Insufficient permissions" }, 403);
+  }
+
   if (!body.order_ids?.length || !body.action) {
     return c.json({ error: "order_ids and action required" }, 400);
   }

@@ -237,18 +237,35 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       <td data-col-key="created_time">{o.created_at ? new Date(o.created_at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
                       <td data-col-key="price" class="price-cell" data-order-id={o.order_id} data-tier={o.flying_pass_tier || "NONE"} data-method={o.payment_method || "CASH"} style="cursor:pointer;position:relative"><span class="price-display">{`¥${o.prepaid_amount.toLocaleString()}`}</span></td>
                       <td data-col-key="pickup_time"><span class="editable" data-field="expected_pickup_at" data-order-id={o.order_id} data-type="datetime-local" data-raw-value={o.expected_pickup_at ? new Date(new Date(o.expected_pickup_at).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16) : ""}>{o.expected_pickup_at ? new Date(o.expected_pickup_at).toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</span></td>
-                      <td data-col-key="pay_status"><span class={`status-pill ${o.status === "PAID" || o.status === "PICKED_UP" ? "status-paid" : o.status === "CANCELLED" ? "status-cancelled" : "status-payment_pending"}`}>{o.status === "PAID" || o.status === "PICKED_UP" ? "결제완료" : o.status === "CANCELLED" ? "취소" : "결제대기"}</span></td>
-                      <td data-col-key="pickup_status"><span class={`status-pill ${o.status === "PICKED_UP" ? "status-picked_up" : o.status === "CANCELLED" ? "status-cancelled" : "status-payment_pending"}`}>{o.status === "PICKED_UP" ? "수령완료" : o.status === "CANCELLED" ? "취소" : "미수령"}</span></td>
+                      <td data-col-key="pay_status">{(() => {
+                        const isPaid = o.status === "PAID" || o.status === "PICKED_UP";
+                        const isCancelled = o.status === "CANCELLED";
+                        const cls = isPaid ? "status-paid" : isCancelled ? "status-cancelled" : "status-payment_pending";
+                        const label = isPaid ? "결제완료" : isCancelled ? "취소" : "결제대기";
+                        return <span class={`status-pill ${cls}`}>{label}</span>;
+                      })()}</td>
+                      <td data-col-key="pickup_status">{(() => {
+                        const isPickedUp = o.status === "PICKED_UP";
+                        const isCancelled = o.status === "CANCELLED";
+                        const cls = isPickedUp ? "status-picked_up" : isCancelled ? "status-cancelled" : "status-payment_pending";
+                        const label = isPickedUp ? "수령완료" : isCancelled ? "취소" : "미수령";
+                        return <span class={`status-pill ${cls}`}>{label}</span>;
+                      })()}</td>
                       <td data-col-key="actions">
                         <div class="inline-actions">
-                          <button
-                            class={`payment-state-btn ${o.status === "PAID" || o.status === "PICKED_UP" ? "is-paid" : "is-pending"}`}
-                            data-action="toggle-payment"
-                            data-order-id={o.order_id}
-                            disabled={o.status === "PICKED_UP" || o.status === "CANCELLED"}
-                          >
-                            {o.status === "PAID" || o.status === "PICKED_UP" ? "결제완료" : "결제대기"}
-                          </button>
+                          {(() => {
+                            const isPaid = o.status === "PAID" || o.status === "PICKED_UP";
+                            return (
+                              <button
+                                class={`payment-state-btn ${isPaid ? "is-paid" : "is-pending"}`}
+                                data-action="toggle-payment"
+                                data-order-id={o.order_id}
+                                disabled={o.status === "PICKED_UP" || o.status === "CANCELLED"}
+                              >
+                                {isPaid ? "결제완료" : "결제대기"}
+                              </button>
+                            );
+                          })()}
                           {o.status !== "PICKED_UP" && o.status !== "CANCELLED" && (
                             <button class="pickup-complete-btn" data-action="pickup" data-order-id={o.order_id}>수령완료</button>
                           )}
