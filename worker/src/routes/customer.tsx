@@ -1481,7 +1481,7 @@ customer.get("/customer/orders/:id", async (c) => {
             expected_pickup_at, expected_storage_days,
             price_per_day, discount_rate, prepaid_amount,
             flying_pass_tier, flying_pass_discount_amount, final_amount,
-            payment_method, status, created_at, view_token
+            payment_method, status, created_at, view_token, updated_at
      FROM luggage_orders WHERE order_id = ?`
   )
     .bind(orderId)
@@ -1503,9 +1503,15 @@ customer.get("/customer/orders/:id", async (c) => {
       status: string;
       created_at: string;
       view_token: string | null;
+      updated_at: string | null;
     }>();
 
-  if (!order || !token || order.view_token !== token) {
+  // Token valid for 10 minutes after creation
+  const tokenExpired = order?.view_token && order.updated_at
+    ? (Date.now() - new Date(order.updated_at).getTime()) > 10 * 60 * 1000
+    : false;
+
+  if (!order || !token || order.view_token !== token || tokenExpired) {
     const titles: Record<string, string> = { ko: "접수가 완료되었습니다", en: "Submission complete", ja: "受付が完了しました" };
     const msgs: Record<string, string> = {
       ko: "접수 확인 내용은 이메일로 발송되었습니다.\n이메일을 확인해주세요.",
@@ -1530,7 +1536,7 @@ customer.get("/customer/orders/:id", async (c) => {
     );
   }
 
-  // Token is valid — retention cron clears old tokens
+  // Token stays valid for lang switching; retention cron clears old tokens
 
   const completionMsgs = await loadCompletionMessages(c.env.DB);
   const finalAmountFormatted = `¥${order.final_amount.toLocaleString()}`;
