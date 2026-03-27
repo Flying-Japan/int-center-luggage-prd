@@ -33,6 +33,7 @@ export const StaffMenu: FC<{ active: string; role: string }> = ({ active, role }
   ];
   const adminOnlyLinks = [
     { href: "/staff/admin/staff-accounts", label: "계정관리" },
+    { href: "/staff/admin/customers", label: "고객목록" },
     { href: "/staff/admin/activity-logs", label: "활동로그" },
   ];
   return (

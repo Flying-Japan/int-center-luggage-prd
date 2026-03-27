@@ -14,6 +14,7 @@ admin.use("/staff/admin/sales/*", editorAuth);
 admin.use("/staff/admin/sales", editorAuth);
 admin.use("/staff/admin/completion-message*", editorAuth);
 admin.use("/staff/admin/staff-accounts*", adminAuth);
+admin.use("/staff/admin/customers*", adminAuth);
 admin.use("/staff/admin/activity-logs*", adminAuth);
 admin.use("/staff/admin/retention*", adminAuth);
 admin.use("/staff/admin/extensions*", adminAuth);
@@ -1035,6 +1036,121 @@ admin.post("/staff/admin/extensions/run", async (c) => {
   const { generateExtensionOrders } = await import("../services/extension");
   const result = await generateExtensionOrders(c.env.DB);
   return c.json({ success: true, ...result });
+});
+
+// GET /staff/admin/customers — Customer list (unique customers from orders)
+admin.get("/staff/admin/customers", async (c) => {
+  const staff = getStaff(c);
+  const q = c.req.query("q")?.trim() || "";
+  const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
+  const pageSize = 50;
+  const offset = (page - 1) * pageSize;
+
+  const whereClauses = ["status != 'CANCELLED'"];
+  const binds: string[] = [];
+  if (q) {
+    whereClauses.push("(name LIKE ? OR phone LIKE ? OR email LIKE ?)");
+    binds.push(`%${q}%`, `%${q}%`, `%${q}%`);
+  }
+  const where = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+  const countResult = await c.env.DB.prepare(
+    `SELECT COUNT(DISTINCT COALESCE(NULLIF(phone,''), email)) as total FROM luggage_orders ${where}`
+  ).bind(...binds).first<{ total: number }>();
+  const total = countResult?.total || 0;
+
+  const rows = await c.env.DB.prepare(
+    `SELECT
+      name, phone, email,
+      COUNT(*) as order_count,
+      SUM(final_amount) as total_spent,
+      MAX(created_at) as last_visit,
+      MIN(created_at) as first_visit,
+      SUM(suitcase_qty) as total_suitcases,
+      SUM(backpack_qty) as total_backpacks
+    FROM luggage_orders ${where}
+    GROUP BY COALESCE(NULLIF(phone,''), email)
+    ORDER BY last_visit DESC
+    LIMIT ? OFFSET ?`
+  ).bind(...binds, pageSize, offset).all<{
+    name: string; phone: string; email: string;
+    order_count: number; total_spent: number;
+    last_visit: string; first_visit: string;
+    total_suitcases: number; total_backpacks: number;
+  }>();
+
+  const totalPages = Math.ceil(total / pageSize);
+
+  return c.html(
+    <html lang="ko">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>고객목록 — Admin</title>
+        <link rel="stylesheet" href="/static/styles.css" />
+      </head>
+      <body class="staff-site">
+        <StaffTopbar staff={staff} />
+        <div class="staff-body">
+          <StaffMenu active="/staff/admin/customers" role={staff.role} />
+          <main class="staff-main" style="padding:16px 20px">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+              <h2 style="font-size:18px;font-weight:700;margin:0">고객목록</h2>
+              <span style="font-size:13px;color:var(--muted)">총 {total.toLocaleString()}명</span>
+            </div>
+
+            <form method="get" action="/staff/admin/customers" style="margin-bottom:12px;display:flex;gap:8px">
+              <input type="text" name="q" value={q} placeholder="이름, 전화번호, 이메일 검색" class="table-control" style="flex:1;max-width:300px" />
+              <button type="submit" class="btn btn-sm btn-primary">검색</button>
+              {q && <a href="/staff/admin/customers" class="btn btn-sm" style="font-size:11px">초기화</a>}
+            </form>
+
+            <div class="table-wrap">
+              <table id="staff-orders-table" style="table-layout:auto">
+                <thead>
+                  <tr>
+                    <th style="width:14%">이름</th>
+                    <th style="width:14%">전화번호</th>
+                    <th style="width:18%">이메일</th>
+                    <th style="width:8%;text-align:right">방문횟수</th>
+                    <th style="width:12%;text-align:right">총 이용금액</th>
+                    <th style="width:10%;text-align:right">캐리어</th>
+                    <th style="width:10%;text-align:right">배낭/백팩</th>
+                    <th style="width:14%">최근 방문</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(rows.results || []).map((r) => (
+                    <tr style="border-bottom:1px solid var(--line)">
+                      <td style="padding:8px;font-weight:600">{r.name || "-"}</td>
+                      <td style="padding:8px;font-size:12px">{r.phone || "-"}</td>
+                      <td style="padding:8px;font-size:12px;word-break:break-all">{r.email || "-"}</td>
+                      <td style="padding:8px;text-align:right">{r.order_count}회</td>
+                      <td style="padding:8px;text-align:right;font-weight:600">¥{(r.total_spent || 0).toLocaleString()}</td>
+                      <td style="padding:8px;text-align:right">{r.total_suitcases || 0}</td>
+                      <td style="padding:8px;text-align:right">{r.total_backpacks || 0}</td>
+                      <td style="padding:8px;font-size:12px;color:var(--muted)">{r.last_visit ? new Date(r.last_visit).toLocaleDateString("ko-KR", { timeZone: "Asia/Tokyo" }) : "-"}</td>
+                    </tr>
+                  ))}
+                  {(!rows.results || rows.results.length === 0) && (
+                    <tr><td colSpan={8} style="padding:24px;text-align:center;color:var(--muted)">고객 데이터가 없습니다</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {totalPages > 1 && (
+              <div style="display:flex;gap:4px;justify-content:center;margin-top:12px">
+                {page > 1 && <a href={`/staff/admin/customers?page=${page - 1}${q ? `&q=${encodeURIComponent(q)}` : ""}`} class="btn btn-sm">← 이전</a>}
+                <span style="font-size:12px;padding:6px 12px;color:var(--muted)">{page} / {totalPages}</span>
+                {page < totalPages && <a href={`/staff/admin/customers?page=${page + 1}${q ? `&q=${encodeURIComponent(q)}` : ""}`} class="btn btn-sm">다음 →</a>}
+              </div>
+            )}
+          </main>
+        </div>
+      </body>
+    </html>
+  );
 });
 
 export default admin;
