@@ -189,9 +189,9 @@ customer.get("/customer", (c) => {
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
           <span style="font-size:9px;font-weight:800;background:rgba(255,255,255,0.25);padding:2px 6px;border-radius:4px;letter-spacing:0.05em">{b.tag}</span>
-          <p style="font-size:14px;font-weight:700;margin:0;line-height:1.3;word-break:keep-all">{b.title[lang] || b.title.ko}</p>
+          <p style="font-size:16px;font-weight:800;margin:0;line-height:1.3;word-break:keep-all">{b.title[lang] || b.title.ko}</p>
         </div>
-        <p style="font-size:11px;opacity:0.85;margin:0">{b.sub[lang] || b.sub.ko}</p>
+        <p style="font-size:12px;opacity:0.85;margin:0">{b.sub[lang] || b.sub.ko}</p>
       </div>
       <span style="font-size:12px;font-weight:700;background:rgba(255,255,255,0.2);padding:6px 12px;border-radius:999px;white-space:nowrap;border:1px solid rgba(255,255,255,0.3)">{b.cta[lang] || b.cta.ko} →</span>
     </a>
