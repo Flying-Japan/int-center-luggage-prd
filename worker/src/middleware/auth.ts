@@ -186,7 +186,10 @@ export async function editorAuth(c: AppContext, next: Next) {
     return c.redirect("/staff/login");
   }
   if (staff.role !== "admin" && staff.role !== "editor") {
-    return c.json({ error: "Editor or Admin required" }, 403);
+    return c.html(
+      `<html><head><meta charset="UTF-8"><title>접근 불가</title></head><body style="font-family:sans-serif;text-align:center;padding:80px 16px;background:#f8fafc"><h1 style="font-size:48px;color:#1e293b;margin:0">403</h1><p style="color:#64748b;margin:12px 0 24px">편집자 또는 관리자 권한이 필요합니다</p><a href="/staff/dashboard" style="display:inline-block;padding:10px 24px;background:#2383e2;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">대시보드로 이동</a></body></html>`,
+      403
+    );
   }
   if (!existing) {
     c.set("staff", staff);

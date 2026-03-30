@@ -325,7 +325,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
 staffOrders.post("/staff/orders/:id/mark-paid", async (c) => {
   const orderId = c.req.param("id");
   const body = await c.req.parseBody();
-  const paymentMethod = String(body.payment_method || "CASH");
+  const paymentMethod = ["CASH", "PAY_QR"].includes(String(body.payment_method)) ? String(body.payment_method) : "CASH";
   const staff = getStaff(c);
 
   await c.env.DB.prepare(
@@ -414,6 +414,16 @@ staffOrders.post("/staff/orders/:id/mark-picked-up", async (c) => {
 staffOrders.post("/staff/orders/:id/undo-picked-up", async (c) => {
   const orderId = c.req.param("id");
   const staff = getStaff(c);
+
+  const current = await c.env.DB.prepare(
+    "SELECT status FROM luggage_orders WHERE order_id = ?"
+  )
+    .bind(orderId)
+    .first<{ status: string }>();
+
+  if (!current || current.status !== "PICKED_UP") {
+    return c.redirect(`/staff/orders/${orderId}?error=수령완료 상태인 주문만 취소할 수 있습니다`);
+  }
 
   await c.env.DB.prepare(
     `UPDATE luggage_orders

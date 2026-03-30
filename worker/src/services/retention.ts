@@ -10,8 +10,6 @@ const ID_IMAGE_RETENTION_DAYS = 14;
 
 export type RetentionResult = {
   imagesCleared: number;
-  ordersDeleted: number;
-  auditLogsDeleted: number;
 };
 
 /**
@@ -23,8 +21,6 @@ export async function runRetentionCleanup(
 ): Promise<RetentionResult> {
   const result: RetentionResult = {
     imagesCleared: 0,
-    ordersDeleted: 0,
-    auditLogsDeleted: 0,
   };
 
   // Pass 1: Clear images older than 14 days

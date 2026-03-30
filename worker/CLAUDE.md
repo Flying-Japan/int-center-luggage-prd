@@ -76,4 +76,4 @@ worker/
 
 Daily at 03:00 JST (18:00 UTC): retention cleanup
 - 14 days: delete images from R2, clear URL fields
-- 60 days: delete order records + audit logs
+- Customer data (orders, audit logs) kept permanently for service/marketing
