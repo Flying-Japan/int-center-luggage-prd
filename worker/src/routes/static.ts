@@ -1013,7 +1013,7 @@ tr.is-in-warehouse { border-left: 3px solid #94a3b8; }
 .price-popover select, .price-popover input[type="number"] { padding: 5px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
 .price-popover .btn-row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
 .price-cell { overflow: visible !important; }
-.thumb { width: 100%; max-width: 100%; max-height: 300px; object-fit: contain; border-radius: 8px; display: block; background: #f7f7f5; }
+.thumb { width: 100%; max-width: 100%; max-height: 500px; object-fit: contain; border-radius: 8px; display: block; background: #f7f7f5; cursor: pointer; }
 .muted { color: var(--muted); font-size: 13px; }
 
 /* ── Summary grid ── */
