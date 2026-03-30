@@ -26,7 +26,7 @@ ops.get("/staff/cash-closing", async (c) => {
     `SELECT c.*, COALESCE(u.display_name, u.username) as staff_name
      FROM luggage_cash_closings c
      LEFT JOIN user_profiles u ON c.staff_id = u.id
-     ORDER BY c.created_at DESC LIMIT 30`
+     ORDER BY c.created_at DESC LIMIT 60`
   ).all();
 
   const staff = getStaff(c);
@@ -94,30 +94,36 @@ ops.get("/staff/cash-closing", async (c) => {
             </form>
           </section>
 
-          <section class="card">
-            <h3 class="card-title">최근 마감</h3>
+          <section class="card" style="padding:12px">
+            <h3 class="card-title" style="margin-bottom:8px">최근 마감</h3>
             <div class="table-wrap">
-              <table>
+              <table style="font-size:12px;border-collapse:collapse;width:100%">
                 <thead>
-                  <tr><th>날짜</th><th>작성자</th><th>합계</th><th>PayPay</th><th>차액</th><th>메모</th><th></th></tr>
+                  <tr style="background:#f1f5f9;border-bottom:2px solid #cbd5e1">
+                    <th style="padding:4px 8px;text-align:left;font-size:11px;color:#475569">날짜</th>
+                    <th style="padding:4px 8px;text-align:left;font-size:11px;color:#475569">작성자</th>
+                    <th style="padding:4px 8px;text-align:right;font-size:11px;color:#475569">합계</th>
+                    <th style="padding:4px 8px;text-align:right;font-size:11px;color:#475569">PayPay</th>
+                    <th style="padding:4px 8px;text-align:right;font-size:11px;color:#475569">차액</th>
+                    <th style="padding:4px 8px;text-align:left;font-size:11px;color:#475569">메모</th>
+                    <th style="padding:4px 6px;font-size:11px"></th>
+                  </tr>
                 </thead>
                 <tbody>
                   {closings.results.map((cl: Record<string, unknown>) => {
                     const diff = cl.difference_amount as number;
                     const noteStr = (cl.note as string) || "";
                     return (
-                      <tr>
-                        <td><a href={`/staff/cash-closing/${cl.closing_id}`}>{cl.business_date as string}</a></td>
-                        <td>{(cl.staff_name as string) || "-"}</td>
-                        <td>¥{(cl.total_amount as number).toLocaleString()}</td>
-                        <td>¥{(cl.paypay_amount as number).toLocaleString()}</td>
-                        <td style={`color:${diff === 0 ? '#166534' : '#dc2626'}`}>{diff > 0 ? "+" : ""}¥{diff.toLocaleString()}</td>
-                        <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{noteStr.length > 30 ? noteStr.slice(0, 30) + "..." : noteStr || "-"}</td>
-                        <td style="white-space:nowrap">
-                          {cl.workflow_status === "SUBMITTED" && (
-                            <a href={`/staff/cash-closing/${cl.closing_id}/edit`} class="btn btn-sm btn-secondary" style="margin-right:4px">수정</a>
-                          )}
-                          <a href={`/staff/cash-closing/${cl.closing_id}`} class="btn btn-sm">상세</a>
+                      <tr style="border-bottom:1px solid #e2e8f0">
+                        <td style="padding:3px 8px;white-space:nowrap"><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:var(--primary);font-weight:600">{cl.business_date as string}</a></td>
+                        <td style="padding:3px 8px">{(cl.staff_name as string) || "-"}</td>
+                        <td style="padding:3px 8px;text-align:right;font-weight:600">¥{(cl.total_amount as number).toLocaleString()}</td>
+                        <td style="padding:3px 8px;text-align:right">¥{(cl.paypay_amount as number).toLocaleString()}</td>
+                        <td style={`padding:3px 8px;text-align:right;font-weight:600;color:${diff === 0 ? '#166534' : '#dc2626'}`}>{diff > 0 ? "+" : ""}{diff.toLocaleString()}</td>
+                        <td style="padding:3px 8px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b">{noteStr.length > 25 ? noteStr.slice(0, 25) + "…" : noteStr || "-"}</td>
+                        <td style="padding:3px 6px;white-space:nowrap">
+                          <a href={`/staff/cash-closing/${cl.closing_id}/edit`} style="color:var(--primary);font-size:11px;margin-right:6px">수정</a>
+                          <a href={`/staff/cash-closing/${cl.closing_id}`} style="color:#64748b;font-size:11px">상세</a>
                         </td>
                       </tr>
                     );
