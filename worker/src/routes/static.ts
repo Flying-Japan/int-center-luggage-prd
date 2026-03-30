@@ -1344,12 +1344,13 @@ body.staff-site .brand { font-size: 15px; font-weight: 700; letter-spacing: -0.0
 body.staff-site .brand-logo { width: 28px; height: 28px; }
 
 body.staff-site .pill-nav {
-  background: rgba(231, 240, 252, 0.75);
-  border: 1px solid rgba(212, 223, 239, 0.6);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  padding: 3px;
-  gap: 2px;
-  border-radius: 999px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  gap: 4px;
+  border-radius: 0;
+  align-items: center;
 }
 
 body.staff-site .pill-link {
