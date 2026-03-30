@@ -605,12 +605,6 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               });
             }
 
-            /* ── New order polling (3s) ── */
-            var _lc=new Date().toISOString();
-            var _ac=null;try{var AC=window.AudioContext||window.webkitAudioContext;if(AC)_ac=new AC();}catch(e){}
-            function _beep(){if(!_ac)return;try{if(_ac.state==='suspended')_ac.resume();var o=_ac.createOscillator(),g=_ac.createGain();o.connect(g);g.connect(_ac.destination);o.frequency.value=880;g.gain.value=0.3;o.start();g.gain.exponentialRampToValueAtTime(0.01,_ac.currentTime+0.5);o.stop(_ac.currentTime+0.5);}catch(e){}}
-            setInterval(function(){fetch('/staff/api/orders/new?since='+encodeURIComponent(_lc)).then(function(r){return r.json();}).then(function(d){if(d.count>0){_beep();_lc=new Date().toISOString();window.location.reload();}}).catch(function(){});},3000);
-
           })();
         ` }} />
       </body>
