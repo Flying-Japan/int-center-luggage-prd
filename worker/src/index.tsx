@@ -65,8 +65,18 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
   // Parse query params for search/filter
   const q = c.req.query("q") || "";
-  const statusFilters = c.req.queries("status_filter") || [];
+  const hasFilterParam = c.req.url.includes("status_filter") || c.req.url.includes("reset_filter");
+  const isReset = c.req.query("reset_filter") === "true";
+  const defaultFilters = ["PAYMENT_PENDING", "PAID"];
+  const statusFilters = isReset ? defaultFilters : hasFilterParam ? (c.req.queries("status_filter") || []) : (() => {
+    // Read from cookie if no URL params
+    const cookie = c.req.header("cookie") || "";
+    const match = cookie.match(/luggage_filters=([^;]+)/);
+    return match ? decodeURIComponent(match[1]).split(",").filter(Boolean) : defaultFilters;
+  })();
   const showAllPickedUp = c.req.query("show_all_picked_up") === "true";
+  // Persist filter to cookie
+  c.header("Set-Cookie", `luggage_filters=${encodeURIComponent(statusFilters.join(","))};Path=/staff;Max-Age=86400;SameSite=Lax`);
 
   let sql = `WITH note_edits AS (
       SELECT a.order_id,
@@ -179,6 +189,10 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 <label class="button-wrap staff-search-button-wrap">
                   <span class="field-label sr-only">조회</span>
                   <button class="btn btn-primary" type="submit">조회</button>
+                </label>
+                <label class="button-wrap">
+                  <span class="field-label sr-only">초기화</span>
+                  <a class="btn btn-secondary" href="/staff/dashboard?reset_filter=true" style="font-size:12px">초기화</a>
                 </label>
               </div>
             </form>
