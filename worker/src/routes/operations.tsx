@@ -279,7 +279,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
                 <p class="stat-value">¥{(cl.actual_qr_amount as number).toLocaleString()}</p>
               </div>
               <div class="card stat-card">
-                <p class="stat-label">자동매출</p>
+                <p class="stat-label">자동매출 <span title="마감 생성 시점의 PAID/PICKED_UP 주문 합산. 이후 취소된 주문은 반영되지 않습니다." style="cursor:help;color:#94a3b8;font-size:10px">(?)</span></p>
                 <p class="stat-value">¥{(cl.check_auto_amount as number).toLocaleString()}</p>
               </div>
               <div class="card stat-card">
@@ -287,6 +287,10 @@ ops.get("/staff/cash-closing/:id", async (c) => {
                 <p class="stat-value" style={`color:${(cl.difference_amount as number) === 0 ? '#166534' : '#dc2626'}`}>¥{(cl.difference_amount as number).toLocaleString()}</p>
               </div>
             </div>
+
+            <p style="margin-bottom:12px;font-size:11px;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:6px 10px">
+              ※ 자동매출은 마감 생성 시점의 스냅샷입니다. 이후 주문이 취소되어도 이 값은 자동으로 갱신되지 않습니다.
+            </p>
 
             <div style="margin-bottom:16px;overflow-x:auto">
               <table style="font-size:11px;border-collapse:collapse;width:100%">

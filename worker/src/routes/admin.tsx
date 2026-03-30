@@ -90,25 +90,6 @@ admin.get("/staff/admin/sales", async (c) => {
     };
   });
 
-  const dayCount = mergedRows.length || 1;
-  const totalLuggage = mergedRows.reduce((s, r) => s + r.luggage, 0);
-  const totalRental = mergedRows.reduce((s, r) => s + r.rental, 0);
-  const totalCombined = totalLuggage + totalRental;
-  const totalPeople = mergedRows.reduce((s, r) => s + r.orders, 0);
-  const totalCash = mergedRows.reduce((s, r) => s + r.cash, 0);
-  const totalQr = mergedRows.reduce((s, r) => s + r.qr, 0);
-
-  // Min / Max stats (only from days with data)
-  const activeDays = mergedRows.filter(r => r.combined > 0);
-  const minMax = activeDays.length > 0 ? {
-    people: { min: Math.min(...activeDays.map(r => r.orders)), max: Math.max(...activeDays.map(r => r.orders)) },
-    cash: { min: Math.min(...activeDays.map(r => r.cash)), max: Math.max(...activeDays.map(r => r.cash)) },
-    qr: { min: Math.min(...activeDays.map(r => r.qr)), max: Math.max(...activeDays.map(r => r.qr)) },
-    luggage: { min: Math.min(...activeDays.map(r => r.luggage)), max: Math.max(...activeDays.map(r => r.luggage)) },
-    rental: { min: Math.min(...activeDays.map(r => r.rental)), max: Math.max(...activeDays.map(r => r.rental)) },
-    combined: { min: Math.min(...activeDays.map(r => r.combined)), max: Math.max(...activeDays.map(r => r.combined)) },
-  } : null;
-
   // Real-time today's sales from luggage_orders
   const todayJST = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const todaySales = await c.env.DB.prepare(
@@ -129,6 +110,74 @@ admin.get("/staff/admin/sales", async (c) => {
     suitcase_total: number; backpack_total: number;
   }>();
   const ts = todaySales || { order_count: 0, paid_count: 0, pending_count: 0, cash_total: 0, qr_total: 0, revenue_total: 0, suitcase_total: 0, backpack_total: 0 };
+
+  // Real-time luggage breakdown for today (for mergedRows override)
+  const todayLuggageRT = await c.env.DB.prepare(
+    `SELECT
+       COUNT(*) as people,
+       SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) AND status IN ('PAID','PICKED_UP') THEN prepaid_amount + extra_amount ELSE 0 END) as cash,
+       SUM(CASE WHEN payment_method = 'PAY_QR' AND status IN ('PAID','PICKED_UP') THEN prepaid_amount + extra_amount ELSE 0 END) as qr,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN prepaid_amount + extra_amount ELSE 0 END) as luggage_total
+     FROM luggage_orders
+     WHERE date(created_at, '+9 hours') = ? AND status != 'CANCELLED'`
+  ).bind(todayJST).first<{ people: number; cash: number; qr: number; luggage_total: number }>();
+  const tlrt = todayLuggageRT || { people: 0, cash: 0, qr: 0, luggage_total: 0 };
+
+  // Override or insert today's row in mergedRows with real-time data
+  const todayIdx = mergedRows.findIndex(r => r.date === todayJST);
+  const todayDow = DOW_JP[new Date(todayJST + "T00:00:00+09:00").getDay()];
+  const todayFlags = getHolidayFlags(todayJST);
+  const todayRTRow: MergedRow & { isRealtime?: boolean } = {
+    date: todayJST,
+    dateJP: `${todayJST.replace(/-/g, "/")}/${todayDow}`,
+    orders: tlrt.people,
+    cash: tlrt.cash,
+    qr: tlrt.qr,
+    luggage: tlrt.luggage_total,
+    rental: todayIdx >= 0 ? mergedRows[todayIdx].rental : 0,
+    combined: tlrt.luggage_total + (todayIdx >= 0 ? mergedRows[todayIdx].rental : 0),
+    isWeekend: todayFlags.isWeekend,
+    jpHoliday: todayFlags.jp,
+    krHoliday: todayFlags.kr,
+    isRealtime: true,
+  };
+
+  // Only inject today's row if today is within the queried range (or no range filter)
+  const inRange = !startDate || !endDate || (todayJST >= startDate && todayJST <= endDate);
+  if (inRange) {
+    if (todayIdx >= 0) {
+      (mergedRows as Array<MergedRow & { isRealtime?: boolean }>)[todayIdx] = todayRTRow;
+    } else {
+      (mergedRows as Array<MergedRow & { isRealtime?: boolean }>).unshift(todayRTRow);
+    }
+  }
+
+  // Stats — computed after real-time injection so today's row is accurate
+  const dayCount = mergedRows.length || 1;
+  const totalLuggage = mergedRows.reduce((s, r) => s + r.luggage, 0);
+  const totalRental = mergedRows.reduce((s, r) => s + r.rental, 0);
+  const totalCombined = totalLuggage + totalRental;
+  const totalPeople = mergedRows.reduce((s, r) => s + r.orders, 0);
+  const totalCash = mergedRows.reduce((s, r) => s + r.cash, 0);
+  const totalQr = mergedRows.reduce((s, r) => s + r.qr, 0);
+
+  // Min / Max stats (only from days with data)
+  const activeDays = mergedRows.filter(r => r.combined > 0);
+  const minMax = activeDays.length > 0 ? {
+    people: { min: Math.min(...activeDays.map(r => r.orders)), max: Math.max(...activeDays.map(r => r.orders)) },
+    cash: { min: Math.min(...activeDays.map(r => r.cash)), max: Math.max(...activeDays.map(r => r.cash)) },
+    qr: { min: Math.min(...activeDays.map(r => r.qr)), max: Math.max(...activeDays.map(r => r.qr)) },
+    luggage: { min: Math.min(...activeDays.map(r => r.luggage)), max: Math.max(...activeDays.map(r => r.luggage)) },
+    rental: { min: Math.min(...activeDays.map(r => r.rental)), max: Math.max(...activeDays.map(r => r.rental)) },
+    combined: { min: Math.min(...activeDays.map(r => r.combined)), max: Math.max(...activeDays.map(r => r.combined)) },
+  } : null;
+
+  // Average daily revenue (excluding today's real-time row for a fair historical avg)
+  const historicalRows = mergedRows.filter(r => r.date !== todayJST && r.combined > 0);
+  const histDayCount = historicalRows.length || 1;
+  const avgDailyRevenue = Math.round(historicalRows.reduce((s, r) => s + r.combined, 0) / histDayCount);
+  const todayVsAvgDiff = ts.revenue_total - avgDailyRevenue;
+  const todayVsAvgPct = avgDailyRevenue > 0 ? Math.round((todayVsAvgDiff / avgDailyRevenue) * 100) : 0;
 
   const staff = getStaff(c);
   const successMsg = c.req.query("success");
@@ -170,6 +219,14 @@ admin.get("/staff/admin/sales", async (c) => {
             <span>캐리어: {ts.suitcase_total}개</span>
             <span>배낭/백팩: {ts.backpack_total}개</span>
           </div>
+          {histDayCount > 1 && (
+            <div style="display:flex;align-items:center;gap:12px;margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b">
+              <span>일평균(과거): <strong style="color:#1e293b">¥{avgDailyRevenue.toLocaleString()}</strong></span>
+              <span style={`font-weight:600;color:${todayVsAvgDiff >= 0 ? "#16a34a" : "#dc2626"}`}>
+                오늘 {todayVsAvgDiff >= 0 ? "+" : ""}{todayVsAvgDiff.toLocaleString()} ({todayVsAvgPct >= 0 ? "+" : ""}{todayVsAvgPct}%)
+              </span>
+            </div>
+          )}
         </section>
         {(() => {
           const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
@@ -277,14 +334,17 @@ admin.get("/staff/admin/sales", async (c) => {
           {mergedRows.length === 0 && (
             <tr><td colspan={7} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
           )}
-          {mergedRows.map((r) => {
+          {(mergedRows as Array<MergedRow & { isRealtime?: boolean }>).map((r) => {
             const lPct = r.combined > 0 ? Math.round(r.luggage / r.combined * 100) : 0;
             const rPct = r.combined > 0 ? 100 - lPct : 0;
             const isHoliday = r.isWeekend || r.jpHoliday || r.krHoliday;
-            const rowBg = isHoliday ? "background:#fef9ee" : "";
+            const rowBg = r.isRealtime ? "background:#f0f9ff;outline:2px solid #bfdbfe;outline-offset:-1px" : isHoliday ? "background:#fef9ee" : "";
             return (
               <tr style={`border-bottom:1px solid var(--line);${rowBg}`}>
-                <td class="sales-td" style={`white-space:nowrap;${r.jpHoliday || r.krHoliday ? "color:#dc2626;font-weight:600" : r.isWeekend ? "color:#2383e2;font-weight:600" : ""}`}>{r.dateJP}{r.isWeekend && !r.jpHoliday && !r.krHoliday ? " 🔵" : ""}{r.jpHoliday ? ` 🇯🇵` : ""}{r.krHoliday ? ` 🇰🇷` : ""}</td>
+                <td class="sales-td" style={`white-space:nowrap;${r.jpHoliday || r.krHoliday ? "color:#dc2626;font-weight:600" : r.isWeekend ? "color:#2383e2;font-weight:600" : ""}`}>
+                  {r.dateJP}{r.isWeekend && !r.jpHoliday && !r.krHoliday ? " 🔵" : ""}{r.jpHoliday ? ` 🇯🇵` : ""}{r.krHoliday ? ` 🇰🇷` : ""}
+                  {r.isRealtime && <span style="margin-left:6px;font-size:9px;font-weight:700;color:#2563eb;background:#dbeafe;padding:1px 5px;border-radius:4px;letter-spacing:0.02em">실시간</span>}
+                </td>
                 <td class="sales-td sales-td--right">{r.orders || "-"}</td>
                 <td class="sales-td sales-td--right">{r.cash ? `¥${r.cash.toLocaleString()}` : "-"}</td>
                 <td class="sales-td sales-td--right">{r.qr ? `¥${r.qr.toLocaleString()}` : "-"}</td>
