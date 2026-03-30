@@ -2,7 +2,7 @@ import type { FC } from "hono/jsx";
 
 export const StaffTopbar: FC<{ staff: { display_name: string | null; username: string | null; role: string }; active?: string }> = ({ staff, active }) => {
   const links = [
-    { href: "/staff/dashboard", label: "대시보드" },
+    { href: "/staff/dashboard", label: "짐보관 신청" },
     { href: "/staff/cash-closing", label: "정산마감" },
     { href: "/staff/handover", label: "인수인계" },
     { href: "/staff/lost-found", label: "분실물" },
@@ -52,7 +52,7 @@ export const NewOrderAlert: FC = () => (
 
 export const StaffMenu: FC<{ active: string; role: string }> = ({ active, role }) => {
   const links = [
-    { href: "/staff/dashboard", label: "대시보드" },
+    { href: "/staff/dashboard", label: "짐보관 신청" },
     { href: "/staff/cash-closing", label: "정산마감" },
     { href: "/staff/handover", label: "인수인계" },
     { href: "/staff/lost-found", label: "분실물" },
