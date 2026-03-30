@@ -109,6 +109,27 @@ admin.get("/staff/admin/sales", async (c) => {
     combined: { min: Math.min(...activeDays.map(r => r.combined)), max: Math.max(...activeDays.map(r => r.combined)) },
   } : null;
 
+  // Real-time today's sales from luggage_orders
+  const todayJST = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const todaySales = await c.env.DB.prepare(
+    `SELECT
+       COUNT(*) as order_count,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN 1 ELSE 0 END) as paid_count,
+       SUM(CASE WHEN status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') AND (payment_method = 'CASH' OR payment_method IS NULL) THEN prepaid_amount + extra_amount ELSE 0 END) as cash_total,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') AND payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as qr_total,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN prepaid_amount + extra_amount ELSE 0 END) as revenue_total,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN suitcase_qty ELSE 0 END) as suitcase_total,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN backpack_qty ELSE 0 END) as backpack_total
+     FROM luggage_orders
+     WHERE date(created_at, '+9 hours') = ?`
+  ).bind(todayJST).first<{
+    order_count: number; paid_count: number; pending_count: number;
+    cash_total: number; qr_total: number; revenue_total: number;
+    suitcase_total: number; backpack_total: number;
+  }>();
+  const ts = todaySales || { order_count: 0, paid_count: 0, pending_count: 0, cash_total: 0, qr_total: 0, revenue_total: 0, suitcase_total: 0, backpack_total: 0 };
+
   const staff = getStaff(c);
   const successMsg = c.req.query("success");
   return c.html(
@@ -119,6 +140,37 @@ admin.get("/staff/admin/sales", async (c) => {
         <main class="container">
         {successMsg && <p class="success-note">{successMsg}</p>}
         <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div></section>
+
+        <section style="margin-bottom:16px;padding:16px;background:#fff;border:1px solid #e2e8f0;border-radius:12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <h3 style="font-size:15px;font-weight:700;margin:0">오늘 실시간 매출</h3>
+            <span style="font-size:11px;color:#64748b">{todayJST}</span>
+            <span style="font-size:10px;color:#94a3b8;margin-left:auto">자동 갱신</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+            <div style="background:#f0f9ff;border-radius:8px;padding:10px;text-align:center">
+              <p style="font-size:10px;color:#64748b;margin:0">총 매출</p>
+              <p style="font-size:20px;font-weight:800;color:#1e293b;margin:4px 0 0">¥{ts.revenue_total.toLocaleString()}</p>
+            </div>
+            <div style="background:#f0fdf4;border-radius:8px;padding:10px;text-align:center">
+              <p style="font-size:10px;color:#64748b;margin:0">현금</p>
+              <p style="font-size:18px;font-weight:700;color:#166534;margin:4px 0 0">¥{ts.cash_total.toLocaleString()}</p>
+            </div>
+            <div style="background:#eff6ff;border-radius:8px;padding:10px;text-align:center">
+              <p style="font-size:10px;color:#64748b;margin:0">QR결제</p>
+              <p style="font-size:18px;font-weight:700;color:#2563eb;margin:4px 0 0">¥{ts.qr_total.toLocaleString()}</p>
+            </div>
+            <div style="background:#fefce8;border-radius:8px;padding:10px;text-align:center">
+              <p style="font-size:10px;color:#64748b;margin:0">접수</p>
+              <p style="font-size:18px;font-weight:700;color:#a16207;margin:4px 0 0">{ts.paid_count}<span style="font-size:11px;color:#94a3b8">/{ts.order_count}건</span></p>
+            </div>
+          </div>
+          <div style="display:flex;gap:16px;margin-top:8px;font-size:11px;color:#64748b">
+            <span>결제대기: {ts.pending_count}건</span>
+            <span>캐리어: {ts.suitcase_total}개</span>
+            <span>배낭/백팩: {ts.backpack_total}개</span>
+          </div>
+        </section>
         {(() => {
           const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
           const today = now.toISOString().slice(0, 10);
