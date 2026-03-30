@@ -512,7 +512,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               if(activePopover){activePopover.pop.remove();activePopover=null;}
             }
             document.addEventListener('click',function(e){
-              if(activePopover&&!activePopover.cell.contains(e.target)) closePopover();
+              if(activePopover&&!activePopover.cell.contains(e.target)&&!activePopover.pop.contains(e.target)) closePopover();
             });
 
             /* ── Bulk actions ── */
