@@ -13,7 +13,7 @@ import { createBugTask } from "../lib/asana";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { displayOrderStatus, displayPaymentMethod, displayFlyingPassTier } from "../lib/display";
 import { fmtJST } from "../lib/dateFormat";
-import { StaffTopbar } from "../lib/components";
+import { StaffTopbar, NewOrderAlert } from "../lib/components";
 
 type Order = {
   order_id: string;
@@ -313,6 +313,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
             )}
           </section>
         </main>
+        <NewOrderAlert />
       </body>
     </html>
   );
@@ -630,6 +631,7 @@ staffOrders.get("/staff/bug-report", (c) => {
             </form>
           </section>
         </main>
+        <NewOrderAlert />
       </body>
     </html>
   );

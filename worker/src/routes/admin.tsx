@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import type { AppType } from "../types";
 import { adminAuth, editorAuth, getStaff } from "../middleware/auth";
 import { createSupabaseAdmin } from "../lib/supabase";
-import { StaffTopbar } from "../lib/components";
+import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
 
 const admin = new Hono<AppType>();
@@ -506,6 +506,7 @@ admin.get("/staff/admin/sales", async (c) => {
   });
 })()`}} />
         </main>
+        <NewOrderAlert />
       </body>
     </html>
   );
@@ -720,6 +721,7 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
     document.getElementById('create-pw').value=pw;
   });}
 })()`}} />
+        <NewOrderAlert />
       </body>
     </html>
   );
@@ -971,6 +973,7 @@ admin.get("/staff/admin/activity-logs", async (c) => {
           )}
         </div>
         </main>
+        <NewOrderAlert />
       </body>
     </html>
   );
@@ -1034,6 +1037,7 @@ admin.get("/staff/admin/completion-message", async (c) => {
           </div>
         </section>
         </main>
+        <NewOrderAlert />
       </body>
     </html>
   );
@@ -1200,6 +1204,7 @@ admin.get("/staff/admin/customers", async (c) => {
             )}
           </main>
         </div>
+        <NewOrderAlert />
       </body>
     </html>
   );

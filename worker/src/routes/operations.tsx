@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import type { AppType } from "../types";
 import { staffAuth, getStaff } from "../middleware/auth";
 import { formatDateJST, nowJST } from "../services/storage";
-import { StaffTopbar } from "../lib/components";
+import { StaffTopbar, NewOrderAlert } from "../lib/components";
 
 const ops = new Hono<AppType>();
 ops.use("/*", staffAuth);
@@ -154,6 +154,7 @@ ops.get("/staff/cash-closing", async (c) => {
             </div>
           </section>
         </main>
+        <NewOrderAlert />
       </body>
     </html>
   );
@@ -358,6 +359,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
             </div>
           </section>
         </main>
+        <NewOrderAlert />
       </body>
     </html>
   );
@@ -432,6 +434,7 @@ ops.get("/staff/cash-closing/:id/edit", async (c) => {
             </form>
           </section>
         </main>
+        <NewOrderAlert />
       </body>
     </html>
   );
@@ -779,6 +782,7 @@ ops.get("/staff/handover", async (c) => {
           </section>
 
         </main>
+        <NewOrderAlert />
       </body>
     </html>
   );
@@ -1063,6 +1067,7 @@ ops.get("/staff/lost-found", async (c) => {
             </div>
           </section>
         </main>
+        <NewOrderAlert />
       </body>
     </html>
   );
@@ -1160,6 +1165,7 @@ ops.get("/staff/schedule", async (c) => {
         )}
         </section>
         </main>
+        <NewOrderAlert />
       </body>
     </html>
   );

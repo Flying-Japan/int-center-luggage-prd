@@ -12,7 +12,7 @@ import { staffAuth, getStaff } from "./middleware/auth";
 import { runRetentionCleanup } from "./services/retention";
 import { syncDailySales } from "./services/dailySalesSync";
 import { tagColorClass, TAG_COLOR_RANGES } from "./lib/tagColors";
-import { StaffTopbar } from "./lib/components";
+import { StaffTopbar, NewOrderAlert } from "./lib/components";
 
 const app = new Hono<AppType>();
 
@@ -638,6 +638,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
           })();
         ` }} />
+        <NewOrderAlert />
       </body>
     </html>
   );
