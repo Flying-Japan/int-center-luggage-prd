@@ -308,7 +308,7 @@ ops.get("/staff/cash-closing", async (c) => {
                     const businessDate = cl.business_date as string;
                     const dateDisplay = formatClosingDate(businessDate);
                     const autoAmount = autoSalesByDate.get(businessDate)?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
-                    const diff = (((cl.total_amount as number) || 0) - STARTING_FLOAT + ((cl.actual_qr_amount as number) || 0)) - autoAmount;
+                    const diff = (((cl.total_amount as number) || 0) - STARTING_FLOAT + ((cl.paypay_amount as number) || 0)) - autoAmount;
                     return (
                       <tr style="border-bottom:1px solid #e2e8f0">
                         <td style={`padding:2px 6px;white-space:nowrap;${dateDisplay.style}`} title={dateDisplay.title}><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:inherit;font-weight:600">{dateDisplay.label}{dateDisplay.suffix}</a></td>
@@ -371,12 +371,11 @@ ops.post("/staff/cash-closing", async (c) => {
     "SELECT closing_id FROM luggage_cash_closings WHERE business_date = ? AND closing_type = ?"
   ).bind(businessDate, closingType).first();
   if (existing) return c.redirect("/staff/cash-closing?error=이미 해당 날짜/유형의 정산이 존재합니다");
-  const actualAmount = (totalAmount - STARTING_FLOAT) + actualQrAmount;
-
-  // Match the legacy Check sheet: Daily sheet totals first, live customer-form orders only as same-day fallback.
+  // 차액 = (현금Total - 시제40000) + PayPay - 자동매출
   const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, businessDate);
   const checkAutoAmount = autoSales?.totalAmount ?? 0;
   const expectedAmount = checkAutoAmount;
+  const actualAmount = (totalAmount - STARTING_FLOAT) + paypayAmount;
   const differenceAmount = actualAmount - expectedAmount;
   const qrDifferenceAmount = actualQrAmount - (autoSales?.qrAmount ?? 0);
 
@@ -454,9 +453,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
 
   const cl = closing as Record<string, unknown>;
   const autoAmount = autoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
-  const cashActual = ((cl.total_amount as number) || 0) - STARTING_FLOAT;
-  const qrActual = (cl.actual_qr_amount as number) || 0;
-  const differenceAmount = (cashActual + qrActual) - autoAmount;
+  const differenceAmount = (((cl.total_amount as number) || 0) - STARTING_FLOAT + ((cl.paypay_amount as number) || 0)) - autoAmount;
   const closingStaffName = (cl.staff_id as string | null)
     ? cashClosingStaffNameMap.get(cl.staff_id as string) || (cl.owner_name as string) || "-"
     : (cl.owner_name as string) || "-";
@@ -670,11 +667,11 @@ ops.post("/staff/cash-closing/:id/edit", async (c) => {
   const actualQrAmount = parseInt(String(body.actual_qr_amount || "0"), 10);
   const rentalCash = parseInt(String(body.rental_cash || "0"), 10) || 0;
   const wandRefund = parseInt(String(body.wand_refund || "0"), 10) || 0;
-  const actualAmount = (totalAmount - STARTING_FLOAT) + actualQrAmount;
-
+  // 차액 = (현금Total - 시제40000) + PayPay - 자동매출
   const cl = existing as Record<string, unknown>;
   const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, cl.business_date as string);
   const expectedAmount = autoSales?.totalAmount ?? ((cl.expected_amount as number) || 0);
+  const actualAmount = (totalAmount - STARTING_FLOAT) + paypayAmount;
   const differenceAmount = actualAmount - expectedAmount;
   const qrDiff = actualQrAmount - (autoSales?.qrAmount ?? 0);
 
