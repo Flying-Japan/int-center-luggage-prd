@@ -65,7 +65,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
   // Parse query params for search/filter
   const q = c.req.query("q") || "";
-  const hasFilterParam = c.req.url.includes("status_filter") || c.req.url.includes("reset_filter");
+  const hasFilterParam = c.req.url.includes("status_filter") || c.req.url.includes("reset_filter") || c.req.url.includes("filter_applied");
   const isReset = c.req.query("reset_filter") === "true";
   const defaultFilters = ["PAYMENT_PENDING", "PAID"];
   const statusFilters = isReset ? defaultFilters : hasFilterParam ? (c.req.queries("status_filter") || []) : (() => {
@@ -155,6 +155,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
           <section class="card">
             <h3 class="card-title">접수 검색</h3>
             <form id="staff-search-form" method="get" action="/staff/dashboard" class="staff-search-form">
+              <input type="hidden" name="filter_applied" value="1" />
               <div class="field">
                 <span class="field-label">상태 (복수 선택)</span>
                 <div class="status-filter-buttons" id="status-filter-buttons">
