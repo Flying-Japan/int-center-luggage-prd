@@ -525,14 +525,14 @@ ops.get("/staff/api/cash-closing/auto-sales", async (c) => {
 // ============================================================
 
 const NOTE_CATEGORY_LABELS: Record<string, string> = {
-  HANDOVER: "인수인계", NOTICE: "안내사항", URGENT: "긴급", OTHER: "기타",
+  HANDOVER: "인수인계", NOTICE: "안내사항", URGENT: "긴급", EXPERIENCE: "체험단", OTHER: "기타",
 };
 
 // GET /staff/handover — Handover notes list
 ops.get("/staff/handover", async (c) => {
   const staff = getStaff(c);
 
-  // Fetch notes with author names, read status, and comments in parallel
+  // Fetch notes with author names, read status, comments, and experience visits in parallel
   const [notes, reads, comments] = await Promise.all([
     c.env.DB.prepare(
       `SELECT n.*, COALESCE(u.display_name, u.username) as author_name
@@ -541,8 +541,10 @@ ops.get("/staff/handover", async (c) => {
        ORDER BY n.is_pinned DESC, n.created_at DESC LIMIT 50`
     ).all(),
     c.env.DB.prepare(
-      "SELECT note_id FROM luggage_handover_reads WHERE staff_id = ?"
-    ).bind(staff.id).all<{ note_id: number }>(),
+      `SELECT r.note_id, r.staff_id, COALESCE(u.display_name, u.username) as reader_name
+       FROM luggage_handover_reads r
+       LEFT JOIN user_profiles u ON r.staff_id = u.id`
+    ).all<{ note_id: number; staff_id: string; reader_name: string }>(),
     c.env.DB.prepare(
       `SELECT c.*, COALESCE(u.display_name, u.username) as author_name
        FROM luggage_handover_comments c
@@ -550,7 +552,19 @@ ops.get("/staff/handover", async (c) => {
        ORDER BY c.created_at ASC`
     ).all(),
   ]);
-  const readNoteIds = new Set(reads.results.map((r) => r.note_id));
+  const expVisits = await c.env.DB.prepare(
+    `SELECT v.*, COALESCE(u.display_name, u.username) as creator_name, COALESCE(p.display_name, p.username) as processor_name
+     FROM luggage_experience_visits v
+     LEFT JOIN user_profiles u ON v.created_by_staff_id = u.id
+     LEFT JOIN user_profiles p ON v.processed_by_staff_id = p.id
+     ORDER BY v.scheduled_date DESC, v.created_at DESC LIMIT 50`
+  ).all();
+  const readNoteIds = new Set(reads.results.filter((r) => r.staff_id === staff.id).map((r) => r.note_id));
+  const readersByNote = new Map<number, string[]>();
+  for (const r of reads.results) {
+    if (!readersByNote.has(r.note_id)) readersByNote.set(r.note_id, []);
+    if (r.reader_name) readersByNote.get(r.note_id)!.push(r.reader_name);
+  }
   const commentsByNote = new Map<number, Record<string, unknown>[]>();
   for (const cm of comments.results as Record<string, unknown>[]) {
     const nid = cm.note_id as number;
@@ -575,6 +589,7 @@ ops.get("/staff/handover", async (c) => {
                     <option value="HANDOVER">인수인계</option>
                     <option value="NOTICE">안내사항</option>
                     <option value="URGENT">긴급</option>
+                    <option value="EXPERIENCE">체험단</option>
                     <option value="OTHER">기타</option>
                   </select>
                 </label>
@@ -585,7 +600,7 @@ ops.get("/staff/handover", async (c) => {
               </div>
               <label class="field">
                 <span class="field-label">내용</span>
-                <textarea class="control" name="content" placeholder="내용" required></textarea>
+                <textarea class="control" name="content" placeholder="내용" required rows={4}></textarea>
               </label>
               <label class="check-row">
                 <input type="checkbox" name="is_pinned" value="1" />
@@ -610,12 +625,18 @@ ops.get("/staff/handover", async (c) => {
                       {isRead ? <span class="status-pill">읽음</span> : <span class="status-pill">새글</span>}
                     </span>
                   </div>
-                  <p class="ops-item-content">{note.content as string}</p>
+                  <p class="ops-item-content" style="white-space:pre-line">{note.content as string}</p>
                   <small class="ops-item-date">
                     {(note.author_name as string) || "알수없음"} · {note.created_at ? new Date(note.created_at as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}
                   </small>
+                  {(() => {
+                    const readers = readersByNote.get(noteId) || [];
+                    return readers.length > 0 ? (
+                      <small style="display:block;margin-top:4px;color:#94a3b8;font-size:11px">읽음: {readers.join(", ")}</small>
+                    ) : null;
+                  })()}
                   {!isRead && (
-                    <form method="post" action={`/staff/handover/${noteId}/read`} style="display:inline;margin-left:8px">
+                    <form method="post" action={`/staff/handover/${noteId}/read`} style="display:inline-block;margin-top:4px">
                       <button class="btn btn-sm" type="submit">읽음 표시</button>
                     </form>
                   )}
@@ -651,6 +672,112 @@ ops.get("/staff/handover", async (c) => {
               );
             })}
           </div>
+
+          {/* Experience Visits Section */}
+          <section class="card" style="margin-top:24px">
+            <h3 class="card-title">체험단 관리</h3>
+            <form method="post" action="/staff/handover/experience" style="margin-bottom:16px">
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">방문자 이름</span>
+                  <input class="control" type="text" name="visitor_name" required />
+                </label>
+                <label class="field">
+                  <span class="field-label">유형</span>
+                  <select class="control" name="visitor_type">
+                    <option value="BLOGGER">블로거</option>
+                    <option value="INFLUENCER">인플루언서</option>
+                    <option value="YOUTUBER">유튜버</option>
+                    <option value="OTHER">기타</option>
+                  </select>
+                </label>
+              </div>
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">방문 예정일</span>
+                  <input class="control" type="date" name="scheduled_date" required />
+                </label>
+                <label class="field">
+                  <span class="field-label">혜택 유형</span>
+                  <select class="control" name="benefit_type">
+                    <option value="">선택</option>
+                    <option value="GIFT_CARD">상품권</option>
+                    <option value="CASH">지원금</option>
+                    <option value="PRODUCT">물품</option>
+                    <option value="OTHER">기타</option>
+                  </select>
+                </label>
+              </div>
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">혜택 금액/내용</span>
+                  <input class="control" type="text" name="benefit_amount" placeholder="예: ¥3,000" />
+                </label>
+                <label class="field">
+                  <span class="field-label">메모</span>
+                  <input class="control" type="text" name="note" placeholder="메모" />
+                </label>
+              </div>
+              <button class="btn btn-primary" type="submit">등록</button>
+            </form>
+
+            <div class="table-wrap" style="overflow-x:auto">
+              <table style="font-size:12px;border-collapse:collapse;width:100%;min-width:800px">
+                <thead>
+                  <tr style="background:#f1f5f9;border-bottom:2px solid #cbd5e1">
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">방문자</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">유형</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">예정일</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">혜택</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">금액</th>
+                    <th style="padding:4px 6px;text-align:center;font-size:11px">상태</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">처리자</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">메모</th>
+                    <th style="padding:4px 6px;text-align:center;font-size:11px">액션</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {expVisits.results.map((v: Record<string, unknown>) => {
+                    const st = v.status as string;
+                    const stColor = st === "SCHEDULED" ? "#64748b" : st === "VISITED" ? "#2563eb" : st === "RECEIVED" ? "#166534" : "#dc2626";
+                    const stLabel = st === "SCHEDULED" ? "예정" : st === "VISITED" ? "방문" : st === "RECEIVED" ? "수령완료" : "취소";
+                    const vtLabel = (v.visitor_type as string) === "BLOGGER" ? "블로거" : (v.visitor_type as string) === "INFLUENCER" ? "인플루언서" : (v.visitor_type as string) === "YOUTUBER" ? "유튜버" : "기타";
+                    const btLabel = (v.benefit_type as string) === "GIFT_CARD" ? "상품권" : (v.benefit_type as string) === "CASH" ? "지원금" : (v.benefit_type as string) === "PRODUCT" ? "물품" : (v.benefit_type as string) === "OTHER" ? "기타" : "-";
+                    return (
+                      <tr style="border-bottom:1px solid #e2e8f0">
+                        <td style="padding:3px 6px;font-weight:600">{v.visitor_name as string}</td>
+                        <td style="padding:3px 6px">{vtLabel}</td>
+                        <td style="padding:3px 6px;white-space:nowrap">{v.scheduled_date as string}</td>
+                        <td style="padding:3px 6px">{btLabel}</td>
+                        <td style="padding:3px 6px">{(v.benefit_amount as string) || "-"}</td>
+                        <td style="padding:3px 6px;text-align:center"><span style={`display:inline-block;padding:1px 8px;border-radius:9999px;font-size:10px;font-weight:600;color:white;background:${stColor}`}>{stLabel}</span></td>
+                        <td style="padding:3px 6px;font-size:11px">{(v.processor_name as string) || (v.creator_name as string) || "-"}</td>
+                        <td style="padding:3px 6px;font-size:11px;color:#64748b;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{(v.note as string) || "-"}</td>
+                        <td style="padding:3px 6px;text-align:center;white-space:nowrap">
+                          {st === "SCHEDULED" && (
+                            <form method="post" action={`/staff/handover/experience/${v.visit_id}/visit`} style="display:inline">
+                              <button class="btn btn-sm" type="submit" style="font-size:10px">방문확인</button>
+                            </form>
+                          )}
+                          {(st === "SCHEDULED" || st === "VISITED") && (
+                            <form method="post" action={`/staff/handover/experience/${v.visit_id}/receive`} style="display:inline;margin-left:2px">
+                              <button class="btn btn-sm btn-primary" type="submit" style="font-size:10px">수령처리</button>
+                            </form>
+                          )}
+                          {st !== "CANCELLED" && st !== "RECEIVED" && (
+                            <form method="post" action={`/staff/handover/experience/${v.visit_id}/cancel`} style="display:inline;margin-left:2px">
+                              <button class="btn btn-sm btn-secondary" type="submit" style="font-size:10px">취소</button>
+                            </form>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
         </main>
       </body>
     </html>
@@ -764,6 +891,60 @@ ops.post("/staff/handover/comments/:id/delete", async (c) => {
   if (!comment || comment.staff_id !== staff.id) return c.redirect("/staff/handover");
 
   await c.env.DB.prepare("DELETE FROM luggage_handover_comments WHERE comment_id = ?").bind(commentId).run();
+  return c.redirect("/staff/handover");
+});
+
+// ============================================================
+// EXPERIENCE VISITS (체험단)
+// ============================================================
+
+// POST /staff/handover/experience — Create visit
+ops.post("/staff/handover/experience", async (c) => {
+  const body = await c.req.parseBody();
+  const staff = getStaff(c);
+
+  await c.env.DB.prepare(
+    `INSERT INTO luggage_experience_visits (visitor_name, visitor_type, scheduled_date, benefit_type, benefit_amount, note, created_by_staff_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    String(body.visitor_name || ""),
+    String(body.visitor_type || "BLOGGER"),
+    String(body.scheduled_date || ""),
+    String(body.benefit_type || "") || null,
+    String(body.benefit_amount || "") || null,
+    String(body.note || "") || null,
+    staff.id
+  ).run();
+
+  return c.redirect("/staff/handover");
+});
+
+// POST /staff/handover/experience/:id/visit — Mark as visited
+ops.post("/staff/handover/experience/:id/visit", async (c) => {
+  const visitId = c.req.param("id");
+  await c.env.DB.prepare(
+    "UPDATE luggage_experience_visits SET status = 'VISITED', updated_at = datetime('now') WHERE visit_id = ? AND status = 'SCHEDULED'"
+  ).bind(visitId).run();
+  return c.redirect("/staff/handover");
+});
+
+// POST /staff/handover/experience/:id/receive — Mark as received
+ops.post("/staff/handover/experience/:id/receive", async (c) => {
+  const visitId = c.req.param("id");
+  const staff = getStaff(c);
+  await c.env.DB.prepare(
+    `UPDATE luggage_experience_visits SET status = 'RECEIVED', processed_by_staff_id = ?, received_by = ?, received_at = datetime('now'), updated_at = datetime('now')
+     WHERE visit_id = ? AND status IN ('SCHEDULED', 'VISITED')`
+  ).bind(staff.id, getStaff(c).display_name || getStaff(c).username, visitId).run();
+  return c.redirect("/staff/handover");
+});
+
+// POST /staff/handover/experience/:id/cancel — Cancel visit
+ops.post("/staff/handover/experience/:id/cancel", async (c) => {
+  const visitId = c.req.param("id");
+  await c.env.DB.prepare(
+    "UPDATE luggage_experience_visits SET status = 'CANCELLED', updated_at = datetime('now') WHERE visit_id = ? AND status IN ('SCHEDULED', 'VISITED')"
+  ).bind(visitId).run();
   return c.redirect("/staff/handover");
 });
 
