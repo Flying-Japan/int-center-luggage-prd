@@ -55,18 +55,21 @@ export async function buildOrderId(db: D1Database, nowUtc?: Date): Promise<strin
 export async function buildTagNo(db: D1Database, nowUtc?: Date): Promise<string> {
   const businessDate = nowUtc ? formatBusinessDate(nowUtc) : todayBusinessDate();
 
-  const row = await db
+  // Find lowest unused tag number (fills gaps from cancelled orders)
+  const used = await db
     .prepare(
-      `INSERT INTO luggage_daily_tag_counters (business_date, last_seq)
-       VALUES (?, 1)
-       ON CONFLICT(business_date) DO UPDATE SET last_seq = last_seq + 1
-       RETURNING last_seq`
+      `SELECT CAST(tag_no AS INTEGER) as num FROM luggage_orders
+       WHERE order_id LIKE ? AND status != 'CANCELLED' AND tag_no IS NOT NULL
+       ORDER BY num ASC`
     )
-    .bind(businessDate)
-    .first<{ last_seq: number }>();
+    .bind(`${businessDate}-%`)
+    .all<{ num: number }>();
 
-  const seq = row?.last_seq ?? 1;
-  return String(seq);
+  const usedSet = new Set(used.results.map((r) => r.num));
+  let next = 1;
+  while (usedSet.has(next)) next++;
+
+  return String(next);
 }
 
 /** Convert a UTC Date to JST business date string (YYYYMMDD). */

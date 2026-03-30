@@ -539,7 +539,7 @@ const NOTE_CATEGORY_LABELS: Record<string, string> = {
 ops.get("/staff/handover", async (c) => {
   const staff = getStaff(c);
 
-  // Fetch notes with author names, read status, comments, and experience visits in parallel
+  // Fetch notes with author names, read status, comments, edits, and experience visits in parallel
   const [notes, reads, comments] = await Promise.all([
     c.env.DB.prepare(
       `SELECT n.*, COALESCE(u.display_name, u.username) as author_name
@@ -559,6 +559,12 @@ ops.get("/staff/handover", async (c) => {
        ORDER BY c.created_at ASC`
     ).all(),
   ]);
+  const edits = await c.env.DB.prepare(
+    `SELECT e.note_id, e.staff_id, COALESCE(u.display_name, u.username) as editor_name, e.created_at
+     FROM luggage_handover_edits e
+     LEFT JOIN user_profiles u ON e.staff_id = u.id
+     ORDER BY e.created_at DESC`
+  ).all<{ note_id: number; staff_id: string; editor_name: string; created_at: string }>();
   const expVisits = await c.env.DB.prepare(
     `SELECT v.*, COALESCE(u.display_name, u.username) as creator_name, COALESCE(p.display_name, p.username) as processor_name
      FROM luggage_experience_visits v
@@ -577,6 +583,11 @@ ops.get("/staff/handover", async (c) => {
     const nid = cm.note_id as number;
     if (!commentsByNote.has(nid)) commentsByNote.set(nid, []);
     commentsByNote.get(nid)!.push(cm);
+  }
+  const editsByNote = new Map<number, { editor_name: string; created_at: string }[]>();
+  for (const ed of edits.results) {
+    if (!editsByNote.has(ed.note_id)) editsByNote.set(ed.note_id, []);
+    editsByNote.get(ed.note_id)!.push({ editor_name: ed.editor_name, created_at: ed.created_at });
   }
 
   return c.html(
@@ -667,14 +678,30 @@ ops.get("/staff/handover", async (c) => {
                     <button class="btn btn-sm btn-secondary" type="submit">댓글</button>
                   </form>
 
-                  {/* Edit/Delete (only for author) */}
-                  {(note.staff_id as string) === staff.id && (
-                    <div style="margin-top:8px;display:flex;gap:6px">
+                  {/* Edit/Delete (author or admin) */}
+                  {((note.staff_id as string) === staff.id || staff.role === "admin") && (
+                    <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
+                      <a href={`/staff/handover/${noteId}/edit`} class="btn btn-sm" style="font-size:11px;text-decoration:none">수정</a>
                       <form method="post" action={`/staff/handover/${noteId}/delete`} style="display:inline" onsubmit="return confirm('이 노트를 삭제하시겠습니까?')">
                         <button class="btn btn-sm btn-secondary" style="font-size:11px" type="submit">삭제</button>
                       </form>
                     </div>
                   )}
+                  {/* Edit history */}
+                  {(() => {
+                    const noteEdits = editsByNote.get(noteId) || [];
+                    if (noteEdits.length === 0) return null;
+                    return (
+                      <details style="margin-top:6px;font-size:11px;color:#94a3b8">
+                        <summary style="cursor:pointer">수정됨 ({noteEdits.length}회)</summary>
+                        <ul style="margin:4px 0 0 16px;padding:0;list-style:disc">
+                          {noteEdits.map((ed) => (
+                            <li>{ed.editor_name} · {ed.created_at ? new Date(ed.created_at as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}</li>
+                          ))}
+                        </ul>
+                      </details>
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -844,6 +871,95 @@ ops.post("/staff/handover/:id/comments", async (c) => {
   )
     .bind(noteId, staff.id, content)
     .run();
+
+  return c.redirect("/staff/handover");
+});
+
+// GET /staff/handover/:id/edit — Edit form
+ops.get("/staff/handover/:id/edit", async (c) => {
+  const noteId = c.req.param("id");
+  const staff = getStaff(c);
+  const note = await c.env.DB.prepare(
+    `SELECT n.*, COALESCE(u.display_name, u.username) as author_name
+     FROM luggage_handover_notes n
+     LEFT JOIN user_profiles u ON n.staff_id = u.id
+     WHERE n.note_id = ?`
+  ).bind(noteId).first<Record<string, unknown>>();
+  if (!note) return c.html(<p>Not found</p>, 404);
+  if ((note.staff_id as string) !== staff.id && staff.role !== "admin") return c.redirect("/staff/handover");
+
+  return c.html(
+    <html lang="ko">
+      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>노트 수정</title></head>
+      <body class="staff-site">
+        <StaffTopbar staff={staff} active="/staff/handover" />
+        <main class="container">
+          <section class="card">
+            <h3 class="card-title">노트 수정</h3>
+            <form method="post" action={`/staff/handover/${noteId}/edit`}>
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">분류</span>
+                  <select class="control" name="category">
+                    {["HANDOVER", "NOTICE", "URGENT", "EXPERIENCE", "OTHER"].map((cat) => (
+                      <option value={cat} selected={cat === (note.category as string)}>{NOTE_CATEGORY_LABELS[cat] || cat}</option>
+                    ))}
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="field-label">제목</span>
+                  <input class="control" type="text" name="title" value={note.title as string} required />
+                </label>
+              </div>
+              <label class="field">
+                <span class="field-label">내용</span>
+                <textarea class="control" name="content" required rows={4}>{note.content as string}</textarea>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" name="is_pinned" value="1" checked={!!(note.is_pinned as number)} />
+                <span>고정</span>
+              </label>
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <button class="btn btn-primary" type="submit">수정 저장</button>
+                <a href="/staff/handover" class="btn btn-secondary">취소</a>
+              </div>
+            </form>
+          </section>
+        </main>
+        <NewOrderAlert />
+      </body>
+    </html>
+  );
+});
+
+// POST /staff/handover/:id/edit — Update note with edit history
+ops.post("/staff/handover/:id/edit", async (c) => {
+  const noteId = c.req.param("id");
+  const staff = getStaff(c);
+  const body = await c.req.parseBody();
+
+  const note = await c.env.DB.prepare("SELECT * FROM luggage_handover_notes WHERE note_id = ?").bind(noteId).first<Record<string, unknown>>();
+  if (!note) return c.redirect("/staff/handover");
+  if ((note.staff_id as string) !== staff.id && staff.role !== "admin") return c.redirect("/staff/handover");
+
+  const newTitle = String(body.title || "");
+  const newContent = String(body.content || "");
+
+  // Insert edit history
+  await c.env.DB.prepare(
+    `INSERT INTO luggage_handover_edits (note_id, staff_id, old_title, old_content, new_title, new_content) VALUES (?, ?, ?, ?, ?, ?)`
+  ).bind(noteId, staff.id, note.title as string, note.content as string, newTitle, newContent).run();
+
+  // Update note
+  await c.env.DB.prepare(
+    "UPDATE luggage_handover_notes SET title = ?, content = ?, category = ?, is_pinned = ? WHERE note_id = ?"
+  ).bind(
+    newTitle,
+    newContent,
+    String(body.category || "HANDOVER"),
+    body.is_pinned ? 1 : 0,
+    noteId
+  ).run();
 
   return c.redirect("/staff/handover");
 });

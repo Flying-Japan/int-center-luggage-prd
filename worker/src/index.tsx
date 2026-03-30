@@ -443,6 +443,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             }
 
             window.refBtn=function(floor,delta){
+              var msg=floor+(delta>0?' +1 추가':' -1 감소')+' 하시겠습니까?';
+              if(!confirm(msg))return;
               apiPost('/staff/api/referral',{floor:floor,delta:delta}).then(function(r){return r.json();}).then(function(d){
                 var el=document.getElementById('ref-'+floor.toLowerCase());
                 if(el)el.textContent=d.count;
