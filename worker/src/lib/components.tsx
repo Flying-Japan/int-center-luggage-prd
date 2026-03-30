@@ -39,6 +39,18 @@ export const StaffTopbar: FC<{ staff: { display_name: string | null; username: s
           </form>
         </nav>
       </div>
+      <div id="new-order-badge" style="display:none;position:fixed;top:8px;right:16px;background:#dc2626;color:#fff;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;z-index:9999;cursor:pointer" />
+      <script dangerouslySetInnerHTML={{__html: [
+        "(function(){",
+        "var lc=new Date().toISOString();",
+        "var ac=null;try{var AC=window.AudioContext||window.webkitAudioContext;if(AC)ac=new AC();}catch(e){}",
+        "function beep(){if(!ac)return;try{if(ac.state==='suspended')ac.resume();var o=ac.createOscillator(),g=ac.createGain();o.connect(g);g.connect(ac.destination);o.frequency.value=880;g.gain.value=0.3;o.start();g.gain.exponentialRampToValueAtTime(0.01,ac.currentTime+0.5);o.stop(ac.currentTime+0.5);}catch(e){}}",
+        "setInterval(function(){fetch('/staff/api/orders/new?since='+encodeURIComponent(lc)).then(function(r){return r.json()}).then(function(d){if(d.count>0){beep();lc=new Date().toISOString();",
+        "if(location.pathname==='/staff/dashboard'){location.reload();}",
+        "else{var b=document.getElementById('new-order-badge');if(b){b.style.display='block';b.textContent='\\uc0c8 \\uc811\\uc218 '+d.count+'\\uac74';b.onclick=function(){location.href='/staff/dashboard';};}",
+        "if(document.title.indexOf('\\ud83d\\udd14')===-1)document.title='\\ud83d\\udd14 '+document.title;}}}).catch(function(){});},3000);",
+        "})()",
+      ].join("")}} />
     </header>
   );
 };
