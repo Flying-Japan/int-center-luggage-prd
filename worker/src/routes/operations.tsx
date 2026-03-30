@@ -5,7 +5,7 @@
 import { Hono } from "hono";
 import type { AppType } from "../types";
 import { staffAuth, getStaff } from "../middleware/auth";
-import { formatDateJST, nowJST } from "../services/storage";
+import { formatDateJST } from "../services/storage";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { fetchStaffNamesByIds } from "../lib/staffProfiles";
 
@@ -23,10 +23,10 @@ const WORKFLOW_LABELS: Record<string, string> = { SUBMITTED: "제출완료" };
 const AUDIT_ACTION_LABELS: Record<string, string> = { CREATE: "정산마감 생성", SUBMIT: "정산마감 제출", VERIFY_LOCK: "확인/잠금 (레거시)", EDIT: "정산마감 수정" };
 const DOW_JP = ["日", "月", "火", "水", "木", "金", "土"];
 const JP_HOLIDAYS: Record<string, string> = {
-  "01-01": "元日", "01-13": "成人の日", "02-11": "建国記念の日", "02-23": "天皇誕生日",
+  "01-01": "元日", "01-12": "成人の日", "02-11": "建国記念の日", "02-23": "天皇誕生日",
   "03-20": "春分の日", "04-29": "昭和の日", "05-03": "憲法記念日", "05-04": "みどりの日",
   "05-05": "こどもの日", "05-06": "振替休日", "07-20": "海の日", "08-11": "山の日",
-  "09-21": "敬老の日", "09-23": "秋分の日", "10-12": "体育の日", "11-03": "文化の日",
+  "09-21": "敬老の日", "09-23": "秋分の日", "10-12": "スポーツの日", "11-03": "文化の日",
   "11-23": "勤労感謝の日",
 };
 const KR_HOLIDAYS: Record<string, string> = {
@@ -167,7 +167,7 @@ async function resolveAutoSalesSummariesByDate(db: D1Database, businessDates: st
     fetchLiveOrderSalesSummariesByDate(db, uniqueDates),
   ]);
 
-  const today = formatDateJST(nowJST());
+  const today = formatDateJST(new Date());
   const result = new Map<string, AutoSalesSummary>();
   for (const businessDate of uniqueDates) {
     const daily = dailySalesByDate.get(businessDate);
@@ -350,7 +350,7 @@ ops.get("/staff/cash-closing", async (c) => {
 ops.post("/staff/cash-closing", async (c) => {
   const body = await c.req.parseBody();
   const staff = getStaff(c);
-  const businessDate = formatDateJST(nowJST());
+  const businessDate = formatDateJST(new Date());
 
   let totalAmount = 0;
   const denomValues: number[] = [];

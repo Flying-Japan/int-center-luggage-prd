@@ -52,7 +52,7 @@ export function validatePickupTimeWindow(
 ): { valid: boolean; error?: string } {
   const jst = toJST(pickupAt);
   const hour = jst.getUTCHours();
-  if (hour < openHour || hour > closeHour) {
+  if (hour < openHour || hour >= closeHour) {
     return {
       valid: false,
       error: `영업시간 ${String(openHour).padStart(2, "0")}:00~${String(closeHour).padStart(2, "0")}:00 내에서 수령 가능합니다.`,
