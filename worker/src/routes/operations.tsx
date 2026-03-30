@@ -39,8 +39,8 @@ const KR_HOLIDAYS: Record<string, string> = {
 };
 
 function getHolidayFlags(dateStr: string): { isWeekend: boolean; jp: string | null; kr: string | null } {
-  const d = new Date(`${dateStr}T00:00:00+09:00`);
-  const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  const isWeekend = d.getUTCDay() === 0 || d.getUTCDay() === 6;
   const mmdd = dateStr.slice(5);
   return {
     isWeekend,
@@ -50,8 +50,8 @@ function getHolidayFlags(dateStr: string): { isWeekend: boolean; jp: string | nu
 }
 
 function formatClosingDate(dateStr: string): { label: string; style: string; suffix: string; title: string } {
-  const d = new Date(`${dateStr}T00:00:00+09:00`);
-  const dow = DOW_JP[d.getDay()];
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  const dow = DOW_JP[d.getUTCDay()];
   const flags = getHolidayFlags(dateStr);
   const suffix = `${flags.isWeekend && !flags.jp && !flags.kr ? " 🔵" : ""}${flags.jp ? " 🇯🇵" : ""}${flags.kr ? " 🇰🇷" : ""}`;
   const style = flags.jp || flags.kr

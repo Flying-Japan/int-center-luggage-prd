@@ -87,8 +87,8 @@ admin.get("/staff/admin/sales", async (c) => {
   };
 
   function getHolidayFlags(dateStr: string): { isWeekend: boolean; jp: string | null; kr: string | null } {
-    const d = new Date(dateStr + "T00:00:00+09:00");
-    const dayOfWeek = d.getDay();
+    const d = new Date(dateStr + "T12:00:00Z");
+    const dayOfWeek = d.getUTCDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     const mmdd = dateStr.slice(5); // MM-DD
     const jp = JP_HOLIDAYS[mmdd] || null;
@@ -98,7 +98,7 @@ admin.get("/staff/admin/sales", async (c) => {
 
   interface MergedRow { date: string; dateJP: string; orders: number; cash: number; qr: number; luggage: number; rental: number; combined: number; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
   const mergedRows: MergedRow[] = dailyRows.results.map(r => {
-    const dow = DOW_JP[new Date(r.sale_date + "T00:00:00+09:00").getDay()];
+    const dow = DOW_JP[new Date(r.sale_date + "T12:00:00Z").getUTCDay()];
     const flags = getHolidayFlags(r.sale_date);
     const actual = actualByDate.get(r.sale_date);
     // Use DB data only if it has more orders than Sheets (avoids stale pre-migration dates)
@@ -157,7 +157,7 @@ admin.get("/staff/admin/sales", async (c) => {
 
   // Override or insert today's row in mergedRows with real-time data
   const todayIdx = mergedRows.findIndex(r => r.date === todayJST);
-  const todayDow = DOW_JP[new Date(todayJST + "T00:00:00+09:00").getDay()];
+  const todayDow = DOW_JP[new Date(todayJST + "T12:00:00Z").getUTCDay()];
   const todayFlags = getHolidayFlags(todayJST);
   const todayRTRow: MergedRow & { isRealtime?: boolean } = {
     date: todayJST,
