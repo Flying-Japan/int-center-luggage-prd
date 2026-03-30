@@ -287,6 +287,33 @@ ops.get("/staff/cash-closing/:id", async (c) => {
               </div>
             </div>
 
+            <div style="margin-bottom:16px;overflow-x:auto">
+              <table style="font-size:11px;border-collapse:collapse;width:100%">
+                <thead>
+                  <tr style="background:#f1f5f9;border-bottom:1px solid #cbd5e1">
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">¥10,000</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">¥5,000</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">¥2,000</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">¥1,000</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">¥500</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">¥100</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">¥50</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">¥10</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">¥5</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">¥1</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    {DENOMS.map(d => <td style="padding:3px 6px;text-align:right;font-weight:600">{((cl[`count_${d}`] as number) || 0).toLocaleString()}</td>)}
+                  </tr>
+                  <tr style="border-top:1px solid #e2e8f0;color:#64748b;font-size:10px">
+                    {DENOMS.map(d => <td style="padding:2px 6px;text-align:right">¥{(((cl[`count_${d}`] as number) || 0) * d).toLocaleString()}</td>)}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
             <div class="summary-grid" style="font-size:13px">
               <p><strong>PayPay</strong><span>¥{(cl.paypay_amount as number).toLocaleString()}</span></p>
               <p><strong>총 실제액</strong><span>¥{(cl.actual_amount as number).toLocaleString()}</span></p>
@@ -345,7 +372,7 @@ ops.get("/staff/cash-closing/:id/edit", async (c) => {
 
   if (!closing) return c.html(<p>Not found</p>, 404);
   const cl = closing as Record<string, unknown>;
-  if (cl.workflow_status !== "SUBMITTED") return c.redirect(`/staff/cash-closing/${closingId}`);
+  // All statuses can be edited
 
   const staff = getStaff(c);
   return c.html(
