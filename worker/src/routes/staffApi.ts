@@ -41,6 +41,17 @@ function buildOrderFilters(
   return { clause, params };
 }
 
+// GET /staff/api/orders/new — Check for new orders since a timestamp
+staffApi.get("/staff/api/orders/new", async (c) => {
+  const since = c.req.query("since") || "";
+  if (!since) return c.json({ orders: [], count: 0 });
+  const result = await c.env.DB.prepare(
+    `SELECT order_id, name, tag_no, status, prepaid_amount, created_at, expected_pickup_at, note, payment_method, in_warehouse, parent_order_id, flying_pass_tier
+     FROM luggage_orders WHERE created_at > ? ORDER BY created_at DESC`
+  ).bind(since).all();
+  return c.json({ orders: result.results, count: result.results.length });
+});
+
 // GET /staff/api/orders — List orders with filtering, search, pagination
 staffApi.get("/staff/api/orders", async (c) => {
   const status = c.req.query("status") || "";
