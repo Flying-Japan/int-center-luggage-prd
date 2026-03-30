@@ -4,7 +4,7 @@
  */
 import { Hono } from "hono";
 import type { AppType } from "../types";
-import { staffAuth, adminAuth, getStaff } from "../middleware/auth";
+import { staffAuth, getStaff } from "../middleware/auth";
 import { formatDateJST, nowJST } from "../services/storage";
 import { StaffMenu, StaffTopbar } from "../lib/components";
 
@@ -17,7 +17,8 @@ ops.use("/*", staffAuth);
 
 const DENOMS = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1] as const;
 const CLOSING_TYPE_LABELS: Record<string, string> = { MORNING_HANDOVER: "오전", FINAL_CLOSE: "최종" };
-const WORKFLOW_LABELS: Record<string, string> = { DRAFT: "임시", SUBMITTED: "제출", VERIFIED: "확인" };
+const WORKFLOW_LABELS: Record<string, string> = { SUBMITTED: "제출완료" };
+const AUDIT_ACTION_LABELS: Record<string, string> = { CREATE: "정산마감 생성", SUBMIT: "정산마감 제출", VERIFY_LOCK: "확인/잠금 (레거시)", EDIT: "정산마감 수정" };
 
 // GET /staff/cash-closing — Cash closing list & form
 ops.get("/staff/cash-closing", async (c) => {
@@ -65,8 +66,9 @@ ops.get("/staff/cash-closing", async (c) => {
                   <input class="control" type="number" name="paypay_amount" defaultValue="0" />
                 </label>
                 <label class="field">
-                  <span class="field-label">실제 QR 금액</span>
+                  <span class="field-label">QR결제 실수령액 (PayPay 포함)</span>
                   <input class="control" type="number" name="actual_qr_amount" defaultValue="0" />
+                  <small style="color:#666;font-size:11px;margin-top:2px">PayPay + 카카오페이 + 기타 QR결제 실수령 합계</small>
                 </label>
               </div>
 
@@ -74,7 +76,7 @@ ops.get("/staff/cash-closing", async (c) => {
                 <span class="field-label">메모</span>
                 <textarea class="control" name="note"></textarea>
               </label>
-              <button class="btn btn-primary" type="submit">저장</button>
+              <button class="btn btn-primary" type="submit">정산마감 제출</button>
             </form>
           </section>
 
@@ -83,7 +85,7 @@ ops.get("/staff/cash-closing", async (c) => {
             <div class="table-wrap">
               <table>
                 <thead>
-                  <tr><th>날짜</th><th>유형</th><th>상태</th><th>합계</th></tr>
+                  <tr><th>날짜</th><th>유형</th><th>상태</th><th>합계</th><th></th></tr>
                 </thead>
                 <tbody>
                   {closings.results.map((cl: Record<string, unknown>) => (
@@ -92,6 +94,12 @@ ops.get("/staff/cash-closing", async (c) => {
                       <td>{CLOSING_TYPE_LABELS[cl.closing_type as string] || cl.closing_type as string}</td>
                       <td><span class="status-pill">{WORKFLOW_LABELS[cl.workflow_status as string] || cl.workflow_status as string}</span></td>
                       <td>¥{(cl.total_amount as number).toLocaleString()}</td>
+                      <td style="white-space:nowrap">
+                        {cl.workflow_status === "SUBMITTED" && (
+                          <a href={`/staff/cash-closing/${cl.closing_id}/edit`} class="btn btn-sm btn-secondary" style="margin-right:4px">수정</a>
+                        )}
+                        <a href={`/staff/cash-closing/${cl.closing_id}`} class="btn btn-sm">상세</a>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -153,7 +161,7 @@ ops.post("/staff/cash-closing", async (c) => {
        actual_amount, check_auto_amount, expected_amount,
        difference_amount, qr_difference_amount,
        staff_id, note
-     ) VALUES (?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, 'SUBMITTED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       businessDate, closingType,
@@ -163,6 +171,17 @@ ops.post("/staff/cash-closing", async (c) => {
       staff.id, String(body.note || "") || null
     )
     .run();
+
+  // Get the new closing_id for audit log
+  const newClosing = await c.env.DB.prepare(
+    "SELECT closing_id FROM luggage_cash_closings WHERE business_date = ? AND closing_type = ?"
+  ).bind(businessDate, closingType).first<{ closing_id: number }>();
+
+  if (newClosing) {
+    await c.env.DB.prepare(
+      "INSERT INTO luggage_cash_closing_audits (closing_id, action, staff_id) VALUES (?, 'SUBMIT', ?)"
+    ).bind(newClosing.closing_id, staff.id).run();
+  }
 
   return c.redirect("/staff/cash-closing");
 });
@@ -178,7 +197,10 @@ ops.get("/staff/cash-closing/:id", async (c) => {
   const staff = getStaff(c);
 
   const audits = await c.env.DB.prepare(
-    "SELECT * FROM luggage_cash_closing_audits WHERE closing_id = ? ORDER BY created_at DESC"
+    `SELECT a.*, COALESCE(u.display_name, u.username) as staff_name
+     FROM luggage_cash_closing_audits a
+     LEFT JOIN user_profiles u ON a.staff_id = u.id
+     WHERE a.closing_id = ? ORDER BY a.created_at DESC`
   )
     .bind(closingId)
     .all();
@@ -222,21 +244,10 @@ ops.get("/staff/cash-closing/:id", async (c) => {
               <p><strong>메모</strong><span>{(cl.note as string) || "-"}</span></p>
             </div>
 
-            {cl.workflow_status === "DRAFT" && (
-              <form method="post" action={`/staff/cash-closing/${closingId}/submit`} style="margin-top:12px">
-                <button class="btn btn-primary" type="submit">제출</button>
-              </form>
-            )}
-            {cl.workflow_status === "SUBMITTED" && staff.role === "admin" && (
-              <form method="post" action={`/staff/cash-closing/${closingId}/verify-lock`} style="margin-top:12px" onsubmit="return confirm('정산을 확인/잠금 처리하시겠습니까?')">
-                <button class="btn btn-primary" type="submit">확인 및 잠금</button>
-              </form>
-            )}
-            {cl.workflow_status === "SUBMITTED" && staff.role !== "admin" && (
-              <p class="card-desc" style="margin-top:12px;color:#b45309">제출 완료 — 관리자 확인 대기 중</p>
-            )}
-            {cl.workflow_status === "LOCKED" && (
-              <p class="card-desc" style="margin-top:12px;color:#166534">확인 완료 (잠금)</p>
+            {cl.workflow_status === "SUBMITTED" && (
+              <div style="margin-top:12px">
+                <a href={`/staff/cash-closing/${closingId}/edit`} class="btn btn-primary">수정</a>
+              </div>
             )}
           </section>
 
@@ -249,7 +260,11 @@ ops.get("/staff/cash-closing/:id", async (c) => {
                 </thead>
                 <tbody>
                   {audits.results.map((a: Record<string, unknown>) => (
-                    <tr><td>{a.created_at as string}</td><td>{a.action as string}</td><td>{a.staff_id as string}</td></tr>
+                    <tr>
+                      <td>{a.created_at ? new Date(a.created_at as string + "Z").toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</td>
+                      <td>{AUDIT_ACTION_LABELS[a.action as string] || a.action as string}</td>
+                      <td>{(a.staff_name as string) || a.staff_id as string}</td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
@@ -261,42 +276,125 @@ ops.get("/staff/cash-closing/:id", async (c) => {
   );
 });
 
-// POST /staff/cash-closing/:id/submit — Submit closing
-ops.post("/staff/cash-closing/:id/submit", async (c) => {
+// GET /staff/cash-closing/:id/edit — Edit form for existing closing
+ops.get("/staff/cash-closing/:id/edit", async (c) => {
   const closingId = c.req.param("id");
+  const closing = await c.env.DB.prepare("SELECT * FROM luggage_cash_closings WHERE closing_id = ?")
+    .bind(closingId)
+    .first();
+
+  if (!closing) return c.html(<p>Not found</p>, 404);
+  const cl = closing as Record<string, unknown>;
+  if (cl.workflow_status !== "SUBMITTED") return c.redirect(`/staff/cash-closing/${closingId}`);
+
   const staff = getStaff(c);
+  return c.html(
+    <html lang="ko">
+      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>정산 수정</title></head>
+      <body class="staff-site">
+        <StaffTopbar staff={staff} />
+        <main class="container">
+          <StaffMenu active="/staff/cash-closing" role={staff.role} />
 
-  await c.env.DB.prepare(
-    "UPDATE luggage_cash_closings SET workflow_status = 'SUBMITTED', submitted_by_staff_id = ?, submitted_at = datetime('now'), updated_at = datetime('now') WHERE closing_id = ? AND workflow_status = 'DRAFT'"
-  )
-    .bind(staff.id, closingId)
-    .run();
+          <section class="card">
+            <h3 class="card-title">정산 수정: {cl.business_date as string}</h3>
+            <p style="margin-bottom:12px">유형: {CLOSING_TYPE_LABELS[cl.closing_type as string] || cl.closing_type as string}</p>
+            <form method="post" action={`/staff/cash-closing/${closingId}/edit`}>
+              <div class="cash-denom-panel">
+                <p class="field-label">현금 내역</p>
+                <div class="cash-denom-grid">
+                  {DENOMS.map((d) => (
+                    <label class="cash-denom-item">
+                      <span>¥{d}</span>
+                      <input class="control" type="number" name={`count_${d}`} defaultValue={String(cl[`count_${d}`] ?? 0)} min="0" />
+                    </label>
+                  ))}
+                </div>
+              </div>
 
-  await c.env.DB.prepare(
-    "INSERT INTO luggage_cash_closing_audits (closing_id, action, staff_id) VALUES (?, 'SUBMIT', ?)"
-  )
-    .bind(closingId, staff.id)
-    .run();
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">PayPay 금액</span>
+                  <input class="control" type="number" name="paypay_amount" defaultValue={String(cl.paypay_amount ?? 0)} />
+                </label>
+                <label class="field">
+                  <span class="field-label">QR결제 실수령액 (PayPay 포함)</span>
+                  <input class="control" type="number" name="actual_qr_amount" defaultValue={String(cl.actual_qr_amount ?? 0)} />
+                  <small style="color:#666;font-size:11px;margin-top:2px">PayPay + 카카오페이 + 기타 QR결제 실수령 합계</small>
+                </label>
+              </div>
 
-  return c.redirect(`/staff/cash-closing/${closingId}`);
+              <label class="field">
+                <span class="field-label">메모</span>
+                <textarea class="control" name="note">{(cl.note as string) || ""}</textarea>
+              </label>
+              <div style="display:flex;gap:8px;margin-top:8px">
+                <button class="btn btn-primary" type="submit">수정 저장</button>
+                <a href={`/staff/cash-closing/${closingId}`} class="btn btn-secondary">취소</a>
+              </div>
+            </form>
+          </section>
+        </main>
+      </body>
+    </html>
+  );
 });
 
-// POST /staff/cash-closing/:id/verify-lock — Admin verify & lock
-ops.post("/staff/cash-closing/:id/verify-lock", adminAuth, async (c) => {
+// POST /staff/cash-closing/:id/edit — Update existing closing
+ops.post("/staff/cash-closing/:id/edit", async (c) => {
   const closingId = c.req.param("id");
   const staff = getStaff(c);
+  const body = await c.req.parseBody();
+
+  // Only allow editing SUBMITTED closings
+  const existing = await c.env.DB.prepare("SELECT * FROM luggage_cash_closings WHERE closing_id = ? AND workflow_status = 'SUBMITTED'")
+    .bind(closingId)
+    .first();
+  if (!existing) return c.redirect(`/staff/cash-closing/${closingId}`);
+
+  let totalAmount = 0;
+  const denomValues: number[] = [];
+  for (const d of DENOMS) {
+    const count = parseInt(String(body[`count_${d}`] || "0"), 10);
+    denomValues.push(count);
+    totalAmount += count * d;
+  }
+
+  const paypayAmount = parseInt(String(body.paypay_amount || "0"), 10);
+  const actualQrAmount = parseInt(String(body.actual_qr_amount || "0"), 10);
+  const actualAmount = totalAmount + actualQrAmount;
+
+  const cl = existing as Record<string, unknown>;
+  const expectedAmount = cl.expected_amount as number;
+  const differenceAmount = actualAmount - expectedAmount;
+  // Recalculate QR difference from auto sales
+  const businessDate = cl.business_date as string;
+  const autoSales = await c.env.DB.prepare(
+    `SELECT SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as auto_qr
+     FROM luggage_orders
+     WHERE date(created_at, '+9 hours') = ? AND status IN ('PAID', 'PICKED_UP')`
+  ).bind(businessDate).first<{ auto_qr: number }>();
+  const qrDiff = actualQrAmount - (autoSales?.auto_qr ?? 0);
 
   await c.env.DB.prepare(
-    "UPDATE luggage_cash_closings SET workflow_status = 'LOCKED', verified_by_staff_id = ?, verified_at = datetime('now'), updated_at = datetime('now') WHERE closing_id = ?"
+    `UPDATE luggage_cash_closings SET
+       count_10000 = ?, count_5000 = ?, count_2000 = ?, count_1000 = ?, count_500 = ?,
+       count_100 = ?, count_50 = ?, count_10 = ?, count_5 = ?, count_1 = ?,
+       total_amount = ?, paypay_amount = ?, actual_qr_amount = ?,
+       actual_amount = ?, difference_amount = ?, qr_difference_amount = ?,
+       note = ?, updated_at = datetime('now')
+     WHERE closing_id = ?`
   )
-    .bind(staff.id, closingId)
+    .bind(
+      ...denomValues, totalAmount, paypayAmount, actualQrAmount,
+      actualAmount, differenceAmount, qrDiff,
+      String(body.note || "") || null, closingId
+    )
     .run();
 
   await c.env.DB.prepare(
-    "INSERT INTO luggage_cash_closing_audits (closing_id, action, staff_id) VALUES (?, 'VERIFY_LOCK', ?)"
-  )
-    .bind(closingId, staff.id)
-    .run();
+    "INSERT INTO luggage_cash_closing_audits (closing_id, action, staff_id) VALUES (?, 'EDIT', ?)"
+  ).bind(closingId, staff.id).run();
 
   return c.redirect(`/staff/cash-closing/${closingId}`);
 });
