@@ -95,17 +95,28 @@ ops.get("/staff/cash-closing", async (c) => {
 
           <section class="card" style="padding:12px">
             <h3 class="card-title" style="margin-bottom:8px">최근 마감</h3>
-            <div class="table-wrap">
-              <table style="font-size:12px;border-collapse:collapse;width:100%">
+            <div class="table-wrap" style="overflow-x:auto">
+              <table style="font-size:11px;border-collapse:collapse;width:100%;min-width:900px">
                 <thead>
                   <tr style="background:#f1f5f9;border-bottom:2px solid #cbd5e1">
-                    <th style="padding:4px 8px;text-align:left;font-size:11px;color:#475569">날짜</th>
-                    <th style="padding:4px 8px;text-align:left;font-size:11px;color:#475569">작성자</th>
-                    <th style="padding:4px 8px;text-align:right;font-size:11px;color:#475569">합계</th>
-                    <th style="padding:4px 8px;text-align:right;font-size:11px;color:#475569">PayPay</th>
-                    <th style="padding:4px 8px;text-align:right;font-size:11px;color:#475569">차액</th>
-                    <th style="padding:4px 8px;text-align:left;font-size:11px;color:#475569">메모</th>
-                    <th style="padding:4px 6px;font-size:11px"></th>
+                    <th style="padding:3px 6px;text-align:left;font-size:10px;color:#475569;white-space:nowrap">날짜</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">10000</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">5000</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">2000</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">1000</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">500</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">100</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">50</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">10</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">5</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">1</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569;font-weight:700">Total</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">PayPay</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#2563eb">Check</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">차액</th>
+                    <th style="padding:3px 4px;text-align:left;font-size:10px;color:#475569">작성자</th>
+                    <th style="padding:3px 4px;text-align:left;font-size:10px;color:#475569">메모</th>
+                    <th style="padding:3px 4px;font-size:10px"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -114,15 +125,26 @@ ops.get("/staff/cash-closing", async (c) => {
                     const noteStr = (cl.note as string) || "";
                     return (
                       <tr style="border-bottom:1px solid #e2e8f0">
-                        <td style="padding:3px 8px;white-space:nowrap"><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:var(--primary);font-weight:600">{cl.business_date as string}</a></td>
-                        <td style="padding:3px 8px">{(cl.staff_name as string) || "-"}</td>
-                        <td style="padding:3px 8px;text-align:right;font-weight:600">¥{(cl.total_amount as number).toLocaleString()}</td>
-                        <td style="padding:3px 8px;text-align:right">¥{(cl.paypay_amount as number).toLocaleString()}</td>
-                        <td style={`padding:3px 8px;text-align:right;font-weight:600;color:${diff === 0 ? '#166534' : '#dc2626'}`}>{diff > 0 ? "+" : ""}{diff.toLocaleString()}</td>
-                        <td style="padding:3px 8px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b">{noteStr.length > 25 ? noteStr.slice(0, 25) + "…" : noteStr || "-"}</td>
-                        <td style="padding:3px 6px;white-space:nowrap">
-                          <a href={`/staff/cash-closing/${cl.closing_id}/edit`} style="color:var(--primary);font-size:11px;margin-right:6px">수정</a>
-                          <a href={`/staff/cash-closing/${cl.closing_id}`} style="color:#64748b;font-size:11px">상세</a>
+                        <td style="padding:2px 6px;white-space:nowrap"><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:var(--primary);font-weight:600">{cl.business_date as string}</a></td>
+                        <td style="padding:2px 4px;text-align:right">{cl.count_10000 as number || 0}</td>
+                        <td style="padding:2px 4px;text-align:right">{cl.count_5000 as number || 0}</td>
+                        <td style="padding:2px 4px;text-align:right">{cl.count_2000 as number || 0}</td>
+                        <td style="padding:2px 4px;text-align:right">{cl.count_1000 as number || 0}</td>
+                        <td style="padding:2px 4px;text-align:right">{cl.count_500 as number || 0}</td>
+                        <td style="padding:2px 4px;text-align:right">{cl.count_100 as number || 0}</td>
+                        <td style="padding:2px 4px;text-align:right">{cl.count_50 as number || 0}</td>
+                        <td style="padding:2px 4px;text-align:right">{cl.count_10 as number || 0}</td>
+                        <td style="padding:2px 4px;text-align:right">{cl.count_5 as number || 0}</td>
+                        <td style="padding:2px 4px;text-align:right">{cl.count_1 as number || 0}</td>
+                        <td style="padding:2px 6px;text-align:right;font-weight:700">¥{(cl.total_amount as number).toLocaleString()}</td>
+                        <td style="padding:2px 6px;text-align:right">¥{(cl.paypay_amount as number).toLocaleString()}</td>
+                        <td style="padding:2px 6px;text-align:right;color:#2563eb">¥{(cl.check_auto_amount as number).toLocaleString()}</td>
+                        <td style={`padding:2px 6px;text-align:right;font-weight:600;color:${diff === 0 ? '#166534' : '#dc2626'}`}>{diff > 0 ? "+" : ""}{diff.toLocaleString()}</td>
+                        <td style="padding:2px 4px;white-space:nowrap">{(cl.staff_name as string) || "-"}</td>
+                        <td style="padding:2px 4px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b">{noteStr.length > 20 ? noteStr.slice(0, 20) + "…" : noteStr || "-"}</td>
+                        <td style="padding:2px 4px;white-space:nowrap">
+                          <a href={`/staff/cash-closing/${cl.closing_id}/edit`} style="color:var(--primary);font-size:10px;margin-right:4px">수정</a>
+                          <a href={`/staff/cash-closing/${cl.closing_id}`} style="color:#64748b;font-size:10px">상세</a>
                         </td>
                       </tr>
                     );
