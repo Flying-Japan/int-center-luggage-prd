@@ -23,7 +23,10 @@ const AUDIT_ACTION_LABELS: Record<string, string> = { CREATE: "정산마감 생�
 // GET /staff/cash-closing — Cash closing list & form
 ops.get("/staff/cash-closing", async (c) => {
   const closings = await c.env.DB.prepare(
-    "SELECT * FROM luggage_cash_closings ORDER BY created_at DESC LIMIT 30"
+    `SELECT c.*, COALESCE(u.display_name, u.username) as staff_name
+     FROM luggage_cash_closings c
+     LEFT JOIN user_profiles u ON c.staff_id = u.id
+     ORDER BY c.created_at DESC LIMIT 30`
   ).all();
 
   const staff = getStaff(c);
@@ -72,6 +75,17 @@ ops.get("/staff/cash-closing", async (c) => {
                 </label>
               </div>
 
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">렌탈 현금</span>
+                  <input class="control" type="number" name="rental_cash" defaultValue="0" />
+                </label>
+                <label class="field">
+                  <span class="field-label">지팡이 환불</span>
+                  <input class="control" type="number" name="wand_refund" defaultValue="0" />
+                </label>
+              </div>
+
               <label class="field">
                 <span class="field-label">메모</span>
                 <textarea class="control" name="note"></textarea>
@@ -85,23 +99,29 @@ ops.get("/staff/cash-closing", async (c) => {
             <div class="table-wrap">
               <table>
                 <thead>
-                  <tr><th>날짜</th><th>유형</th><th>상태</th><th>합계</th><th></th></tr>
+                  <tr><th>날짜</th><th>작성자</th><th>합계</th><th>PayPay</th><th>차액</th><th>메모</th><th></th></tr>
                 </thead>
                 <tbody>
-                  {closings.results.map((cl: Record<string, unknown>) => (
-                    <tr>
-                      <td><a href={`/staff/cash-closing/${cl.closing_id}`}>{cl.business_date as string}</a></td>
-                      <td>{CLOSING_TYPE_LABELS[cl.closing_type as string] || cl.closing_type as string}</td>
-                      <td><span class="status-pill">{WORKFLOW_LABELS[cl.workflow_status as string] || cl.workflow_status as string}</span></td>
-                      <td>¥{(cl.total_amount as number).toLocaleString()}</td>
-                      <td style="white-space:nowrap">
-                        {cl.workflow_status === "SUBMITTED" && (
-                          <a href={`/staff/cash-closing/${cl.closing_id}/edit`} class="btn btn-sm btn-secondary" style="margin-right:4px">수정</a>
-                        )}
-                        <a href={`/staff/cash-closing/${cl.closing_id}`} class="btn btn-sm">상세</a>
-                      </td>
-                    </tr>
-                  ))}
+                  {closings.results.map((cl: Record<string, unknown>) => {
+                    const diff = cl.difference_amount as number;
+                    const noteStr = (cl.note as string) || "";
+                    return (
+                      <tr>
+                        <td><a href={`/staff/cash-closing/${cl.closing_id}`}>{cl.business_date as string}</a></td>
+                        <td>{(cl.staff_name as string) || "-"}</td>
+                        <td>¥{(cl.total_amount as number).toLocaleString()}</td>
+                        <td>¥{(cl.paypay_amount as number).toLocaleString()}</td>
+                        <td style={`color:${diff === 0 ? '#166534' : '#dc2626'}`}>{diff > 0 ? "+" : ""}¥{diff.toLocaleString()}</td>
+                        <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{noteStr.length > 30 ? noteStr.slice(0, 30) + "..." : noteStr || "-"}</td>
+                        <td style="white-space:nowrap">
+                          {cl.workflow_status === "SUBMITTED" && (
+                            <a href={`/staff/cash-closing/${cl.closing_id}/edit`} class="btn btn-sm btn-secondary" style="margin-right:4px">수정</a>
+                          )}
+                          <a href={`/staff/cash-closing/${cl.closing_id}`} class="btn btn-sm">상세</a>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -128,6 +148,8 @@ ops.post("/staff/cash-closing", async (c) => {
 
   const paypayAmount = parseInt(String(body.paypay_amount || "0"), 10);
   const actualQrAmount = parseInt(String(body.actual_qr_amount || "0"), 10);
+  const rentalCash = parseInt(String(body.rental_cash || "0"), 10) || 0;
+  const wandRefund = parseInt(String(body.wand_refund || "0"), 10) || 0;
   const closingType = String(body.closing_type || "FINAL_CLOSE");
 
   // Prevent duplicate closings for same date + type
@@ -160,14 +182,16 @@ ops.post("/staff/cash-closing", async (c) => {
        total_amount, paypay_amount, actual_qr_amount,
        actual_amount, check_auto_amount, expected_amount,
        difference_amount, qr_difference_amount,
+       rental_cash, wand_refund,
        staff_id, note
-     ) VALUES (?, ?, 'SUBMITTED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, 'SUBMITTED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       businessDate, closingType,
       ...denomValues, totalAmount, paypayAmount, actualQrAmount,
       actualAmount, checkAutoAmount, expectedAmount,
       differenceAmount, qrDifferenceAmount,
+      rentalCash, wandRefund,
       staff.id, String(body.note || "") || null
     )
     .run();
@@ -240,8 +264,18 @@ ops.get("/staff/cash-closing/:id", async (c) => {
             <div class="summary-grid" style="font-size:13px">
               <p><strong>PayPay</strong><span>¥{(cl.paypay_amount as number).toLocaleString()}</span></p>
               <p><strong>총 실제액</strong><span>¥{(cl.actual_amount as number).toLocaleString()}</span></p>
+              <p><strong>렌탈 현금</strong><span>¥{((cl.rental_cash as number) || 0).toLocaleString()}</span></p>
+              <p><strong>지팡이 환불</strong><span>¥{((cl.wand_refund as number) || 0).toLocaleString()}</span></p>
               <p><strong>QR 차액</strong><span style={`color:${(cl.qr_difference_amount as number) === 0 ? '#166534' : '#dc2626'}`}>¥{(cl.qr_difference_amount as number).toLocaleString()}</span></p>
               <p><strong>메모</strong><span>{(cl.note as string) || "-"}</span></p>
+            </div>
+
+            <div style="margin-top:12px;padding:10px;background:#f5f5f4;border-radius:6px;font-size:13px;color:#37352f">
+              {(() => {
+                const diff = cl.difference_amount as number;
+                const typeLabel = CLOSING_TYPE_LABELS[cl.closing_type as string] || cl.closing_type as string;
+                return `${typeLabel} 정산현금 (¥${(cl.total_amount as number).toLocaleString()} / ${diff > 0 ? "+" : ""}${diff.toLocaleString()}엔)`;
+              })()}
             </div>
 
             {cl.workflow_status === "SUBMITTED" && (
@@ -324,6 +358,17 @@ ops.get("/staff/cash-closing/:id/edit", async (c) => {
                 </label>
               </div>
 
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">렌탈 현금</span>
+                  <input class="control" type="number" name="rental_cash" defaultValue={String(cl.rental_cash ?? 0)} />
+                </label>
+                <label class="field">
+                  <span class="field-label">지팡이 환불</span>
+                  <input class="control" type="number" name="wand_refund" defaultValue={String(cl.wand_refund ?? 0)} />
+                </label>
+              </div>
+
               <label class="field">
                 <span class="field-label">메모</span>
                 <textarea class="control" name="note">{(cl.note as string) || ""}</textarea>
@@ -362,6 +407,8 @@ ops.post("/staff/cash-closing/:id/edit", async (c) => {
 
   const paypayAmount = parseInt(String(body.paypay_amount || "0"), 10);
   const actualQrAmount = parseInt(String(body.actual_qr_amount || "0"), 10);
+  const rentalCash = parseInt(String(body.rental_cash || "0"), 10) || 0;
+  const wandRefund = parseInt(String(body.wand_refund || "0"), 10) || 0;
   const actualAmount = totalAmount + actualQrAmount;
 
   const cl = existing as Record<string, unknown>;
@@ -382,12 +429,14 @@ ops.post("/staff/cash-closing/:id/edit", async (c) => {
        count_100 = ?, count_50 = ?, count_10 = ?, count_5 = ?, count_1 = ?,
        total_amount = ?, paypay_amount = ?, actual_qr_amount = ?,
        actual_amount = ?, difference_amount = ?, qr_difference_amount = ?,
+       rental_cash = ?, wand_refund = ?,
        note = ?, updated_at = datetime('now')
      WHERE closing_id = ?`
   )
     .bind(
       ...denomValues, totalAmount, paypayAmount, actualQrAmount,
       actualAmount, differenceAmount, qrDiff,
+      rentalCash, wandRefund,
       String(body.note || "") || null, closingId
     )
     .run();
