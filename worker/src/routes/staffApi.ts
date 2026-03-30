@@ -41,6 +41,35 @@ function buildOrderFilters(
   return { clause, params };
 }
 
+// POST /staff/api/referral — Increment/decrement referral count
+staffApi.post("/staff/api/referral", async (c) => {
+  const body = await c.req.json<{ floor: string; delta: number }>();
+  if (!["4F", "8F"].includes(body.floor)) return c.json({ error: "Invalid floor" }, 400);
+  const delta = body.delta === -1 ? -1 : 1;
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const businessDate = now.toISOString().slice(0, 10);
+  await c.env.DB.prepare(
+    `INSERT INTO luggage_referral_counts (business_date, floor, count) VALUES (?, ?, ?)
+     ON CONFLICT(business_date, floor) DO UPDATE SET count = MAX(0, count + ?), updated_at = datetime('now')`
+  ).bind(businessDate, body.floor, Math.max(0, delta), delta).run();
+  const row = await c.env.DB.prepare(
+    "SELECT count FROM luggage_referral_counts WHERE business_date = ? AND floor = ?"
+  ).bind(businessDate, body.floor).first<{ count: number }>();
+  return c.json({ floor: body.floor, count: row?.count ?? 0 });
+});
+
+// GET /staff/api/referral — Get today's referral counts
+staffApi.get("/staff/api/referral", async (c) => {
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const businessDate = now.toISOString().slice(0, 10);
+  const rows = await c.env.DB.prepare(
+    "SELECT floor, count FROM luggage_referral_counts WHERE business_date = ?"
+  ).bind(businessDate).all<{ floor: string; count: number }>();
+  const counts: Record<string, number> = { "4F": 0, "8F": 0 };
+  for (const r of rows.results) counts[r.floor] = r.count;
+  return c.json(counts);
+});
+
 // GET /staff/api/orders/new — Check for new orders since a timestamp
 staffApi.get("/staff/api/orders/new", async (c) => {
   const since = c.req.query("since") || "";

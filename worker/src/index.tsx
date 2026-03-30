@@ -112,8 +112,12 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
   sql += " ORDER BY o.created_at ASC LIMIT 100";
 
-  // Run order list and counts in parallel
-  const [orders, countsResult] = await Promise.all([
+  // Get today's referral counts
+  const nowJSTRef = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const todayRef = nowJSTRef.toISOString().slice(0, 10);
+
+  // Run order list, counts, and referral counts in parallel
+  const [orders, countsResult, refRows] = await Promise.all([
     c.env.DB.prepare(sql)
       .bind(...params)
       .all<{ order_id: string; name: string | null; tag_no: string | null; status: string; prepaid_amount: number; created_at: string; expected_pickup_at: string | null; note: string | null; payment_method: string | null; in_warehouse: number; parent_order_id: string | null; flying_pass_tier: string | null; note_author: string | null; note_updated_at: string | null }>(),
@@ -126,9 +130,12 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
         COUNT(*) as total_count
       FROM luggage_orders`
     ).first<{ pending_count: number; paid_count: number; picked_up_count: number; cancelled_count: number; total_count: number }>(),
+    c.env.DB.prepare("SELECT floor, count FROM luggage_referral_counts WHERE business_date = ?").bind(todayRef).all<{ floor: string; count: number }>(),
   ]);
 
   const counts = countsResult || { pending_count: 0, paid_count: 0, picked_up_count: 0, cancelled_count: 0, total_count: 0 };
+  const refCounts: Record<string, number> = { "4F": 0, "8F": 0 };
+  for (const r of refRows.results) refCounts[r.floor] = r.count;
 
   return c.html(
     <html lang="ko">
@@ -147,6 +154,23 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               <p class="hero-kicker">Operations</p>
               <h2 class="hero-title">직원 대시보드</h2>
               <p class="hero-desc">{staff.display_name || staff.username} ({staff.role === "admin" ? "ADMIN" : staff.role === "editor" ? "EDITOR" : "VIEWER"}) · 전체 {counts.total_count}건</p>
+            </div>
+          </section>
+
+          <section style="display:flex;gap:12px;margin-bottom:8px">
+            <div style="flex:1;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between">
+              <div><span style="font-size:11px;color:#64748b;font-weight:600">4F 안내</span><span id="ref-4f" style="font-size:20px;font-weight:800;margin-left:8px;color:#1e293b">{refCounts["4F"]}</span><span style="font-size:11px;color:#64748b">팀</span></div>
+              <div style="display:flex;gap:4px">
+                <button class="btn btn-sm" style="padding:2px 10px;font-size:14px" onclick="refBtn('4F',-1)">−</button>
+                <button class="btn btn-primary btn-sm" style="padding:2px 10px;font-size:14px" onclick="refBtn('4F',1)">+</button>
+              </div>
+            </div>
+            <div style="flex:1;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between">
+              <div><span style="font-size:11px;color:#64748b;font-weight:600">8F 안내</span><span id="ref-8f" style="font-size:20px;font-weight:800;margin-left:8px;color:#1e293b">{refCounts["8F"]}</span><span style="font-size:11px;color:#64748b">팀</span></div>
+              <div style="display:flex;gap:4px">
+                <button class="btn btn-sm" style="padding:2px 10px;font-size:14px" onclick="refBtn('8F',-1)">−</button>
+                <button class="btn btn-primary btn-sm" style="padding:2px 10px;font-size:14px" onclick="refBtn('8F',1)">+</button>
+              </div>
             </div>
           </section>
 
@@ -417,6 +441,13 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             function apiPost(url,body){
               return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):'{}'});
             }
+
+            window.refBtn=function(floor,delta){
+              apiPost('/staff/api/referral',{floor:floor,delta:delta}).then(function(r){return r.json();}).then(function(d){
+                var el=document.getElementById('ref-'+floor.toLowerCase());
+                if(el)el.textContent=d.count;
+              });
+            };
 
             function togglePayment(btn,oid){
               if(!confirm('결제 상태를 변경하시겠습니까?')) return;
