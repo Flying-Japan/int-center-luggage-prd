@@ -976,6 +976,7 @@ tbody tr:hover { background: #eef5ff; }
 .tag-color-gray { color: #fff; background: #94a3b8; border: 2px solid #64748b; }
 .tag-color-pink { color: #fff; background: #ec4899; border: 2px solid #db2777; }
 .tag-color-brown { color: #fff; background: #b45309; border: 2px solid #92400e; }
+.tag-color-skyblue { color: #fff; background: #38bdf8; border: 2px solid #0ea5e9; }
 
 /* ── Click-to-edit cells ── */
 .editable { cursor: pointer; border-bottom: 1px dashed transparent; transition: border-color 0.15s; }
@@ -1697,6 +1698,7 @@ body.staff-site #staff-orders-table .tag-pill.tag-color-black { color: #fff !imp
 body.staff-site #staff-orders-table .tag-pill.tag-color-gray { color: #fff !important; background: #94a3b8 !important; border: 2px solid #64748b !important; }
 body.staff-site #staff-orders-table .tag-pill.tag-color-pink { color: #fff !important; background: #ec4899 !important; border: 2px solid #db2777 !important; }
 body.staff-site #staff-orders-table .tag-pill.tag-color-brown { color: #fff !important; background: #b45309 !important; border: 2px solid #92400e !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-color-skyblue { color: #fff !important; background: #38bdf8 !important; border: 2px solid #0ea5e9 !important; }
 
 body.staff-site .price-amount { color: var(--text); font-weight: 600; font-size: 13px; }
 

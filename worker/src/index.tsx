@@ -142,7 +142,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
       <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>직원 대시보드</title>
+        <title>짐보관 신청</title>
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body class="staff-site">
@@ -152,7 +152,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
           <section class="hero hero-row">
             <div>
               <p class="hero-kicker">Operations</p>
-              <h2 class="hero-title">직원 대시보드</h2>
+              <h2 class="hero-title">짐보관 신청</h2>
               <p class="hero-desc">{staff.display_name || staff.username} ({staff.role === "admin" ? "ADMIN" : staff.role === "editor" ? "EDITOR" : "VIEWER"}) · 전체 {counts.total_count}건</p>
             </div>
           </section>

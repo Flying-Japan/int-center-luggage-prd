@@ -9,6 +9,7 @@ export const TAG_COLOR_RANGES: [number, number, string][] = [
   [61, 70, "tag-color-gray"],
   [71, 80, "tag-color-pink"],
   [81, 90, "tag-color-brown"],
+  [91, 100, "tag-color-skyblue"],
 ];
 
 /** Map tag_no to a color class (1-10 orange, 11-20 blue, etc.) */
