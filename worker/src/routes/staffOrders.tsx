@@ -13,7 +13,7 @@ import { createBugTask } from "../lib/asana";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { displayOrderStatus, displayPaymentMethod, displayFlyingPassTier } from "../lib/display";
 import { fmtJST } from "../lib/dateFormat";
-import { StaffMenu, StaffTopbar } from "../lib/components";
+import { StaffTopbar } from "../lib/components";
 
 type Order = {
   order_id: string;
@@ -109,7 +109,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/dashboard" />
         <main class="container">
           {/* Hero */}
           <section class="hero hero-row">
@@ -120,9 +120,6 @@ staffOrders.get("/staff/orders/:id", async (c) => {
             </div>
             <a class="btn btn-secondary" href="/staff/dashboard">목록으로</a>
           </section>
-
-          {/* Staff menu */}
-          <StaffMenu active="/staff/dashboard" role={staff.role} />
 
           {/* Edit card */}
           <section class="card">
@@ -583,9 +580,8 @@ staffOrders.get("/staff/bug-report", (c) => {
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/bug-report" />
         <main class="container">
-          <StaffMenu active="/staff/bug-report" role={staff.role} />
           <section class="hero"><div><p class="hero-kicker">Operations</p><h2 class="hero-title">버그 신고</h2></div></section>
           {success && <p class="success-note">버그 신고가 접수되었습니다. 감사합니다!</p>}
           {error && <p class="error">신고 중 오류가 발생했습니다. 다시 시도해주세요.</p>}

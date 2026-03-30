@@ -1335,6 +1335,11 @@ body.staff-site .topbar-inner {
   max-width: 100%;
 }
 
+body.staff-site .topbar-menu { display:flex; gap:2px; padding:0 16px 8px; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+body.staff-site .topbar-menu-link { font-size:12px; font-weight:600; color:#64748b; padding:4px 10px; border-radius:6px; text-decoration:none; white-space:nowrap; transition:background .15s,color .15s; }
+body.staff-site .topbar-menu-link:hover { background:#e2e8f0; color:#1e293b; }
+body.staff-site .topbar-menu-link.is-active { background:#2383e2; color:#fff; }
+
 body.staff-site .brand { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
 body.staff-site .brand-logo { width: 28px; height: 28px; }
 

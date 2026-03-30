@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import type { AppType } from "../types";
 import { adminAuth, editorAuth, getStaff } from "../middleware/auth";
 import { createSupabaseAdmin } from "../lib/supabase";
-import { StaffMenu, StaffTopbar } from "../lib/components";
+import { StaffTopbar } from "../lib/components";
 import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
 
 const admin = new Hono<AppType>();
@@ -115,9 +115,8 @@ admin.get("/staff/admin/sales", async (c) => {
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script><script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2/dist/chartjs-plugin-datalabels.min.js"></script><title>매출 분석</title></head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/admin/sales" />
         <main class="container">
-          <StaffMenu active="/staff/admin/sales" role={staff.role} />
         {successMsg && <p class="success-note">{successMsg}</p>}
         <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div></section>
         {(() => {
@@ -559,9 +558,8 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>직원 계정</title>
       </head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/admin/staff-accounts" />
         <main class="container">
-          <StaffMenu active="/staff/admin/staff-accounts" role={staff.role} />
         {successMsg && <p class="success-note">{successMsg}</p>}
         {errorMsg && <p class="error">{decodeURIComponent(errorMsg)}</p>}
         <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">직원 계정</h2></div></section>
@@ -852,9 +850,8 @@ admin.get("/staff/admin/activity-logs", async (c) => {
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>활동 로그</title></head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/admin/activity-logs" />
         <main class="container">
-          <StaffMenu active="/staff/admin/activity-logs" role={staff.role} />
         <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">활동 로그</h2><p class="hero-desc">{totalCount.toLocaleString()}건</p></div></section>
 
         {(() => {
@@ -938,9 +935,8 @@ admin.get("/staff/admin/completion-message", async (c) => {
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>작성완료 문구 수정</title>
       </head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/admin/completion-message" />
         <main class="container">
-          <StaffMenu active="/staff/admin/completion-message" role={staff.role} />
         {successMsg && <p class="success-note">{successMsg}</p>}
         <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">작성완료 문구 수정</h2><p class="hero-desc">한국어로 입력하면 영어/일본어 문구가 자동 생성됩니다.</p></div></section>
 
@@ -1090,9 +1086,8 @@ admin.get("/staff/admin/customers", async (c) => {
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/admin/customers" />
         <div class="staff-body">
-          <StaffMenu active="/staff/admin/customers" role={staff.role} />
           <main class="staff-main" style="padding:16px 20px">
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
               <h2 style="font-size:18px;font-weight:700;margin:0">고객목록</h2>

@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import type { AppType } from "../types";
 import { staffAuth, getStaff } from "../middleware/auth";
 import { formatDateJST, nowJST } from "../services/storage";
-import { StaffMenu, StaffTopbar } from "../lib/components";
+import { StaffTopbar } from "../lib/components";
 
 const ops = new Hono<AppType>();
 ops.use("/*", staffAuth);
@@ -34,9 +34,8 @@ ops.get("/staff/cash-closing", async (c) => {
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>정산 마감</title></head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/cash-closing" />
         <main class="container">
-          <StaffMenu active="/staff/cash-closing" role={staff.role} />
 
           <section class="hero"><div><p class="hero-kicker">Operations</p><h2 class="hero-title">정산 마감</h2></div></section>
 
@@ -240,9 +239,8 @@ ops.get("/staff/cash-closing/:id", async (c) => {
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>정산 상세</title></head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/cash-closing" />
         <main class="container">
-          <StaffMenu active="/staff/cash-closing" role={staff.role} />
 
           <section class="card">
             <h3 class="card-title">정산 상세: {cl.business_date as string}</h3>
@@ -332,9 +330,8 @@ ops.get("/staff/cash-closing/:id/edit", async (c) => {
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>정산 수정</title></head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/cash-closing" />
         <main class="container">
-          <StaffMenu active="/staff/cash-closing" role={staff.role} />
 
           <section class="card">
             <h3 class="card-title">정산 수정: {cl.business_date as string}</h3>
@@ -516,9 +513,8 @@ ops.get("/staff/handover", async (c) => {
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>인수인계</title></head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/handover" />
         <main class="container">
-          <StaffMenu active="/staff/handover" role={staff.role} />
 
           <section class="card">
             <h3 class="card-title">노트 작성</h3>
@@ -756,9 +752,8 @@ ops.get("/staff/lost-found", async (c) => {
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>분실물</title></head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/lost-found" />
         <main class="container">
-          <StaffMenu active="/staff/lost-found" role={staff.role} />
 
           <section class="card">
             <h3 class="card-title">분실물 등록</h3>
@@ -921,9 +916,8 @@ ops.get("/staff/schedule", async (c) => {
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>근무 스케줄</title></head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/schedule" />
         <main class="container">
-          <StaffMenu active="/staff/schedule" role={staff.role} />
         <section class="hero"><div><p class="hero-kicker">Operations</p><h2 class="hero-title">근무 스케줄</h2></div></section>
         <section class="card" style="padding:16px">
         {calendarUrl?.setting_value ? (

@@ -12,7 +12,7 @@ import { staffAuth, getStaff } from "./middleware/auth";
 import { runRetentionCleanup } from "./services/retention";
 import { syncDailySales } from "./services/dailySalesSync";
 import { tagColorClass, TAG_COLOR_RANGES } from "./lib/tagColors";
-import { StaffMenu, StaffTopbar } from "./lib/components";
+import { StaffTopbar } from "./lib/components";
 
 const app = new Hono<AppType>();
 
@@ -139,7 +139,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
         <link rel="stylesheet" href="/static/styles.css" />
       </head>
       <body class="staff-site">
-        <StaffTopbar staff={staff} />
+        <StaffTopbar staff={staff} active="/staff/dashboard" />
 
         <main class="container">
           <section class="hero hero-row">
@@ -149,8 +149,6 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               <p class="hero-desc">{staff.display_name || staff.username} ({staff.role === "admin" ? "ADMIN" : staff.role === "editor" ? "EDITOR" : "VIEWER"}) · 전체 {counts.total_count}건</p>
             </div>
           </section>
-
-          <StaffMenu active="/staff/dashboard" role={staff.role} />
 
           <section class="card">
             <h3 class="card-title">접수 검색</h3>
