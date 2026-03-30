@@ -1,5 +1,7 @@
 /** Brevo (Sendinblue) transactional email client */
 
+import { RENTAL_PROMO_LINKS } from "./rentalLinks";
+
 const BREVO_API = "https://api.brevo.com/v3/smtp/email";
 
 interface OrderConfirmationData {
@@ -104,14 +106,14 @@ export async function sendOrderConfirmation(
       <p style="text-align:center;font-size:14px;font-weight:700;margin:0 0 12px">${lang === "ja" ? "センターでレンタルもできます ✈️" : lang === "en" ? "Rentals available at our center ✈️" : "센터에서 대여도 가능해요 ✈️"}</p>
       <table style="width:100%;border-collapse:collapse">
         <tr>
-          <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🎮 ${lang === "ja" ? "マリオバンド" : lang === "en" ? "Mario Band" : "마리오밴드"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/68dce579a48a271c2018bb54" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🪄 ${lang === "ja" ? "HP杖" : lang === "en" ? "HP Wand" : "해리포터 지팡이"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">💇 ${lang === "ja" ? "エアラップ" : lang === "en" ? "Airwrap" : "다이슨 에어랩"}</a></td>
+          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.usj.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🎮 ${lang === "ja" ? "マリオバンド" : lang === "en" ? "Mario Band" : "마리오밴드"}</a></td>
+          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.usj.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🪄 ${lang === "ja" ? "HP杖" : lang === "en" ? "HP Wand" : "해리포터 지팡이"}</a></td>
+          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.dyson.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">💇 ${lang === "ja" ? "エアラップ" : lang === "en" ? "Airwrap" : "다이슨 에어랩"}</a></td>
         </tr>
         <tr>
-          <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/6980349d3b9377397d436f46" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">✨ ${lang === "ja" ? "ストレートナー" : lang === "en" ? "Straightener" : "다이슨 고데기"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">👶 ${lang === "ja" ? "ベビーカー" : lang === "en" ? "Stroller" : "유모차"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="https://mkt.shopping.naver.com/link/694123cd003f786e5c3c350e" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🎫 ${lang === "ja" ? "フードパス" : lang === "en" ? "Food Pass" : "먹방패스"}</a></td>
+          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.dyson.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">✨ ${lang === "ja" ? "ストレートナー" : lang === "en" ? "Straightener" : "다이슨 고데기"}</a></td>
+          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.stroller.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">👶 ${lang === "ja" ? "ベビーカー" : lang === "en" ? "Stroller" : "유모차"}</a></td>
+          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.usj.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🎫 ${lang === "ja" ? "フードパス" : lang === "en" ? "Food Pass" : "먹방패스"}</a></td>
         </tr>
       </table>
     </div>

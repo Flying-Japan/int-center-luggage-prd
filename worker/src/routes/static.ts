@@ -1,7 +1,18 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { AppType } from "../types";
 
 const staticRoutes = new Hono<AppType>();
+
+async function serveR2Image(c: Context<AppType>, key: string, contentType: string) {
+  const obj = await c.env.IMAGES.get(key);
+  if (!obj) return c.notFound();
+  return new Response(obj.body, {
+    headers: {
+      "Content-Type": contentType,
+      "Cache-Control": "public, max-age=86400",
+    },
+  });
+}
 
 // Serve a simple SVG favicon (no external files needed in Workers)
 staticRoutes.get("/favicon.ico", (c) => {
@@ -52,41 +63,43 @@ staticRoutes.get("/fj-indexnow-2026-key.txt", (c) => {
 
 // Serve logo from R2
 staticRoutes.get("/static/flying-pass-white.jpg", async (c) => {
-  const obj = await c.env.IMAGES.get("static/flying-pass-white.jpg");
-  if (!obj) return c.notFound();
-  return new Response(obj.body, {
-    headers: {
-      "Content-Type": "image/jpeg",
-      "Cache-Control": "public, max-age=86400",
-    },
-  });
+  return serveR2Image(c, "static/flying-pass-white.jpg", "image/jpeg");
 });
 
 staticRoutes.get("/static/qr-payment-guide.jpg", async (c) => {
-  const obj = await c.env.IMAGES.get("static/qr-payment-guide.jpg");
-  if (!obj) return c.notFound();
-  return new Response(obj.body, {
-    headers: { "Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400" },
-  });
+  return serveR2Image(c, "static/qr-payment-guide.jpg", "image/jpeg");
 });
 
 staticRoutes.get("/static/logo-horizontal-white.png", async (c) => {
-  const obj = await c.env.IMAGES.get("static/logo-horizontal-white.png");
-  if (!obj) return c.notFound();
-  return new Response(obj.body, {
-    headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=86400" },
-  });
+  return serveR2Image(c, "static/logo-horizontal-white.png", "image/png");
 });
 
 staticRoutes.get("/static/logo-horizontal.png", async (c) => {
-  const obj = await c.env.IMAGES.get("static/logo-horizontal.png");
-  if (!obj) return c.notFound();
-  return new Response(obj.body, {
-    headers: {
-      "Content-Type": "image/png",
-      "Cache-Control": "public, max-age=86400",
-    },
-  });
+  return serveR2Image(c, "static/logo-horizontal.png", "image/png");
+});
+
+staticRoutes.get("/static/rental-banner-usj-large.jpg", async (c) => {
+  return serveR2Image(c, "static/rental-banner-usj-large.jpg", "image/jpeg");
+});
+
+staticRoutes.get("/static/rental-banner-usj-small.jpg", async (c) => {
+  return serveR2Image(c, "static/rental-banner-usj-small.jpg", "image/jpeg");
+});
+
+staticRoutes.get("/static/rental-banner-dyson-large.jpg", async (c) => {
+  return serveR2Image(c, "static/rental-banner-dyson-large.jpg", "image/jpeg");
+});
+
+staticRoutes.get("/static/rental-banner-dyson-small.jpg", async (c) => {
+  return serveR2Image(c, "static/rental-banner-dyson-small.jpg", "image/jpeg");
+});
+
+staticRoutes.get("/static/rental-banner-stroller-large.jpg", async (c) => {
+  return serveR2Image(c, "static/rental-banner-stroller-large.jpg", "image/jpeg");
+});
+
+staticRoutes.get("/static/rental-banner-stroller-small.jpg", async (c) => {
+  return serveR2Image(c, "static/rental-banner-stroller-small.jpg", "image/jpeg");
 });
 
 // Embedded CSS — ported from original FastAPI app.css

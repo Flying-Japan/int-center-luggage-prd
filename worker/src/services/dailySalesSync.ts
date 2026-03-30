@@ -62,8 +62,8 @@ export async function syncDailySales(
     const people = parseInt((row[1] || "0").replace(/[^0-9]/g, ""), 10) || 0;
     const cash = parseYen(row[2] || "");
     const qr = parseYen(row[3] || "");
-    const luggage = parseYen(row[4] || "");
-    const rental = rentalMap.get(date) || parseYen(row[10] || "");
+    const luggage = cash + qr;
+    const rental = Math.max(rentalMap.get(date) || 0, parseYen(row[10] || ""));
     if (luggage === 0 && rental === 0 && people === 0) continue;
 
     stmts.push(

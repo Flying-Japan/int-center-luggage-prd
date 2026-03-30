@@ -5,6 +5,7 @@ import { FLYING_PASS_TIERS, type FlyingPassTier } from "../services/pricing";
 import { loadCompletionMessages, applyAmountTemplate } from "../services/completionMessages";
 import { uploadImage, buildImageKey, extFromContentType, validateImageUpload } from "../lib/r2";
 import { sendOrderConfirmation } from "../lib/brevo";
+import { RENTAL_PROMO_LINKS } from "../lib/rentalLinks";
 import {
   calculatePricePerDay,
   calculatePrepaidAmount,
@@ -15,6 +16,7 @@ import { calculateStorageDays } from "../services/storage";
 import { buildOrderId, buildTagNo } from "../services/orderNumber";
 
 const customer = new Hono<AppType>();
+const LUGGAGE_GA4_MEASUREMENT_ID = "G-DLKGF3C7CS";
 
 // ---------------------------------------------------------------------------
 // GET /customer — Intake form (faithful port of original FastAPI template)
@@ -101,6 +103,21 @@ customer.get("/customer", (c) => {
     en: "Staff will assist you after check-in.",
     ja: "受付後、スタッフがご案内いたします。",
   };
+  const submitDoubleCheckNotice: Record<string, string> = {
+    ko: "접수 후에는 입력하신 정보를 기준으로 보관 및 안내가 진행됩니다. 실제 정보와 다르게 입력된 경우 발생하는 문제에 대해서는 당사가 책임지기 어려우니, 제출 전에 이름·연락처·수령 예정 일시를 한 번 더 확인해 주세요.",
+    en: "We use the submitted information for storage and pickup guidance. If any details differ from the actual information, we may not be able to take responsibility for issues caused by that mismatch, so please review your name, contact, and pickup details before submitting.",
+    ja: "受付後はご入力内容をもとに保管・ご案内を行います。実際の情報と異なる内容を入力された場合に生じる問題については当社で責任を負いかねるため、送信前にお名前・連絡先・受取予定日時をもう一度ご確認ください。",
+  };
+  const validationHeader: Record<string, string> = {
+    ko: "아래 항목을 확인해 주세요:",
+    en: "Please check the following:",
+    ja: "以下の項目をご確認ください:",
+  };
+  const validationSubtext: Record<string, string> = {
+    ko: "선택 또는 입력이 완료되지 않았습니다.",
+    en: "These fields are still missing or incomplete.",
+    ja: "未入力または未選択の項目があります。",
+  };
   const discountTableExpand: Record<string, string> = {
     ko: "장기 보관 할인표 보기", en: "View Long-stay Discount Table", ja: "長期保管割引表を見る",
   };
@@ -165,18 +182,24 @@ customer.get("/customer", (c) => {
 
   // Rental banners — shuffled randomly on each render
   const bannerDefs = [
-    { emoji: "🎮", bg: "linear-gradient(135deg,#4285F4 0%,#1b6ec2 100%)", color: "#fff", tag: "USJ", url: "https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa",
-      title: { ko: "USJ 가시나요?", en: "Going to USJ?", ja: "USJに行きますか？" },
-      sub: { ko: "마리오밴드 · 해리포터 지팡이 대여", en: "Mario Band & Wand rentals", ja: "マリオバンド・杖レンタル" },
-      cta: { ko: "대여하기", en: "Rent now", ja: "レンタル" } },
-    { emoji: "✨", bg: "linear-gradient(135deg,#ec4899 0%,#be185d 100%)", color: "#fff", tag: "HOT", url: "https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596",
-      title: { ko: "다이슨 에어랩 · 고데기", en: "Dyson Airwrap & Straightener", ja: "ダイソン エアラップ" },
-      sub: { ko: "센터에서 바로 대여 가능!", en: "Available right at our center!", ja: "センターですぐレンタル！" },
-      cta: { ko: "대여하기", en: "Rent now", ja: "レンタル" } },
-    { emoji: "👶", bg: "linear-gradient(135deg,#22c55e 0%,#15803d 100%)", color: "#fff", tag: "NEW", url: "https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a",
-      title: { ko: "유모차 대여 가능!", en: "Stroller rentals!", ja: "ベビーカーレンタル！" },
-      sub: { ko: "싸이벡스 · 트라이크 바로 대여", en: "Cybex & Trike at our center", ja: "サイベックス・トライク" },
-      cta: { ko: "대여하기", en: "Rent now", ja: "レンタル" } },
+    {
+      url: RENTAL_PROMO_LINKS.usj.main,
+      largeSrc: "/static/rental-banner-usj-large.jpg?v=20260330",
+      smallSrc: "/static/rental-banner-usj-small.jpg?v=20260330",
+      alt: { ko: "USJ 렌탈 배너", en: "USJ rental banner", ja: "USJレンタルバナー" },
+    },
+    {
+      url: RENTAL_PROMO_LINKS.dyson.main,
+      largeSrc: "/static/rental-banner-dyson-large.jpg?v=20260330",
+      smallSrc: "/static/rental-banner-dyson-small.jpg?v=20260330",
+      alt: { ko: "다이슨 렌탈 배너", en: "Dyson rental banner", ja: "ダイソンレンタルバナー" },
+    },
+    {
+      url: RENTAL_PROMO_LINKS.stroller.main,
+      largeSrc: "/static/rental-banner-stroller-large.jpg?v=20260330",
+      smallSrc: "/static/rental-banner-stroller-small.jpg?v=20260330",
+      alt: { ko: "유모차 렌탈 배너", en: "Stroller rental banner", ja: "ベビーカーレンタルバナー" },
+    },
   ];
   // Fisher-Yates shuffle
   for (let i = bannerDefs.length - 1; i > 0; i--) {
@@ -184,16 +207,11 @@ customer.get("/customer", (c) => {
     [bannerDefs[i], bannerDefs[j]] = [bannerDefs[j], bannerDefs[i]];
   }
   const rentalBanners = bannerDefs.map(b => (
-    <a href={b.url} target="_blank" rel="noopener" style={`background:${b.bg};border:none;border-radius:var(--radius-md);padding:14px 16px;display:flex;align-items:center;gap:14px;margin:6px 0;text-decoration:none;color:${b.color};transition:transform .15s,box-shadow .15s;box-shadow:0 4px 14px rgba(0,0,0,0.12)`}>
-      <span style="font-size:32px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.2))">{b.emoji}</span>
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
-          <span style="font-size:9px;font-weight:800;background:rgba(255,255,255,0.25);padding:2px 6px;border-radius:4px;letter-spacing:0.05em">{b.tag}</span>
-          <p style="font-size:16px;font-weight:800;margin:0;line-height:1.3;word-break:keep-all">{b.title[lang] || b.title.ko}</p>
-        </div>
-        <p style="font-size:12px;opacity:0.85;margin:0">{b.sub[lang] || b.sub.ko}</p>
-      </div>
-      <span style="font-size:12px;font-weight:700;background:rgba(255,255,255,0.2);padding:6px 12px;border-radius:999px;white-space:nowrap;border:1px solid rgba(255,255,255,0.3)">{b.cta[lang] || b.cta.ko} →</span>
+    <a href={b.url} target="_blank" rel="noopener" style="display:block;margin:6px 0;border-radius:var(--radius-md);overflow:hidden;text-decoration:none;box-shadow:0 8px 24px rgba(15,23,42,0.12);transition:transform .15s,box-shadow .15s">
+      <picture>
+        <source media="(max-width: 640px)" srcset={b.smallSrc} />
+        <img src={b.largeSrc} alt={b.alt[lang] || b.alt.ko} style="display:block;width:100%;height:auto" loading="lazy" />
+      </picture>
     </a>
   ));
 
@@ -204,8 +222,8 @@ customer.get("/customer", (c) => {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="naver-site-verification" content="281f09e72fa3900dfffbd57ee5fd208a7872f818" />
         <meta name="google-site-verification" content="_IzvQgZRjJtht2Gfv7iEaIOJXGvq574QDs-SXYQONYU" />
-        <script async src="https://www.googletagmanager.com/gtag/js?id=G-DLKGF3C7CS" />
-        <script dangerouslySetInnerHTML={{__html: "window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-DLKGF3C7CS');"}} />
+        <script async src={`https://www.googletagmanager.com/gtag/js?id=${LUGGAGE_GA4_MEASUREMENT_ID}`} />
+        <script dangerouslySetInnerHTML={{__html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${LUGGAGE_GA4_MEASUREMENT_ID}');`}} />
         <title>{customerTitle[lang] || customerTitle.ko} — {t("brand_name", lang)}</title>
         <link rel="preconnect" href="https://cdn.jsdelivr.net" />
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
@@ -427,7 +445,49 @@ form { margin-top: 16px; }
 .upload-status.is-busy { background: #edf4ff; border: 1px solid #d3e4ff; color: #1b58c0; }
 .upload-status.is-error { background: #fff2f2; border: 1px solid #ffd4d4; color: #bd3030; }
 .submit-dock { margin-top: 12px; }
+.submit-dock-warning {
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fffaf2 0%, #fff5e8 100%);
+  border: 1px solid #fdc784;
+  color: #9a3412;
+  font-size: 12px;
+  line-height: 1.7;
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.08);
+}
 .submit-dock-hint { margin: 8px 2px 0; color: #617086; font-size: 12px; text-align: center; }
+.validation-banner {
+  display: none;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 12px;
+  color: #b42318;
+  text-align: left;
+}
+.validation-banner.is-visible { display: block; }
+.validation-banner-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: #b42318;
+}
+.validation-banner-subtext {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #c2410c;
+  line-height: 1.5;
+}
+.validation-banner-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: #b42318;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.validation-banner-list li { margin-bottom: 2px; }
 .btn, button {
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid transparent; border-radius: 14px; min-height: 42px;
@@ -875,7 +935,12 @@ form { margin-top: 16px; }
 
               {/* submit */}
               <div class="submit-dock">
-                <div id="validation-msg" style="display:none;margin-bottom:10px;padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;font-size:13px;color:#dc2626;text-align:center"></div>
+                <p class="submit-dock-warning">{submitDoubleCheckNotice[lang] || submitDoubleCheckNotice.ko}</p>
+                <div id="validation-msg" class="validation-banner" aria-live="polite">
+                  <p id="validation-msg-title" class="validation-banner-title"></p>
+                  <p id="validation-msg-subtext" class="validation-banner-subtext"></p>
+                  <ul id="validation-msg-list" class="validation-banner-list"></ul>
+                </div>
                 <button id="customer-submit-btn" class="btn btn-primary btn-lg" type="submit">{t("submit", lang)}</button>
                 <p class="submit-dock-hint">{mobileSubmitHint[lang] || mobileSubmitHint.ko}</p>
               </div>
@@ -1217,11 +1282,13 @@ form { margin-top: 16px; }
     var lEl=formEl.querySelector('[name="luggage_image"]');
     var cEl=formEl.querySelector('[name="consent_checked"]');
     var m=[];
+    syncPickupHiddenValue();
     if(!nEl||!nEl.value.trim())m.push({el:nEl,msg:'${lang === "ja" ? "お名前" : lang === "en" ? "Name" : "이름"}'});
     if(!pEl||!pEl.value.trim())m.push({el:pEl,msg:'${lang === "ja" ? "電話番号" : lang === "en" ? "Phone" : "전화번호"}'});
     if(!eEl||!eEl.value.trim()||!eEl.value.includes('@'))m.push({el:eEl,msg:'${lang === "ja" ? "メール" : lang === "en" ? "Email" : "이메일"}'});
     var sVal=Number(suitcaseEl&&suitcaseEl.value||0),bVal=Number(backpackEl&&backpackEl.value||0);
     if(sVal<=0&&bVal<=0)m.push({el:suitcaseSelectEl,msg:'${lang === "ja" ? "荷物数量" : lang === "en" ? "Bag quantity" : "짐 수량"}'});
+    if(!pickupHiddenEl||!pickupHiddenEl.value)m.push({el:pickupDateEl,msg:'${lang === "ja" ? "受取予定日時" : lang === "en" ? "Pickup date & time" : "수령 예정 일시"}'});
     if(iEl&&!iEl.files.length)m.push({el:iEl,msg:'${lang === "ja" ? "身分証写真" : lang === "en" ? "ID Photo" : "신분증 사진"}'});
     if(lEl&&!lEl.files.length)m.push({el:lEl,msg:'${lang === "ja" ? "荷物写真" : lang === "en" ? "Luggage Photo" : "짐 사진"}'});
     if(cEl&&!cEl.checked)m.push({el:cEl,msg:'${lang === "ja" ? "同意" : lang === "en" ? "Consent" : "유의사항 동의"}'});
@@ -1229,21 +1296,45 @@ form { margin-top: 16px; }
   }
 
   var validationMsgEl=document.getElementById('validation-msg');
+  var validationMsgTitleEl=document.getElementById('validation-msg-title');
+  var validationMsgSubtextEl=document.getElementById('validation-msg-subtext');
+  var validationMsgListEl=document.getElementById('validation-msg-list');
 
-  function showValidationBanner(missing){
+  function showValidationBanner(missing, shouldScroll){
+    if(!validationMsgEl||!validationMsgListEl)return;
+    if(validationMsgTitleEl) validationMsgTitleEl.textContent='${validationHeader[lang] || validationHeader.ko}';
+    if(validationMsgSubtextEl) validationMsgSubtextEl.textContent='${validationSubtext[lang] || validationSubtext.ko}';
+    validationMsgListEl.innerHTML='';
+    missing.forEach(function(item){
+      var li=document.createElement('li');
+      li.textContent=item.msg;
+      validationMsgListEl.appendChild(li);
+    });
+    validationMsgEl.classList.add('is-visible');
+    if(shouldScroll!==false) validationMsgEl.scrollIntoView({behavior:'smooth',block:'center'});
+  }
+
+  function hideValidationBanner(){
     if(!validationMsgEl)return;
-    var names=missing.map(function(m){return m.msg;}).join(' · ');
-    validationMsgEl.textContent='${ lang === "ja" ? "⚠️ 未入力: " : lang === "en" ? "⚠️ Missing: " : "⚠️ 미입력: "}'+names;
-    validationMsgEl.style.display='block';
-    validationMsgEl.scrollIntoView({behavior:'smooth',block:'center'});
+    validationMsgEl.classList.remove('is-visible');
+    if(validationMsgListEl) validationMsgListEl.innerHTML='';
   }
 
   formEl.addEventListener('input',function(e){
     var f=e.target.closest('.field');if(f)f.classList.remove('field-error');
-    if(validationMsgEl)validationMsgEl.style.display='none';
+    if(validationAttempts>0&&validationMsgEl){
+      var remaining=getValidationMissing();
+      if(remaining.length>0) showValidationBanner(remaining,false);
+      else { validationAttempts=0; hideValidationBanner(); }
+    }
   });
   formEl.addEventListener('change',function(e){
     var f=e.target.closest('.field')||e.target.closest('.check-row');if(f)f.classList.remove('field-error');
+    if(validationAttempts>0&&validationMsgEl){
+      var remaining=getValidationMissing();
+      if(remaining.length>0) showValidationBanner(remaining,false);
+      else { validationAttempts=0; hideValidationBanner(); }
+    }
   });
 
   formEl.addEventListener("submit", async function(event){
@@ -1256,7 +1347,7 @@ form { margin-top: 16px; }
     if(missing.length>0){
       validationAttempts++;
       missing.forEach(function(m){if(m.el){var f=m.el.closest('.field')||m.el.closest('.check-row');if(f)f.classList.add('field-error');}});
-      showValidationBanner(missing);
+      showValidationBanner(missing,true);
       return;
     }
     validationAttempts=0;
@@ -1575,8 +1666,8 @@ customer.get("/customer/orders/:id", async (c) => {
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{t("success_title", lang)} — {t("brand_name", lang)}</title>
-        <script async src="https://www.googletagmanager.com/gtag/js?id=G-DLKGF3C7CS" />
-        <script dangerouslySetInnerHTML={{__html: "window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-DLKGF3C7CS');"}} />
+        <script async src={`https://www.googletagmanager.com/gtag/js?id=${LUGGAGE_GA4_MEASUREMENT_ID}`} />
+        <script dangerouslySetInnerHTML={{__html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${LUGGAGE_GA4_MEASUREMENT_ID}');`}} />
         <link rel="preconnect" href="https://cdn.jsdelivr.net" />
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
         <style dangerouslySetInnerHTML={{__html: `
@@ -1835,12 +1926,12 @@ a { color: inherit; text-decoration: none; }
               ja: "センターですぐレンタルできるサービス",
             };
             const rentalItems = [
-              { emoji: "🎮", ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: "https://mkt.shopping.naver.com/link/6980349d41a1733726ec62aa" },
-              { emoji: "🪄", ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: "https://mkt.shopping.naver.com/link/68dce579a48a271c2018bb54" },
-              { emoji: "💇", ko: "다이슨 에어랩", en: "Dyson Airwrap", ja: "ダイソン エアラップ", url: "https://mkt.shopping.naver.com/link/6980349d92a45c3c29778596" },
-              { emoji: "✨", ko: "다이슨 고데기", en: "Dyson Airstraight", ja: "ダイソン ストレートナー", url: "https://mkt.shopping.naver.com/link/6980349d3b9377397d436f46" },
-              { emoji: "👶", ko: "유모차 대여", en: "Stroller Rental", ja: "ベビーカーレンタル", url: "https://mkt.shopping.naver.com/link/68dce520772f4564fe84320a" },
-              { emoji: "🎫", ko: "플라잉패스 먹방패스", en: "Flying Food Pass", ja: "フライングフードパス", url: "https://mkt.shopping.naver.com/link/694123cd003f786e5c3c350e" },
+              { emoji: "🎮", ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: RENTAL_PROMO_LINKS.usj.finish },
+              { emoji: "🪄", ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: RENTAL_PROMO_LINKS.usj.finish },
+              { emoji: "💇", ko: "다이슨 에어랩", en: "Dyson Airwrap", ja: "ダイソン エアラップ", url: RENTAL_PROMO_LINKS.dyson.finish },
+              { emoji: "✨", ko: "다이슨 고데기", en: "Dyson Airstraight", ja: "ダイソン ストレートナー", url: RENTAL_PROMO_LINKS.dyson.finish },
+              { emoji: "👶", ko: "유모차 대여", en: "Stroller Rental", ja: "ベビーカーレンタル", url: RENTAL_PROMO_LINKS.stroller.finish },
+              { emoji: "🎫", ko: "플라잉패스 먹방패스", en: "Flying Food Pass", ja: "フライングフードパス", url: RENTAL_PROMO_LINKS.usj.finish },
             ];
             return (
               <div class="card" style="padding:20px;background:linear-gradient(135deg,rgba(234,242,255,0.9) 0%,rgba(255,255,255,0.95) 50%,rgba(234,242,255,0.9) 100%);border:1px solid rgba(47,128,248,0.15)">

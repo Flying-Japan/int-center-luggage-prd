@@ -2,7 +2,7 @@
  * Staff API routes — JSON endpoints for dashboard interaction.
  * Handles order listing, inline editing, bulk actions, pickup/undo.
  */
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { AppType } from "../types";
 import { staffAuth, getStaff, insertAuditLog } from "../middleware/auth";
 import { calculateStorageDays, calculateExtraDays } from "../services/storage";
@@ -13,6 +13,14 @@ const staffApi = new Hono<AppType>();
 
 // All routes require staff auth
 staffApi.use("/*", staffAuth);
+
+function canEditOrders(role: string): boolean {
+  return role === "admin" || role === "editor";
+}
+
+function denyEditorOnlyJson(c: Context<AppType>) {
+  return c.json({ error: "편집자 또는 관리자 권한이 필요합니다" }, 403);
+}
 
 /** Build the shared WHERE clause fragment and params for order filtering. */
 function buildOrderFilters(
@@ -43,6 +51,8 @@ function buildOrderFilters(
 
 // POST /staff/api/referral — Increment/decrement referral count
 staffApi.post("/staff/api/referral", async (c) => {
+  const staff = getStaff(c);
+  if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
   const body = await c.req.json<{ floor: string; delta: number }>();
   if (!["4F", "8F"].includes(body.floor)) return c.json({ error: "Invalid floor" }, 400);
   const delta = body.delta === -1 ? -1 : 1;
@@ -118,6 +128,7 @@ staffApi.post("/staff/api/orders/:id/inline-update", async (c) => {
   const orderId = c.req.param("id");
   const body = await c.req.json<Record<string, string | number | null>>();
   const staff = getStaff(c);
+  if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
 
   // Allowed fields for inline update
   const ALLOWED_FIELDS = ["name", "phone", "tag_no", "note", "expected_pickup_at", "flying_pass_tier"];
@@ -172,6 +183,8 @@ staffApi.post("/staff/api/orders/:id/inline-update", async (c) => {
 // POST /staff/api/orders/:id/toggle-warehouse — Toggle warehouse flag
 staffApi.post("/staff/api/orders/:id/toggle-warehouse", async (c) => {
   const orderId = c.req.param("id");
+  const staff = getStaff(c);
+  if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
 
   const order = await c.env.DB.prepare(
     "SELECT in_warehouse FROM luggage_orders WHERE order_id = ?"
@@ -188,7 +201,7 @@ staffApi.post("/staff/api/orders/:id/toggle-warehouse", async (c) => {
     .bind(newVal, orderId)
     .run();
 
-  await insertAuditLog(c.env.DB, orderId, getStaff(c).id, "TOGGLE_WAREHOUSE", newVal ? "창고보관" : "창고해제");
+  await insertAuditLog(c.env.DB, orderId, staff.id, "TOGGLE_WAREHOUSE", newVal ? "창고보관" : "창고해제");
   return c.json({ success: true, in_warehouse: !!newVal });
 });
 
@@ -196,6 +209,7 @@ staffApi.post("/staff/api/orders/:id/toggle-warehouse", async (c) => {
 staffApi.post("/staff/api/orders/:id/cancel", async (c) => {
   const orderId = c.req.param("id");
   const staff = getStaff(c);
+  if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
 
   await c.env.DB.prepare(
     "UPDATE luggage_orders SET status = 'CANCELLED', updated_at = datetime('now') WHERE order_id = ?"
@@ -213,9 +227,7 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
   const body = await c.req.json<{ order_ids: string[]; action: string }>();
   const staff = getStaff(c);
 
-  if (staff.role === "viewer") {
-    return c.json({ error: "Insufficient permissions" }, 403);
-  }
+  if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
 
   if (!body.order_ids?.length || !body.action) {
     return c.json({ error: "order_ids and action required" }, 400);
@@ -262,6 +274,7 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
 staffApi.post("/staff/api/orders/:id/pickup", async (c) => {
   const orderId = c.req.param("id");
   const staff = getStaff(c);
+  if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
   const now = new Date().toISOString();
 
   const order = await c.env.DB.prepare(
@@ -308,6 +321,7 @@ staffApi.post("/staff/api/orders/:id/pickup", async (c) => {
 staffApi.post("/staff/api/orders/:id/undo-pickup", async (c) => {
   const orderId = c.req.param("id");
   const staff = getStaff(c);
+  if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
 
   await c.env.DB.prepare(
     `UPDATE luggage_orders
@@ -331,6 +345,7 @@ staffApi.post("/staff/api/orders/:id/undo-pickup", async (c) => {
 staffApi.post("/staff/api/orders/:id/toggle-payment", async (c) => {
   const orderId = c.req.param("id");
   const staff = getStaff(c);
+  if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
 
   const order = await c.env.DB.prepare(
     "SELECT status FROM luggage_orders WHERE order_id = ?"
@@ -364,6 +379,7 @@ staffApi.post("/staff/api/orders/:id/update-price", async (c) => {
     staff_prepaid_override_amount?: number | null;
   }>();
   const staff = getStaff(c);
+  if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
 
   const order = await c.env.DB.prepare(
     "SELECT price_per_day, expected_storage_days, prepaid_amount, flying_pass_tier, payment_method FROM luggage_orders WHERE order_id = ?"

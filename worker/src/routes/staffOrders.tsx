@@ -4,7 +4,7 @@
  */
 import { Hono } from "hono";
 import type { AppType } from "../types";
-import { staffAuth, getStaff, insertAuditLog } from "../middleware/auth";
+import { staffAuth, editorAuth, getStaff, insertAuditLog } from "../middleware/auth";
 import { downloadImage, logImageView } from "../lib/r2";
 import { buildOrderId, buildTagNo } from "../services/orderNumber";
 import { calculatePricePerDay, calculatePrepaidAmount, normalizeFlyingPassTier, flyingPassDiscountAmount, calculateExtraAmount } from "../services/pricing";
@@ -320,8 +320,9 @@ staffOrders.get("/staff/orders/:id", async (c) => {
 });
 
 // POST /staff/orders/:id/mark-paid
-staffOrders.post("/staff/orders/:id/mark-paid", async (c) => {
+staffOrders.post("/staff/orders/:id/mark-paid", editorAuth, async (c) => {
   const orderId = c.req.param("id");
+  if (!orderId) return c.redirect("/staff/dashboard");
   const body = await c.req.parseBody();
   const paymentMethod = ["CASH", "PAY_QR"].includes(String(body.payment_method)) ? String(body.payment_method) : "CASH";
   const staff = getStaff(c);
@@ -338,8 +339,9 @@ staffOrders.post("/staff/orders/:id/mark-paid", async (c) => {
 });
 
 // POST /staff/orders/:id/update
-staffOrders.post("/staff/orders/:id/update", async (c) => {
+staffOrders.post("/staff/orders/:id/update", editorAuth, async (c) => {
   const orderId = c.req.param("id");
+  if (!orderId) return c.redirect("/staff/dashboard");
   const body = await c.req.parseBody();
   const staff = getStaff(c);
 
@@ -376,8 +378,9 @@ staffOrders.post("/staff/orders/:id/update", async (c) => {
 });
 
 // POST /staff/orders/:id/mark-picked-up
-staffOrders.post("/staff/orders/:id/mark-picked-up", async (c) => {
+staffOrders.post("/staff/orders/:id/mark-picked-up", editorAuth, async (c) => {
   const orderId = c.req.param("id");
+  if (!orderId) return c.redirect("/staff/dashboard");
   const staff = getStaff(c);
   const now = new Date().toISOString();
 
@@ -409,8 +412,9 @@ staffOrders.post("/staff/orders/:id/mark-picked-up", async (c) => {
 });
 
 // POST /staff/orders/:id/undo-picked-up
-staffOrders.post("/staff/orders/:id/undo-picked-up", async (c) => {
+staffOrders.post("/staff/orders/:id/undo-picked-up", editorAuth, async (c) => {
   const orderId = c.req.param("id");
+  if (!orderId) return c.redirect("/staff/dashboard");
   const staff = getStaff(c);
 
   const current = await c.env.DB.prepare(
@@ -438,8 +442,9 @@ staffOrders.post("/staff/orders/:id/undo-picked-up", async (c) => {
 });
 
 // POST /staff/orders/:id/create-extension
-staffOrders.post("/staff/orders/:id/create-extension", async (c) => {
+staffOrders.post("/staff/orders/:id/create-extension", editorAuth, async (c) => {
   const parentOrderId = c.req.param("id");
+  if (!parentOrderId) return c.redirect("/staff/dashboard");
   const staff = getStaff(c);
 
   const parent = await c.env.DB.prepare("SELECT * FROM luggage_orders WHERE order_id = ?")
@@ -476,7 +481,7 @@ staffOrders.post("/staff/orders/:id/create-extension", async (c) => {
 });
 
 // POST /staff/orders/manual — Manual order creation
-staffOrders.post("/staff/orders/manual", async (c) => {
+staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
   const body = await c.req.parseBody();
   const staff = getStaff(c);
 

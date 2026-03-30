@@ -13,6 +13,7 @@ import { runRetentionCleanup } from "./services/retention";
 import { syncDailySales } from "./services/dailySalesSync";
 import { tagColorClass, TAG_COLOR_RANGES } from "./lib/tagColors";
 import { StaffTopbar, NewOrderAlert } from "./lib/components";
+import { fetchStaffNamesByIds } from "./lib/staffProfiles";
 
 const app = new Hono<AppType>();
 
@@ -80,15 +81,14 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
   let sql = `WITH note_edits AS (
       SELECT a.order_id,
-             COALESCE(u.display_name, u.username, a.staff_id) as note_author,
+             a.staff_id as note_staff_id,
              a.timestamp as note_updated_at,
              ROW_NUMBER() OVER (PARTITION BY a.order_id ORDER BY a.timestamp DESC) as rn
       FROM luggage_audit_logs a
-      LEFT JOIN user_profiles u ON a.staff_id = u.id
       WHERE a.action = 'INLINE_UPDATE' AND a.details LIKE '%비고%'
     )
     SELECT o.order_id, o.name, o.tag_no, o.status, o.prepaid_amount, o.created_at, o.expected_pickup_at, o.note, o.payment_method, o.in_warehouse, o.parent_order_id, o.flying_pass_tier,
-           ne.note_author, ne.note_updated_at
+           ne.note_staff_id, ne.note_updated_at
     FROM luggage_orders o
     LEFT JOIN note_edits ne ON ne.order_id = o.order_id AND ne.rn = 1
     WHERE 1=1`;
@@ -120,7 +120,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   const [orders, countsResult, refRows] = await Promise.all([
     c.env.DB.prepare(sql)
       .bind(...params)
-      .all<{ order_id: string; name: string | null; tag_no: string | null; status: string; prepaid_amount: number; created_at: string; expected_pickup_at: string | null; note: string | null; payment_method: string | null; in_warehouse: number; parent_order_id: string | null; flying_pass_tier: string | null; note_author: string | null; note_updated_at: string | null }>(),
+      .all<{ order_id: string; name: string | null; tag_no: string | null; status: string; prepaid_amount: number; created_at: string; expected_pickup_at: string | null; note: string | null; payment_method: string | null; in_warehouse: number; parent_order_id: string | null; flying_pass_tier: string | null; note_staff_id: string | null; note_updated_at: string | null }>(),
     c.env.DB.prepare(
       `SELECT
         SUM(CASE WHEN status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
@@ -136,6 +136,11 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   const counts = countsResult || { pending_count: 0, paid_count: 0, picked_up_count: 0, cancelled_count: 0, total_count: 0 };
   const refCounts: Record<string, number> = { "4F": 0, "8F": 0 };
   for (const r of refRows.results) refCounts[r.floor] = r.count;
+  const noteAuthorMap = await fetchStaffNamesByIds(c.env, orders.results.map((order) => order.note_staff_id));
+  const orderRows = orders.results.map((order) => ({
+    ...order,
+    note_author: order.note_staff_id ? noteAuthorMap.get(order.note_staff_id) || order.note_staff_id : null,
+  }));
 
   return c.html(
     <html lang="ko">
@@ -258,7 +263,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.results.map((o) => {
+                  {orderRows.map((o) => {
                     const rowClasses = [
                       o.status === "CANCELLED" && "is-cancelled",
                       o.in_warehouse && "is-in-warehouse",
@@ -329,7 +334,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     </tr>
                     );
                   })}
-                  {orders.results.length === 0 && (
+                  {orderRows.length === 0 && (
                     <tr><td colspan={10}>데이터가 없습니다.</td></tr>
                   )}
                 </tbody>

@@ -5,7 +5,7 @@ export type Env = {
   DB: D1Database;
   IMAGES: R2Bucket;
 
-  // Supabase (auth only)
+  // Supabase (staff auth + staff profiles)
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_ROLE_KEY: string;

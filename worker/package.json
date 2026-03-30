@@ -6,6 +6,9 @@
     "deploy": "wrangler deploy",
     "db:migrate:local": "wrangler d1 execute center-luggage-db --local --file=src/schema.sql",
     "db:migrate:prod": "wrangler d1 execute center-luggage-db --remote --file=src/schema.sql",
+    "backfill:cash-closing": "node scripts/backfill-cash-closings-from-check-sheet.mjs",
+    "sync:cash-closing-staff": "node scripts/sync-cash-closing-staff-ids.mjs",
+    "backfill:daily-sales": "node scripts/backfill-daily-sales-from-sheet.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },

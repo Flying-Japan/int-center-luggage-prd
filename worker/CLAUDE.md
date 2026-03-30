@@ -61,7 +61,7 @@ worker/
 - D1 queries use parameterized `.bind()` — never string interpolation
 - R2 via Worker binding (not REST API)
 - Session cookies for auth (not JWTs)
-- Tables prefixed `luggage_` except `user_profiles` (shared)
+- Tables prefixed `luggage_`; staff profiles and roles live in Supabase `user_profiles`
 
 ## Environment Variables (Cloudflare Dashboard)
 

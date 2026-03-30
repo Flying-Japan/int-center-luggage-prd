@@ -36,6 +36,31 @@ admin.get("/staff/admin/sales", async (c) => {
     `SELECT sale_date, people, cash, qr, luggage_total, rental_total FROM luggage_daily_sales${whereClause} ORDER BY sale_date DESC`
   ).bind(...params).all<{ sale_date: string; people: number; cash: number; qr: number; luggage_total: number; rental_total: number }>();
 
+  // Fetch actual luggage revenue from D1 orders (more accurate than Sheets)
+  let actualWhereClause = "";
+  const actualParams: string[] = [];
+  if (startDate && endDate) {
+    actualWhereClause = " AND date(created_at, '+9 hours') BETWEEN ? AND ?";
+    actualParams.push(startDate, endDate);
+  }
+  const actualLuggageRows = await c.env.DB.prepare(
+    `SELECT
+      date(created_at, '+9 hours') as sale_date,
+      COUNT(*) as order_count,
+      SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) THEN prepaid_amount + extra_amount ELSE 0 END) as cash,
+      SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as qr,
+      SUM(prepaid_amount + extra_amount) as luggage_total
+    FROM luggage_orders
+    WHERE status IN ('PAID', 'PICKED_UP')${actualWhereClause}
+    GROUP BY sale_date`
+  ).bind(...actualParams).all<{ sale_date: string; order_count: number; cash: number; qr: number; luggage_total: number }>();
+
+  // Build lookup map for actual luggage data by date
+  const actualByDate = new Map<string, { order_count: number; cash: number; qr: number; luggage_total: number }>();
+  for (const row of actualLuggageRows.results) {
+    actualByDate.set(row.sale_date, row);
+  }
+
   const DOW_JP = ["日", "月", "火", "水", "木", "金", "土"];
 
   // Japanese public holidays 2026
@@ -75,15 +100,22 @@ admin.get("/staff/admin/sales", async (c) => {
   const mergedRows: MergedRow[] = dailyRows.results.map(r => {
     const dow = DOW_JP[new Date(r.sale_date + "T00:00:00+09:00").getDay()];
     const flags = getHolidayFlags(r.sale_date);
+    const actual = actualByDate.get(r.sale_date);
+    // Luggage revenue must equal tender breakdown (cash + QR).
+    // Some synced rows have stale luggage_total values, so derive from tenders.
+    const cash = actual ? actual.cash : r.cash;
+    const qr = actual ? actual.qr : r.qr;
+    const luggage = cash + qr;
+    const orders = actual ? actual.order_count : r.people;
     return {
       date: r.sale_date,
       dateJP: `${r.sale_date.replace(/-/g, "/")}/${dow}`,
-      orders: r.people,
-      cash: r.cash,
-      qr: r.qr,
-      luggage: r.luggage_total,
+      orders,
+      cash,
+      qr,
+      luggage,
       rental: r.rental_total,
-      combined: r.luggage_total + r.rental_total,
+      combined: luggage + r.rental_total,
       isWeekend: flags.isWeekend,
       jpHoliday: flags.jp,
       krHoliday: flags.kr,

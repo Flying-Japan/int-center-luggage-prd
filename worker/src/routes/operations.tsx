@@ -7,6 +7,7 @@ import type { AppType } from "../types";
 import { staffAuth, getStaff } from "../middleware/auth";
 import { formatDateJST, nowJST } from "../services/storage";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
+import { fetchStaffNamesByIds } from "../lib/staffProfiles";
 
 const ops = new Hono<AppType>();
 ops.use("/*", staffAuth);
@@ -16,18 +17,200 @@ ops.use("/*", staffAuth);
 // ============================================================
 
 const DENOMS = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1] as const;
+const STARTING_FLOAT = 40000; // 시제 ¥40,000
 const CLOSING_TYPE_LABELS: Record<string, string> = { MORNING_HANDOVER: "오전", FINAL_CLOSE: "최종" };
 const WORKFLOW_LABELS: Record<string, string> = { SUBMITTED: "제출완료" };
 const AUDIT_ACTION_LABELS: Record<string, string> = { CREATE: "정산마감 생성", SUBMIT: "정산마감 제출", VERIFY_LOCK: "확인/잠금 (레거시)", EDIT: "정산마감 수정" };
+const DOW_JP = ["日", "月", "火", "水", "木", "金", "土"];
+const JP_HOLIDAYS: Record<string, string> = {
+  "01-01": "元日", "01-13": "成人の日", "02-11": "建国記念の日", "02-23": "天皇誕生日",
+  "03-20": "春分の日", "04-29": "昭和の日", "05-03": "憲法記念日", "05-04": "みどりの日",
+  "05-05": "こどもの日", "05-06": "振替休日", "07-20": "海の日", "08-11": "山の日",
+  "09-21": "敬老の日", "09-23": "秋分の日", "10-12": "体育の日", "11-03": "文化の日",
+  "11-23": "勤労感謝の日",
+};
+const KR_HOLIDAYS: Record<string, string> = {
+  "01-01": "신정", "03-01": "삼일절", "05-05": "어린이날", "06-06": "현충일",
+  "08-15": "광복절", "10-03": "개천절", "10-09": "한글날", "12-25": "성탄절",
+  "2025-10-03": "개천절", "2025-10-05": "추석", "2025-10-06": "추석", "2025-10-07": "추석", "2025-10-08": "대체휴일", "2025-10-09": "한글날",
+  "2026-02-16": "설날", "2026-02-17": "설날", "2026-02-18": "설날",
+  "2026-05-24": "석가탄신일",
+  "2026-09-24": "추석", "2026-09-25": "추석", "2026-09-26": "추석",
+};
+
+function getHolidayFlags(dateStr: string): { isWeekend: boolean; jp: string | null; kr: string | null } {
+  const d = new Date(`${dateStr}T00:00:00+09:00`);
+  const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+  const mmdd = dateStr.slice(5);
+  return {
+    isWeekend,
+    jp: JP_HOLIDAYS[mmdd] || null,
+    kr: KR_HOLIDAYS[dateStr] || KR_HOLIDAYS[mmdd] || null,
+  };
+}
+
+function formatClosingDate(dateStr: string): { label: string; style: string; suffix: string; title: string } {
+  const d = new Date(`${dateStr}T00:00:00+09:00`);
+  const dow = DOW_JP[d.getDay()];
+  const flags = getHolidayFlags(dateStr);
+  const suffix = `${flags.isWeekend && !flags.jp && !flags.kr ? " 🔵" : ""}${flags.jp ? " 🇯🇵" : ""}${flags.kr ? " 🇰🇷" : ""}`;
+  const style = flags.jp || flags.kr
+    ? "color:#dc2626;font-weight:600"
+    : flags.isWeekend
+      ? "color:#2383e2;font-weight:600"
+      : "";
+  const title = [flags.jp, flags.kr].filter(Boolean).join(" / ");
+  return {
+    label: `${dateStr.replace(/-/g, "/")}/${dow}`,
+    style,
+    suffix,
+    title,
+  };
+}
+
+function formatDenominationLabel(amount: number): string {
+  return `¥${amount.toLocaleString()}`;
+}
+
+function uniqueStaffIds(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.map((value) => `${value ?? ""}`.trim()).filter(Boolean))];
+}
+
+type AutoSalesSummary = {
+  cashAmount: number;
+  qrAmount: number;
+  totalAmount: number;
+  orderCount: number;
+  source: "daily_sales" | "live_orders";
+};
+
+function buildDateRange(businessDates: string[]): { uniqueDates: string[]; rangeStart: string; rangeEnd: string } | null {
+  const uniqueDates = [...new Set(businessDates.filter(Boolean))];
+  if (uniqueDates.length === 0) return null;
+
+  const sortedDates = uniqueDates.sort();
+  return {
+    uniqueDates,
+    rangeStart: sortedDates[0],
+    rangeEnd: sortedDates[sortedDates.length - 1],
+  };
+}
+
+async function fetchDailySalesSummariesByDate(db: D1Database, businessDates: string[]): Promise<Map<string, AutoSalesSummary>> {
+  const dateRange = buildDateRange(businessDates);
+  if (!dateRange) return new Map();
+
+  const rows = await db.prepare(
+    `SELECT sale_date, cash, qr, luggage_total
+     FROM luggage_daily_sales
+     WHERE sale_date >= ?
+       AND sale_date <= ?`
+  ).bind(dateRange.rangeStart, dateRange.rangeEnd).all<{ sale_date: string; cash: number; qr: number; luggage_total: number }>();
+
+  const result = new Map<string, AutoSalesSummary>();
+  for (const row of rows.results) {
+    result.set(row.sale_date, {
+      cashAmount: row.cash ?? 0,
+      qrAmount: row.qr ?? 0,
+      totalAmount: row.luggage_total ?? 0,
+      orderCount: 0,
+      source: "daily_sales",
+    });
+  }
+  return result;
+}
+
+async function fetchLiveOrderSalesSummariesByDate(db: D1Database, businessDates: string[]): Promise<Map<string, AutoSalesSummary>> {
+  const dateRange = buildDateRange(businessDates);
+  if (!dateRange) return new Map();
+
+  const rows = await db.prepare(
+    `SELECT
+       date(created_at, '+9 hours') as business_date,
+       SUM(CASE WHEN payment_method = 'PAY_QR' THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr_amount,
+       SUM(CASE WHEN payment_method = 'CASH' OR payment_method IS NULL THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash_amount,
+       SUM(COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount) as total_amount,
+       COUNT(*) as order_count
+     FROM luggage_orders
+     WHERE date(created_at, '+9 hours') >= ?
+       AND date(created_at, '+9 hours') <= ?
+       AND status != 'CANCELLED'
+       AND manual_entry = 0
+     GROUP BY date(created_at, '+9 hours')`
+  ).bind(dateRange.rangeStart, dateRange.rangeEnd).all<{
+    business_date: string;
+    cash_amount: number;
+    qr_amount: number;
+    total_amount: number;
+    order_count: number;
+  }>();
+
+  const result = new Map<string, AutoSalesSummary>();
+  for (const row of rows.results) {
+    result.set(row.business_date, {
+      cashAmount: row.cash_amount ?? 0,
+      qrAmount: row.qr_amount ?? 0,
+      totalAmount: row.total_amount ?? 0,
+      orderCount: row.order_count ?? 0,
+      source: "live_orders",
+    });
+  }
+  return result;
+}
+
+async function resolveAutoSalesSummariesByDate(db: D1Database, businessDates: string[]): Promise<Map<string, AutoSalesSummary>> {
+  const uniqueDates = [...new Set(businessDates.filter(Boolean))];
+  if (uniqueDates.length === 0) return new Map();
+
+  const [dailySalesByDate, liveOrdersByDate] = await Promise.all([
+    fetchDailySalesSummariesByDate(db, uniqueDates),
+    fetchLiveOrderSalesSummariesByDate(db, uniqueDates),
+  ]);
+
+  const today = formatDateJST(nowJST());
+  const result = new Map<string, AutoSalesSummary>();
+  for (const businessDate of uniqueDates) {
+    const daily = dailySalesByDate.get(businessDate);
+    const live = liveOrdersByDate.get(businessDate);
+    if (businessDate === today && live && live.totalAmount > 0) {
+      result.set(businessDate, live);
+      continue;
+    }
+    if (daily) {
+      result.set(businessDate, daily);
+      continue;
+    }
+    if (live) {
+      result.set(businessDate, live);
+    }
+  }
+  return result;
+}
+
+async function resolveAutoSalesSummaryForDate(db: D1Database, businessDate: string): Promise<AutoSalesSummary | null> {
+  return (await resolveAutoSalesSummariesByDate(db, [businessDate])).get(businessDate) ?? null;
+}
 
 // GET /staff/cash-closing — Cash closing list & form
 ops.get("/staff/cash-closing", async (c) => {
   const closings = await c.env.DB.prepare(
-    `SELECT c.*, COALESCE(u.display_name, u.username) as staff_name
-     FROM luggage_cash_closings c
-     LEFT JOIN user_profiles u ON c.staff_id = u.id
-     ORDER BY c.created_at DESC LIMIT 60`
-  ).all();
+    `SELECT * FROM luggage_cash_closings
+     ORDER BY business_date DESC, closing_id DESC LIMIT 400`
+  ).all<Record<string, unknown>>();
+  const staffNameMap = await fetchStaffNamesByIds(
+    c.env,
+    closings.results.map((closing) => closing.staff_id as string | null | undefined),
+  );
+  const closingRows: Array<Record<string, unknown> & { staff_name: string | null }> = closings.results.map((closing) => ({
+    ...closing,
+    staff_name: (closing.staff_id as string | null)
+      ? staffNameMap.get(closing.staff_id as string) || (closing.owner_name as string) || null
+      : (closing.owner_name as string) || null,
+  }));
+  const autoSalesByDate = await resolveAutoSalesSummariesByDate(
+    c.env.DB,
+    closingRows.map((cl) => String(cl.business_date || ""))
+  );
 
   const staff = getStaff(c);
   return c.html(
@@ -55,7 +238,7 @@ ops.get("/staff/cash-closing", async (c) => {
                 <div class="cash-denom-grid">
                   {DENOMS.map((d) => (
                     <label class="cash-denom-item">
-                      <span>¥{d}</span>
+                      <span>{formatDenominationLabel(d)}</span>
                       <input class="control" type="number" name={`count_${d}`} defaultValue="0" min="0" />
                     </label>
                   ))}
@@ -100,10 +283,10 @@ ops.get("/staff/cash-closing", async (c) => {
                 <thead>
                   <tr style="background:#f1f5f9;border-bottom:2px solid #cbd5e1">
                     <th style="padding:3px 6px;text-align:left;font-size:10px;color:#475569;white-space:nowrap">날짜</th>
-                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">10000</th>
-                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">5000</th>
-                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">2000</th>
-                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">1000</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">10,000</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">5,000</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">2,000</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">1,000</th>
                     <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">500</th>
                     <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">100</th>
                     <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">50</th>
@@ -112,7 +295,7 @@ ops.get("/staff/cash-closing", async (c) => {
                     <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">1</th>
                     <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569;font-weight:700">Total</th>
                     <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">PayPay</th>
-                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#2563eb">자동매출</th>
+                    <th title="짐보관 신청서 기준 합계" style="padding:3px 6px;text-align:right;font-size:10px;color:#2563eb">자동매출</th>
                     <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">차액</th>
                     <th style="padding:3px 4px;text-align:left;font-size:10px;color:#475569">작성자</th>
                     <th style="padding:3px 4px;text-align:left;font-size:10px;color:#475569">메모</th>
@@ -120,25 +303,28 @@ ops.get("/staff/cash-closing", async (c) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {closings.results.map((cl: Record<string, unknown>) => {
-                    const diff = cl.difference_amount as number;
+                  {closingRows.map((cl: Record<string, unknown>) => {
                     const noteStr = (cl.note as string) || "";
+                    const businessDate = cl.business_date as string;
+                    const dateDisplay = formatClosingDate(businessDate);
+                    const autoAmount = autoSalesByDate.get(businessDate)?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
+                    const diff = (((cl.total_amount as number) || 0) - STARTING_FLOAT + ((cl.actual_qr_amount as number) || 0)) - autoAmount;
                     return (
                       <tr style="border-bottom:1px solid #e2e8f0">
-                        <td style="padding:2px 6px;white-space:nowrap"><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:var(--primary);font-weight:600">{cl.business_date as string}</a></td>
-                        <td style="padding:2px 4px;text-align:right">{cl.count_10000 as number || 0}</td>
-                        <td style="padding:2px 4px;text-align:right">{cl.count_5000 as number || 0}</td>
-                        <td style="padding:2px 4px;text-align:right">{cl.count_2000 as number || 0}</td>
-                        <td style="padding:2px 4px;text-align:right">{cl.count_1000 as number || 0}</td>
-                        <td style="padding:2px 4px;text-align:right">{cl.count_500 as number || 0}</td>
-                        <td style="padding:2px 4px;text-align:right">{cl.count_100 as number || 0}</td>
-                        <td style="padding:2px 4px;text-align:right">{cl.count_50 as number || 0}</td>
-                        <td style="padding:2px 4px;text-align:right">{cl.count_10 as number || 0}</td>
-                        <td style="padding:2px 4px;text-align:right">{cl.count_5 as number || 0}</td>
-                        <td style="padding:2px 4px;text-align:right">{cl.count_1 as number || 0}</td>
+                        <td style={`padding:2px 6px;white-space:nowrap;${dateDisplay.style}`} title={dateDisplay.title}><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:inherit;font-weight:600">{dateDisplay.label}{dateDisplay.suffix}</a></td>
+                        <td style="padding:2px 4px;text-align:right">{((cl.count_10000 as number) || 0).toLocaleString()}</td>
+                        <td style="padding:2px 4px;text-align:right">{((cl.count_5000 as number) || 0).toLocaleString()}</td>
+                        <td style="padding:2px 4px;text-align:right">{((cl.count_2000 as number) || 0).toLocaleString()}</td>
+                        <td style="padding:2px 4px;text-align:right">{((cl.count_1000 as number) || 0).toLocaleString()}</td>
+                        <td style="padding:2px 4px;text-align:right">{((cl.count_500 as number) || 0).toLocaleString()}</td>
+                        <td style="padding:2px 4px;text-align:right">{((cl.count_100 as number) || 0).toLocaleString()}</td>
+                        <td style="padding:2px 4px;text-align:right">{((cl.count_50 as number) || 0).toLocaleString()}</td>
+                        <td style="padding:2px 4px;text-align:right">{((cl.count_10 as number) || 0).toLocaleString()}</td>
+                        <td style="padding:2px 4px;text-align:right">{((cl.count_5 as number) || 0).toLocaleString()}</td>
+                        <td style="padding:2px 4px;text-align:right">{((cl.count_1 as number) || 0).toLocaleString()}</td>
                         <td style="padding:2px 6px;text-align:right;font-weight:700">¥{(cl.total_amount as number).toLocaleString()}</td>
                         <td style="padding:2px 6px;text-align:right">¥{(cl.paypay_amount as number).toLocaleString()}</td>
-                        <td style="padding:2px 6px;text-align:right;color:#2563eb">¥{(cl.check_auto_amount as number).toLocaleString()}</td>
+                        <td style="padding:2px 6px;text-align:right;color:#2563eb">¥{autoAmount.toLocaleString()}</td>
                         <td style={`padding:2px 6px;text-align:right;font-weight:600;color:${diff === 0 ? '#166534' : '#dc2626'}`}>{diff > 0 ? "+" : ""}{diff.toLocaleString()}</td>
                         <td style="padding:2px 4px;white-space:nowrap">{(cl.staff_name as string) || "-"}</td>
                         <td style="padding:2px 4px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b">{noteStr.length > 20 ? noteStr.slice(0, 20) + "…" : noteStr || "-"}</td>
@@ -185,22 +371,14 @@ ops.post("/staff/cash-closing", async (c) => {
     "SELECT closing_id FROM luggage_cash_closings WHERE business_date = ? AND closing_type = ?"
   ).bind(businessDate, closingType).first();
   if (existing) return c.redirect("/staff/cash-closing?error=이미 해당 날짜/유형의 정산이 존재합니다");
-  const actualAmount = totalAmount + actualQrAmount;
+  const actualAmount = (totalAmount - STARTING_FLOAT) + actualQrAmount;
 
-  // Auto-calculate expected amount from today's PAID/PICKED_UP orders (includes extra_amount)
-  const autoSales = await c.env.DB.prepare(
-    `SELECT
-       SUM(CASE WHEN payment_method = 'CASH' OR payment_method IS NULL THEN prepaid_amount + extra_amount ELSE 0 END) as auto_cash,
-       SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as auto_qr,
-       SUM(prepaid_amount + extra_amount) as auto_total
-     FROM luggage_orders
-     WHERE date(created_at, '+9 hours') = ? AND status IN ('PAID', 'PICKED_UP')`
-  ).bind(businessDate).first<{ auto_cash: number; auto_qr: number; auto_total: number }>();
-
-  const checkAutoAmount = autoSales?.auto_total ?? 0;
+  // Match the legacy Check sheet: Daily sheet totals first, live customer-form orders only as same-day fallback.
+  const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, businessDate);
+  const checkAutoAmount = autoSales?.totalAmount ?? 0;
   const expectedAmount = checkAutoAmount;
   const differenceAmount = actualAmount - expectedAmount;
-  const qrDifferenceAmount = actualQrAmount - (autoSales?.auto_qr ?? 0);
+  const qrDifferenceAmount = actualQrAmount - (autoSales?.qrAmount ?? 0);
 
   await c.env.DB.prepare(
     `INSERT INTO luggage_cash_closings (
@@ -241,23 +419,47 @@ ops.post("/staff/cash-closing", async (c) => {
 // GET /staff/cash-closing/:id — Cash closing detail
 ops.get("/staff/cash-closing/:id", async (c) => {
   const closingId = c.req.param("id");
-  const closing = await c.env.DB.prepare("SELECT * FROM luggage_cash_closings WHERE closing_id = ?")
+  const closing = await c.env.DB.prepare(
+    `SELECT * FROM luggage_cash_closings
+     WHERE closing_id = ?`
+  )
     .bind(closingId)
-    .first();
+    .first<Record<string, unknown>>();
 
   if (!closing) return c.html(<p>Not found</p>, 404);
   const staff = getStaff(c);
+  const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, String((closing as Record<string, unknown>).business_date || ""));
 
   const audits = await c.env.DB.prepare(
-    `SELECT a.*, COALESCE(u.display_name, u.username) as staff_name
-     FROM luggage_cash_closing_audits a
-     LEFT JOIN user_profiles u ON a.staff_id = u.id
-     WHERE a.closing_id = ? ORDER BY a.created_at DESC`
+    `SELECT *
+     FROM luggage_cash_closing_audits
+     WHERE closing_id = ? ORDER BY created_at DESC`
   )
     .bind(closingId)
-    .all();
+    .all<Record<string, unknown>>();
+
+  const cashClosingStaffNameMap = await fetchStaffNamesByIds(
+    c.env,
+    uniqueStaffIds([
+      closing.staff_id as string | null | undefined,
+      ...audits.results.map((audit) => audit.staff_id as string | null | undefined),
+    ]),
+  );
+  const auditRows = audits.results.map((audit) => ({
+    ...audit,
+    staff_name: (audit.staff_id as string | null)
+      ? cashClosingStaffNameMap.get(audit.staff_id as string) || (audit.staff_id as string)
+      : null,
+  }));
 
   const cl = closing as Record<string, unknown>;
+  const autoAmount = autoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
+  const cashActual = ((cl.total_amount as number) || 0) - STARTING_FLOAT;
+  const qrActual = (cl.actual_qr_amount as number) || 0;
+  const differenceAmount = (cashActual + qrActual) - autoAmount;
+  const closingStaffName = (cl.staff_id as string | null)
+    ? cashClosingStaffNameMap.get(cl.staff_id as string) || (cl.owner_name as string) || "-"
+    : (cl.owner_name as string) || "-";
   return c.html(
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>정산 상세</title></head>
@@ -279,17 +481,17 @@ ops.get("/staff/cash-closing/:id", async (c) => {
                 <p class="stat-value">¥{(cl.actual_qr_amount as number).toLocaleString()}</p>
               </div>
               <div class="card stat-card">
-                <p class="stat-label">자동매출 <span title="마감 생성 시점의 PAID/PICKED_UP 주문 합산. 이후 취소된 주문은 반영되지 않습니다." style="cursor:help;color:#94a3b8;font-size:10px">(?)</span></p>
-                <p class="stat-value">¥{(cl.check_auto_amount as number).toLocaleString()}</p>
+                <p class="stat-label">자동매출 <span title="Daily 시트(짐보관 신청서 합계)를 우선 사용하고, 당일 시트 미반영 시 실시간 신청서 주문을 사용합니다." style="cursor:help;color:#94a3b8;font-size:10px">(?)</span></p>
+                <p class="stat-value">¥{autoAmount.toLocaleString()}</p>
               </div>
               <div class="card stat-card">
                 <p class="stat-label">차액</p>
-                <p class="stat-value" style={`color:${(cl.difference_amount as number) === 0 ? '#166534' : '#dc2626'}`}>¥{(cl.difference_amount as number).toLocaleString()}</p>
+                <p class="stat-value" style={`color:${differenceAmount === 0 ? '#166534' : '#dc2626'}`}>¥{differenceAmount.toLocaleString()}</p>
               </div>
             </div>
 
             <p style="margin-bottom:12px;font-size:11px;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:6px 10px">
-              ※ 자동매출은 마감 생성 시점의 스냅샷입니다. 이후 주문이 취소되어도 이 값은 자동으로 갱신되지 않습니다.
+              ※ 자동매출은 Daily 시트의 짐보관 신청서 합계를 우선 사용합니다. 당일 시트가 아직 비어 있으면 실시간 신청서 주문 합계로 표시됩니다.
             </p>
 
             <div style="margin-bottom:16px;overflow-x:auto">
@@ -325,14 +527,14 @@ ops.get("/staff/cash-closing/:id", async (c) => {
               <p><strong>렌탈 현금</strong><span>¥{((cl.rental_cash as number) || 0).toLocaleString()}</span></p>
               <p><strong>지팡이 환불</strong><span>¥{((cl.wand_refund as number) || 0).toLocaleString()}</span></p>
               <p><strong>QR 차액</strong><span style={`color:${(cl.qr_difference_amount as number) === 0 ? '#166534' : '#dc2626'}`}>¥{(cl.qr_difference_amount as number).toLocaleString()}</span></p>
+              <p><strong>작성자</strong><span>{closingStaffName}</span></p>
               <p><strong>메모</strong><span>{(cl.note as string) || "-"}</span></p>
             </div>
 
             <div style="margin-top:12px;padding:10px;background:#f5f5f4;border-radius:6px;font-size:13px;color:#37352f">
               {(() => {
-                const diff = cl.difference_amount as number;
                 const typeLabel = CLOSING_TYPE_LABELS[cl.closing_type as string] || cl.closing_type as string;
-                return `${typeLabel} 정산현금 (¥${(cl.total_amount as number).toLocaleString()} / ${diff > 0 ? "+" : ""}${diff.toLocaleString()}엔)`;
+                return `${typeLabel} 정산현금 (¥${(cl.total_amount as number).toLocaleString()} / ${differenceAmount > 0 ? "+" : ""}${differenceAmount.toLocaleString()}엔)`;
               })()}
             </div>
 
@@ -351,7 +553,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
                   <tr><th>시간</th><th>행동</th><th>직원</th></tr>
                 </thead>
                 <tbody>
-                  {audits.results.map((a: Record<string, unknown>) => (
+                  {auditRows.map((a: Record<string, unknown>) => (
                     <tr>
                       <td>{a.created_at ? new Date(a.created_at as string + "Z").toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</td>
                       <td>{AUDIT_ACTION_LABELS[a.action as string] || a.action as string}</td>
@@ -397,7 +599,7 @@ ops.get("/staff/cash-closing/:id/edit", async (c) => {
                 <div class="cash-denom-grid">
                   {DENOMS.map((d) => (
                     <label class="cash-denom-item">
-                      <span>¥{d}</span>
+                      <span>{formatDenominationLabel(d)}</span>
                       <input class="control" type="number" name={`count_${d}`} defaultValue={String(cl[`count_${d}`] ?? 0)} min="0" />
                     </label>
                   ))}
@@ -468,33 +670,27 @@ ops.post("/staff/cash-closing/:id/edit", async (c) => {
   const actualQrAmount = parseInt(String(body.actual_qr_amount || "0"), 10);
   const rentalCash = parseInt(String(body.rental_cash || "0"), 10) || 0;
   const wandRefund = parseInt(String(body.wand_refund || "0"), 10) || 0;
-  const actualAmount = totalAmount + actualQrAmount;
+  const actualAmount = (totalAmount - STARTING_FLOAT) + actualQrAmount;
 
   const cl = existing as Record<string, unknown>;
-  const expectedAmount = cl.expected_amount as number;
+  const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, cl.business_date as string);
+  const expectedAmount = autoSales?.totalAmount ?? ((cl.expected_amount as number) || 0);
   const differenceAmount = actualAmount - expectedAmount;
-  // Recalculate QR difference from auto sales
-  const businessDate = cl.business_date as string;
-  const autoSales = await c.env.DB.prepare(
-    `SELECT SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as auto_qr
-     FROM luggage_orders
-     WHERE date(created_at, '+9 hours') = ? AND status IN ('PAID', 'PICKED_UP')`
-  ).bind(businessDate).first<{ auto_qr: number }>();
-  const qrDiff = actualQrAmount - (autoSales?.auto_qr ?? 0);
+  const qrDiff = actualQrAmount - (autoSales?.qrAmount ?? 0);
 
   await c.env.DB.prepare(
     `UPDATE luggage_cash_closings SET
        count_10000 = ?, count_5000 = ?, count_2000 = ?, count_1000 = ?, count_500 = ?,
        count_100 = ?, count_50 = ?, count_10 = ?, count_5 = ?, count_1 = ?,
        total_amount = ?, paypay_amount = ?, actual_qr_amount = ?,
-       actual_amount = ?, difference_amount = ?, qr_difference_amount = ?,
+       actual_amount = ?, check_auto_amount = ?, expected_amount = ?, difference_amount = ?, qr_difference_amount = ?,
        rental_cash = ?, wand_refund = ?,
        note = ?, updated_at = datetime('now')
      WHERE closing_id = ?`
   )
     .bind(
       ...denomValues, totalAmount, paypayAmount, actualQrAmount,
-      actualAmount, differenceAmount, qrDiff,
+      actualAmount, expectedAmount, expectedAmount, differenceAmount, qrDiff,
       rentalCash, wandRefund,
       String(body.note || "") || null, closingId
     )
@@ -512,19 +708,14 @@ ops.get("/staff/api/cash-closing/auto-sales", async (c) => {
   const businessDate = c.req.query("date") || "";
   if (!businessDate) return c.json({ error: "date required" }, 400);
 
-  const result = await c.env.DB.prepare(
-    `SELECT
-       SUM(CASE WHEN payment_method = 'CASH' THEN prepaid_amount + extra_amount ELSE 0 END) as cash_amount,
-       SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as qr_amount,
-       SUM(prepaid_amount + extra_amount) as total_amount,
-       COUNT(*) as order_count
-     FROM luggage_orders
-     WHERE date(created_at, '+9 hours') = ? AND status IN ('PAID', 'PICKED_UP')`
-  )
-    .bind(businessDate)
-    .first();
-
-  return c.json(result || { cash_amount: 0, qr_amount: 0, total_amount: 0, order_count: 0 });
+  const result = await resolveAutoSalesSummaryForDate(c.env.DB, businessDate);
+  return c.json(result ? {
+    cash_amount: result.cashAmount,
+    qr_amount: result.qrAmount,
+    total_amount: result.totalAmount,
+    order_count: result.orderCount,
+    source: result.source,
+  } : { cash_amount: 0, qr_amount: 0, total_amount: 0, order_count: 0, source: "daily_sales" });
 });
 
 // ============================================================
@@ -542,50 +733,83 @@ ops.get("/staff/handover", async (c) => {
   // Fetch notes with author names, read status, comments, edits, and experience visits in parallel
   const [notes, reads, comments] = await Promise.all([
     c.env.DB.prepare(
-      `SELECT n.*, COALESCE(u.display_name, u.username) as author_name
-       FROM luggage_handover_notes n
-       LEFT JOIN user_profiles u ON n.staff_id = u.id
-       ORDER BY n.is_pinned DESC, n.created_at DESC LIMIT 50`
-    ).all(),
+      `SELECT *
+       FROM luggage_handover_notes
+       ORDER BY is_pinned DESC, created_at DESC LIMIT 50`
+    ).all<Record<string, unknown>>(),
     c.env.DB.prepare(
-      `SELECT r.note_id, r.staff_id, COALESCE(u.display_name, u.username) as reader_name
-       FROM luggage_handover_reads r
-       LEFT JOIN user_profiles u ON r.staff_id = u.id`
-    ).all<{ note_id: number; staff_id: string; reader_name: string }>(),
+      `SELECT note_id, staff_id
+       FROM luggage_handover_reads`
+    ).all<{ note_id: number; staff_id: string }>(),
     c.env.DB.prepare(
-      `SELECT c.*, COALESCE(u.display_name, u.username) as author_name
-       FROM luggage_handover_comments c
-       LEFT JOIN user_profiles u ON c.staff_id = u.id
-       ORDER BY c.created_at ASC`
-    ).all(),
+      `SELECT *
+       FROM luggage_handover_comments
+       ORDER BY created_at ASC`
+    ).all<Record<string, unknown>>(),
   ]);
   const edits = await c.env.DB.prepare(
-    `SELECT e.note_id, e.staff_id, COALESCE(u.display_name, u.username) as editor_name, e.created_at
-     FROM luggage_handover_edits e
-     LEFT JOIN user_profiles u ON e.staff_id = u.id
-     ORDER BY e.created_at DESC`
-  ).all<{ note_id: number; staff_id: string; editor_name: string; created_at: string }>();
+    `SELECT note_id, staff_id, created_at
+     FROM luggage_handover_edits
+     ORDER BY created_at DESC`
+  ).all<{ note_id: number; staff_id: string; created_at: string }>();
   const expVisits = await c.env.DB.prepare(
-    `SELECT v.*, COALESCE(u.display_name, u.username) as creator_name, COALESCE(p.display_name, p.username) as processor_name
-     FROM luggage_experience_visits v
-     LEFT JOIN user_profiles u ON v.created_by_staff_id = u.id
-     LEFT JOIN user_profiles p ON v.processed_by_staff_id = p.id
-     ORDER BY v.scheduled_date DESC, v.created_at DESC LIMIT 50`
-  ).all();
+    `SELECT *
+     FROM luggage_experience_visits
+     ORDER BY scheduled_date DESC, created_at DESC LIMIT 50`
+  ).all<Record<string, unknown>>();
+  const handoverStaffNameMap = await fetchStaffNamesByIds(
+    c.env,
+    uniqueStaffIds([
+      ...notes.results.map((note) => note.staff_id as string | null | undefined),
+      ...reads.results.map((read) => read.staff_id),
+      ...comments.results.map((comment) => comment.staff_id as string | null | undefined),
+      ...edits.results.map((edit) => edit.staff_id),
+      ...expVisits.results.flatMap((visit) => [
+        visit.created_by_staff_id as string | null | undefined,
+        visit.processed_by_staff_id as string | null | undefined,
+      ]),
+    ]),
+  );
+  const noteRows = notes.results.map((note) => ({
+    ...note,
+    author_name: (note.staff_id as string | null)
+      ? handoverStaffNameMap.get(note.staff_id as string) || null
+      : null,
+  }));
+  const commentRows = comments.results.map((comment) => ({
+    ...comment,
+    author_name: (comment.staff_id as string | null)
+      ? handoverStaffNameMap.get(comment.staff_id as string) || null
+      : null,
+  }));
+  const editRows = edits.results.map((edit) => ({
+    ...edit,
+    editor_name: handoverStaffNameMap.get(edit.staff_id) || edit.staff_id,
+  }));
+  const expVisitRows = expVisits.results.map((visit) => ({
+    ...visit,
+    creator_name: (visit.created_by_staff_id as string | null)
+      ? handoverStaffNameMap.get(visit.created_by_staff_id as string) || null
+      : null,
+    processor_name: (visit.processed_by_staff_id as string | null)
+      ? handoverStaffNameMap.get(visit.processed_by_staff_id as string) || null
+      : null,
+  }));
   const readNoteIds = new Set(reads.results.filter((r) => r.staff_id === staff.id).map((r) => r.note_id));
   const readersByNote = new Map<number, string[]>();
   for (const r of reads.results) {
     if (!readersByNote.has(r.note_id)) readersByNote.set(r.note_id, []);
-    if (r.reader_name) readersByNote.get(r.note_id)!.push(r.reader_name);
+    const readerName = handoverStaffNameMap.get(r.staff_id) || r.staff_id;
+    readersByNote.get(r.note_id)!.push(readerName);
   }
   const commentsByNote = new Map<number, Record<string, unknown>[]>();
-  for (const cm of comments.results as Record<string, unknown>[]) {
+  for (const cm of commentRows as Record<string, unknown>[]) {
     const nid = cm.note_id as number;
     if (!commentsByNote.has(nid)) commentsByNote.set(nid, []);
     commentsByNote.get(nid)!.push(cm);
   }
   const editsByNote = new Map<number, { editor_name: string; created_at: string }[]>();
-  for (const ed of edits.results) {
+  for (const ed of editRows) {
     if (!editsByNote.has(ed.note_id)) editsByNote.set(ed.note_id, []);
     editsByNote.get(ed.note_id)!.push({ editor_name: ed.editor_name, created_at: ed.created_at });
   }
@@ -629,7 +853,7 @@ ops.get("/staff/handover", async (c) => {
           </section>
 
           <div class="ops-board">
-            {notes.results.map((note: Record<string, unknown>) => {
+            {noteRows.map((note: Record<string, unknown>) => {
               const noteId = note.note_id as number;
               const isRead = readNoteIds.has(noteId);
               const noteComments = commentsByNote.get(noteId) || [];
@@ -771,7 +995,7 @@ ops.get("/staff/handover", async (c) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {expVisits.results.map((v: Record<string, unknown>) => {
+                  {expVisitRows.map((v: Record<string, unknown>) => {
                     const st = v.status as string;
                     const stColor = st === "SCHEDULED" ? "#64748b" : st === "VISITED" ? "#2563eb" : st === "RECEIVED" ? "#166534" : "#dc2626";
                     const stLabel = st === "SCHEDULED" ? "예정" : st === "VISITED" ? "방문" : st === "RECEIVED" ? "수령완료" : "취소";
@@ -880,10 +1104,9 @@ ops.get("/staff/handover/:id/edit", async (c) => {
   const noteId = c.req.param("id");
   const staff = getStaff(c);
   const note = await c.env.DB.prepare(
-    `SELECT n.*, COALESCE(u.display_name, u.username) as author_name
-     FROM luggage_handover_notes n
-     LEFT JOIN user_profiles u ON n.staff_id = u.id
-     WHERE n.note_id = ?`
+    `SELECT *
+     FROM luggage_handover_notes
+     WHERE note_id = ?`
   ).bind(noteId).first<Record<string, unknown>>();
   if (!note) return c.html(<p>Not found</p>, 404);
   if ((note.staff_id as string) !== staff.id && staff.role !== "admin") return c.redirect("/staff/handover");

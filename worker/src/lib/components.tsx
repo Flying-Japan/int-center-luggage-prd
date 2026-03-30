@@ -1,28 +1,36 @@
 import type { FC } from "hono/jsx";
 
-export const StaffTopbar: FC<{ staff: { display_name: string | null; username: string | null; role: string }; active?: string }> = ({ staff, active }) => {
-  const links = [
+function getStaffNavLinks(role: string) {
+  const primaryLinks = [
     { href: "/staff/dashboard", label: "짐보관 신청" },
     { href: "/staff/cash-closing", label: "정산마감" },
-    { href: "/staff/handover", label: "인수인계" },
-    { href: "/staff/lost-found", label: "분실물" },
-    { href: "/staff/schedule", label: "스케줄" },
-    { href: "/staff/bug-report", label: "버그신고" },
   ];
   const editorLinks = [
     { href: "/staff/admin/sales", label: "매출관리" },
     { href: "/staff/admin/completion-message", label: "완료메시지" },
+  ];
+  const secondaryLinks = [
+    { href: "/staff/handover", label: "인수인계" },
+    { href: "/staff/lost-found", label: "분실물" },
+    { href: "/staff/schedule", label: "스케줄" },
+    { href: "/staff/bug-report", label: "버그신고" },
   ];
   const adminOnlyLinks = [
     { href: "/staff/admin/staff-accounts", label: "계정관리" },
     { href: "/staff/admin/customers", label: "고객목록" },
     { href: "/staff/admin/activity-logs", label: "활동로그" },
   ];
-  const allLinks = [
-    ...links,
-    ...(staff.role === "admin" || staff.role === "editor" ? editorLinks : []),
-    ...(staff.role === "admin" ? adminOnlyLinks : []),
+
+  return [
+    ...primaryLinks,
+    ...(role === "admin" || role === "editor" ? editorLinks : []),
+    ...secondaryLinks,
+    ...(role === "admin" ? adminOnlyLinks : []),
   ];
+}
+
+export const StaffTopbar: FC<{ staff: { display_name: string | null; username: string | null; role: string }; active?: string }> = ({ staff, active }) => {
+  const allLinks = getStaffNavLinks(staff.role);
   return (
     <header class="topbar">
       <div class="topbar-inner">
@@ -52,28 +60,10 @@ export const NewOrderAlert: FC = () => (
 );
 
 export const StaffMenu: FC<{ active: string; role: string }> = ({ active, role }) => {
-  const links = [
-    { href: "/staff/dashboard", label: "짐보관 신청" },
-    { href: "/staff/cash-closing", label: "정산마감" },
-    { href: "/staff/handover", label: "인수인계" },
-    { href: "/staff/lost-found", label: "분실물" },
-    { href: "/staff/schedule", label: "스케줄" },
-    { href: "/staff/bug-report", label: "버그신고" },
-  ];
-  const editorLinks = [
-    { href: "/staff/admin/sales", label: "매출관리" },
-    { href: "/staff/admin/completion-message", label: "완료메시지" },
-  ];
-  const adminOnlyLinks = [
-    { href: "/staff/admin/staff-accounts", label: "계정관리" },
-    { href: "/staff/admin/customers", label: "고객목록" },
-    { href: "/staff/admin/activity-logs", label: "활동로그" },
-  ];
+  const links = getStaffNavLinks(role);
   return (
     <nav class="staff-menu" aria-label="직원 메뉴">
       {links.map(l => <a class={`staff-menu-link${l.href === active ? " is-active" : ""}`} href={l.href}>{l.label}</a>)}
-      {(role === "admin" || role === "editor") && editorLinks.map(l => <a class={`staff-menu-link${l.href === active ? " is-active" : ""}`} href={l.href}>{l.label}</a>)}
-      {role === "admin" && adminOnlyLinks.map(l => <a class={`staff-menu-link${l.href === active ? " is-active" : ""}`} href={l.href}>{l.label}</a>)}
     </nav>
   );
 };
