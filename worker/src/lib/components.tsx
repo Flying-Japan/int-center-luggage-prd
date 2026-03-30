@@ -27,8 +27,11 @@ export const StaffTopbar: FC<{ staff: { display_name: string | null; username: s
     <header class="topbar">
       <div class="topbar-inner">
         <a class="brand" href="/staff/dashboard">
-          <img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="32" />
+          <img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="28" />
         </a>
+        <nav class="topbar-menu">
+          {allLinks.map(l => <a class={`topbar-menu-link${l.href === active ? " is-active" : ""}`} href={l.href}>{l.label}</a>)}
+        </nav>
         <nav class="pill-nav">
           <span class="pill-user">{staff.display_name || staff.username}</span>
           <form method="post" action="/staff/logout" style="display:inline">
@@ -36,9 +39,6 @@ export const StaffTopbar: FC<{ staff: { display_name: string | null; username: s
           </form>
         </nav>
       </div>
-      <nav class="topbar-menu">
-        {allLinks.map(l => <a class={`topbar-menu-link${l.href === active ? " is-active" : ""}`} href={l.href}>{l.label}</a>)}
-      </nav>
     </header>
   );
 };
