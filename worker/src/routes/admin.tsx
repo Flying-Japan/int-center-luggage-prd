@@ -101,12 +101,12 @@ admin.get("/staff/admin/sales", async (c) => {
     const dow = DOW_JP[new Date(r.sale_date + "T00:00:00+09:00").getDay()];
     const flags = getHolidayFlags(r.sale_date);
     const actual = actualByDate.get(r.sale_date);
-    // Luggage revenue must equal tender breakdown (cash + QR).
-    // Some synced rows have stale luggage_total values, so derive from tenders.
-    const cash = actual ? actual.cash : r.cash;
-    const qr = actual ? actual.qr : r.qr;
+    // Use DB data only if it has more orders than Sheets (avoids stale pre-migration dates)
+    const useDB = actual && actual.order_count > (r.people || 0) * 0.5;
+    const cash = useDB ? actual.cash : r.cash;
+    const qr = useDB ? actual.qr : r.qr;
     const luggage = cash + qr;
-    const orders = actual ? actual.order_count : r.people;
+    const orders = useDB ? actual.order_count : r.people;
     return {
       date: r.sale_date,
       dateJP: `${r.sale_date.replace(/-/g, "/")}/${dow}`,
