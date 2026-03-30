@@ -204,8 +204,8 @@ customer.get("/customer", (c) => {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="naver-site-verification" content="281f09e72fa3900dfffbd57ee5fd208a7872f818" />
         <meta name="google-site-verification" content="_IzvQgZRjJtht2Gfv7iEaIOJXGvq574QDs-SXYQONYU" />
-        <script async src="https://www.googletagmanager.com/gtag/js?id=G-EK9N14G73E" />
-        <script dangerouslySetInnerHTML={{__html: "window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-EK9N14G73E');"}} />
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-3Z1YBNGKL3" />
+        <script dangerouslySetInnerHTML={{__html: "window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-3Z1YBNGKL3');"}} />
         <title>{customerTitle[lang] || customerTitle.ko} — {t("brand_name", lang)}</title>
         <link rel="preconnect" href="https://cdn.jsdelivr.net" />
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
@@ -1575,8 +1575,8 @@ customer.get("/customer/orders/:id", async (c) => {
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{t("success_title", lang)} — {t("brand_name", lang)}</title>
-        <script async src="https://www.googletagmanager.com/gtag/js?id=G-EK9N14G73E" />
-        <script dangerouslySetInnerHTML={{__html: "window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-EK9N14G73E');"}} />
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-3Z1YBNGKL3" />
+        <script dangerouslySetInnerHTML={{__html: "window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-3Z1YBNGKL3');"}} />
         <link rel="preconnect" href="https://cdn.jsdelivr.net" />
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
         <style dangerouslySetInnerHTML={{__html: `
