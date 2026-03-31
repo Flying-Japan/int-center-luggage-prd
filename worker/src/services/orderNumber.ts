@@ -50,26 +50,14 @@ export async function buildOrderId(db: D1Database, nowUtc?: Date): Promise<strin
 }
 
 /**
- * Generate next tag_no for today using D1 luggage_daily_tag_counters.
+ * Derive tag_no from an order_id's sequence number.
+ * Since buildOrderId already handles reuse and sequential numbering,
+ * the tag_no is simply the NNN part of YYYYMMDD-NNN — keeping them in sync.
  */
-export async function buildTagNo(db: D1Database, nowUtc?: Date): Promise<string> {
-  const businessDate = nowUtc ? formatBusinessDate(nowUtc) : todayBusinessDate();
-
-  // Find lowest unused tag number (fills gaps from cancelled orders)
-  const used = await db
-    .prepare(
-      `SELECT CAST(tag_no AS INTEGER) as num FROM luggage_orders
-       WHERE order_id LIKE ? AND status != 'CANCELLED' AND tag_no IS NOT NULL
-       ORDER BY num ASC`
-    )
-    .bind(`${businessDate}-%`)
-    .all<{ num: number }>();
-
-  const usedSet = new Set(used.results.map((r) => r.num));
-  let next = 1;
-  while (usedSet.has(next)) next++;
-
-  return String(next);
+export function buildTagNo(orderId: string): string {
+  // Extract sequence number from order_id format YYYYMMDD-NNN
+  const seq = parseInt(orderId.split("-")[1], 10);
+  return String(seq);
 }
 
 /** Convert a UTC Date to JST business date string (YYYYMMDD). */

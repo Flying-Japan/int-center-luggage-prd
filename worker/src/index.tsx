@@ -76,10 +76,45 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
     return match ? decodeURIComponent(match[1]).split(",").filter(Boolean) : defaultFilters;
   })();
   const showAllPickedUp = c.req.query("show_all_picked_up") === "true";
+  const dateFrom = c.req.query("date_from") || "";
+  const dateTo = c.req.query("date_to") || "";
+  const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
+  const pageSize = 100;
   // Persist filter to cookie
   c.header("Set-Cookie", `luggage_filters=${encodeURIComponent(statusFilters.join(","))};Path=/staff;Max-Age=86400;SameSite=Lax`);
 
-  let sql = `WITH note_edits AS (
+  // Build shared WHERE clause and params (used for both count and list queries)
+  let whereClause = "WHERE 1=1";
+  const params: string[] = [];
+
+  if (statusFilters.length > 0) {
+    whereClause += ` AND status IN (${statusFilters.map(() => "?").join(",")})`;
+    params.push(...statusFilters);
+  }
+
+  if (q) {
+    whereClause += " AND (o.name LIKE ? OR o.order_id LIKE ? OR o.tag_no LIKE ? OR o.phone LIKE ?)";
+    const like = `%${q}%`;
+    params.push(like, like, like, like);
+  }
+
+  // Hide old PICKED_UP orders (>2 days) unless show_all_picked_up is checked
+  if (!showAllPickedUp) {
+    whereClause += " AND (o.status != 'PICKED_UP' OR o.created_at >= datetime('now', '-2 days'))";
+  }
+
+  if (dateFrom) {
+    whereClause += " AND o.created_at >= ?";
+    params.push(dateFrom + "T00:00:00Z");
+  }
+  if (dateTo) {
+    whereClause += " AND o.created_at <= ?";
+    params.push(dateTo + "T23:59:59Z");
+  }
+
+  const countSql = `SELECT COUNT(*) as total FROM luggage_orders o ${whereClause}`;
+
+  const sql = `WITH note_edits AS (
       SELECT a.order_id,
              a.staff_id as note_staff_id,
              a.timestamp as note_updated_at,
@@ -91,33 +126,15 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
            ne.note_staff_id, ne.note_updated_at
     FROM luggage_orders o
     LEFT JOIN note_edits ne ON ne.order_id = o.order_id AND ne.rn = 1
-    WHERE 1=1`;
-  const params: string[] = [];
-
-  if (statusFilters.length > 0) {
-    sql += ` AND status IN (${statusFilters.map(() => "?").join(",")})`;
-    params.push(...statusFilters);
-  }
-
-  if (q) {
-    sql += " AND (o.name LIKE ? OR o.order_id LIKE ? OR o.tag_no LIKE ? OR o.phone LIKE ?)";
-    const like = `%${q}%`;
-    params.push(like, like, like, like);
-  }
-
-  // Hide old PICKED_UP orders (>2 days) unless show_all_picked_up is checked
-  if (!showAllPickedUp) {
-    sql += " AND (o.status != 'PICKED_UP' OR o.created_at >= datetime('now', '-2 days'))";
-  }
-
-  sql += " ORDER BY o.created_at ASC LIMIT 100";
+    ${whereClause}
+    ORDER BY o.created_at ASC LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`;
 
   // Get today's referral counts
   const nowJSTRef = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const todayRef = nowJSTRef.toISOString().slice(0, 10);
 
-  // Run order list, counts, and referral counts in parallel
-  const [orders, countsResult, refRows] = await Promise.all([
+  // Run order list, counts, filtered count, and referral counts in parallel
+  const [orders, countsResult, filteredCountResult, refRows] = await Promise.all([
     c.env.DB.prepare(sql)
       .bind(...params)
       .all<{ order_id: string; name: string | null; tag_no: string | null; status: string; prepaid_amount: number; created_at: string; expected_pickup_at: string | null; note: string | null; payment_method: string | null; in_warehouse: number; parent_order_id: string | null; flying_pass_tier: string | null; note_staff_id: string | null; note_updated_at: string | null }>(),
@@ -130,10 +147,13 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
         COUNT(*) as total_count
       FROM luggage_orders`
     ).first<{ pending_count: number; paid_count: number; picked_up_count: number; cancelled_count: number; total_count: number }>(),
+    c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>(),
     c.env.DB.prepare("SELECT floor, count FROM luggage_referral_counts WHERE business_date = ?").bind(todayRef).all<{ floor: string; count: number }>(),
   ]);
 
   const counts = countsResult || { pending_count: 0, paid_count: 0, picked_up_count: 0, cancelled_count: 0, total_count: 0 };
+  const totalFiltered = filteredCountResult?.total ?? 0;
+  const totalPages = Math.ceil(totalFiltered / pageSize);
   const refCounts: Record<string, number> = { "4F": 0, "8F": 0 };
   for (const r of refRows.results) refCounts[r.floor] = r.count;
   const noteAuthorMap = await fetchStaffNamesByIds(c.env, orders.results.map((order) => order.note_staff_id));
@@ -206,6 +226,23 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     <input class="status-filter-input" type="checkbox" name="show_all_picked_up" value="true" checked={showAllPickedUp} />
                     <span>수령완료 전체보기</span>
                   </label>
+                </div>
+              </div>
+
+              <div class="staff-search-row">
+                <label class="field">
+                  <span class="field-label">기간</span>
+                  <input class="control" type="date" name="date_from" value={dateFrom} />
+                </label>
+                <span style="align-self:center;padding-top:20px">~</span>
+                <label class="field">
+                  <span class="field-label">&nbsp;</span>
+                  <input class="control" type="date" name="date_to" value={dateTo} />
+                </label>
+                <div style="display:flex;gap:4px;align-self:end;padding-bottom:2px">
+                  <button type="button" class="btn btn-sm" onclick="setDateRange('today')">오늘</button>
+                  <button type="button" class="btn btn-sm" onclick="setDateRange('week')">이번주</button>
+                  <button type="button" class="btn btn-sm" onclick="setDateRange('month')">이번달</button>
                 </div>
               </div>
 
@@ -330,7 +367,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                         <span class="editable" data-field="note" data-order-id={o.order_id}>{o.note || "-"}</span>
                         {o.note_author && <span style="display:block;font-size:10px;color:#999;margin-top:2px">{o.note_author} · {o.note_updated_at ? new Date(o.note_updated_at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}</span>}
                       </td>
-                      <td data-col-key="detail"><a class="btn btn-secondary btn-sm" href={`/staff/orders/${o.order_id}`}>상세</a></td>
+                      <td data-col-key="detail"><button class="btn btn-secondary btn-sm detail-toggle" data-order-id={o.order_id}>상세</button></td>
                     </tr>
                     );
                   })}
@@ -340,6 +377,59 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination */}
+            {totalFiltered > 0 && (
+              <div style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px">
+                <span style="color:#64748b">{`${totalFiltered}건 중 ${(page - 1) * pageSize + 1}-${Math.min(page * pageSize, totalFiltered)}`}</span>
+                {totalPages > 1 && (
+                  <div style="display:flex;gap:4px;margin-left:8px">
+                    {page > 1 && (
+                      <a class="btn btn-sm btn-secondary" href={`/staff/dashboard?${(() => {
+                        const u = new URLSearchParams();
+                        if (q) u.set("q", q);
+                        statusFilters.forEach((s) => u.append("status_filter", s));
+                        if (showAllPickedUp) u.set("show_all_picked_up", "true");
+                        if (dateFrom) u.set("date_from", dateFrom);
+                        if (dateTo) u.set("date_to", dateTo);
+                        u.set("filter_applied", "1");
+                        u.set("page", String(page - 1));
+                        return u.toString();
+                      })()}`}>이전</a>
+                    )}
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                      <a
+                        class={`btn btn-sm ${p === page ? "btn-primary" : "btn-secondary"}`}
+                        href={`/staff/dashboard?${(() => {
+                          const u = new URLSearchParams();
+                          if (q) u.set("q", q);
+                          statusFilters.forEach((s) => u.append("status_filter", s));
+                          if (showAllPickedUp) u.set("show_all_picked_up", "true");
+                          if (dateFrom) u.set("date_from", dateFrom);
+                          if (dateTo) u.set("date_to", dateTo);
+                          u.set("filter_applied", "1");
+                          u.set("page", String(p));
+                          return u.toString();
+                        })()}`}
+                      >{p}</a>
+                    ))}
+                    {page < totalPages && (
+                      <a class="btn btn-sm btn-secondary" href={`/staff/dashboard?${(() => {
+                        const u = new URLSearchParams();
+                        if (q) u.set("q", q);
+                        statusFilters.forEach((s) => u.append("status_filter", s));
+                        if (showAllPickedUp) u.set("show_all_picked_up", "true");
+                        if (dateFrom) u.set("date_from", dateFrom);
+                        if (dateTo) u.set("date_to", dateTo);
+                        u.set("filter_applied", "1");
+                        u.set("page", String(page + 1));
+                        return u.toString();
+                      })()}`}>다음</a>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
           {/* Manual order form */}
@@ -642,6 +732,90 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 },{passive:true});
               });
             }
+
+            /* ── Date range presets ── */
+            window.setDateRange=function(range){
+              var now=new Date(Date.now()+9*60*60*1000);
+              var y=now.getUTCFullYear(),m=String(now.getUTCMonth()+1).padStart(2,'0'),d=String(now.getUTCDate()).padStart(2,'0');
+              var today=y+'-'+m+'-'+d;
+              var fromEl=document.querySelector('[name=date_from]');
+              var toEl=document.querySelector('[name=date_to]');
+              toEl.value=today;
+              if(range==='today') fromEl.value=today;
+              else if(range==='week'){
+                var dow=now.getUTCDay();
+                var mon=new Date(now.getTime()-(dow===0?6:dow-1)*86400000);
+                fromEl.value=mon.toISOString().slice(0,10);
+              } else if(range==='month'){
+                fromEl.value=y+'-'+m+'-01';
+              }
+            };
+
+            /* ── Detail row toggle ── */
+            document.querySelectorAll('.detail-toggle').forEach(function(btn){
+              btn.addEventListener('click',function(){
+                var oid=btn.dataset.orderId;
+                var row=btn.closest('tr');
+                var existing=row.nextElementSibling;
+                if(existing&&existing.classList.contains('detail-row')){
+                  existing.remove();btn.textContent='상세';return;
+                }
+                btn.textContent='접기';
+                var detailRow=document.createElement('tr');
+                detailRow.className='detail-row';
+                var td=document.createElement('td');
+                td.colSpan=11;
+                td.style.cssText='padding:12px 16px;background:#f8fafc;font-size:12px;border-bottom:2px solid #e2e8f0';
+                td.textContent='로딩중...';
+                detailRow.appendChild(td);
+                row.after(detailRow);
+                fetch('/staff/api/orders?search='+encodeURIComponent(oid)+'&limit=1')
+                  .then(function(r){return r.json();})
+                  .then(function(d){
+                    if(!d.orders||!d.orders.length){td.textContent='데이터 없음';return;}
+                    var o=d.orders[0];
+                    var grid=document.createElement('div');
+                    grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px';
+                    var items=[
+                      ['접수번호',o.order_id],
+                      ['이름',o.name||'-'],
+                      ['전화',o.phone||'-'],
+                      ['짐번호',o.tag_no||'-'],
+                      ['상태',o.status],
+                      ['결제수단',o.payment_method||'-'],
+                      ['금액','¥'+Number(o.prepaid_amount||0).toLocaleString()],
+                      ['Flying Pass',o.flying_pass_tier||'NONE'],
+                      ['접수',o.created_at?new Date(o.created_at).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'}):'-'],
+                      ['예정 픽업',o.expected_pickup_at?new Date(o.expected_pickup_at).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'}):'-'],
+                      ['실제 픽업',o.actual_pickup_at?new Date(o.actual_pickup_at).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'}):'-'],
+                      ['보관일수',o.actual_storage_days||'-'],
+                      ['초과일',o.extra_days||0],
+                      ['추가요금','¥'+Number(o.extra_amount||0).toLocaleString()],
+                      ['비고',o.note||'-'],
+                      ['창고',o.in_warehouse?'O':'-']
+                    ];
+                    items.forEach(function(pair){
+                      var div=document.createElement('div');
+                      var strong=document.createElement('strong');
+                      strong.textContent=pair[0]+': ';
+                      div.appendChild(strong);
+                      div.appendChild(document.createTextNode(String(pair[1])));
+                      grid.appendChild(div);
+                    });
+                    td.textContent='';
+                    td.appendChild(grid);
+                    var linkWrap=document.createElement('div');
+                    linkWrap.style.marginTop='8px';
+                    var a=document.createElement('a');
+                    a.href='/staff/orders/'+o.order_id;
+                    a.className='btn btn-sm';
+                    a.style.textDecoration='none';
+                    a.textContent='전체 상세 페이지';
+                    linkWrap.appendChild(a);
+                    td.appendChild(linkWrap);
+                  });
+              });
+            });
 
           })();
         ` }} />

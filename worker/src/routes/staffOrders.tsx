@@ -498,7 +498,8 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
     return c.redirect("/staff/dashboard?error=이름, 전화번호, 짐 수량이 필요합니다");
   }
 
-  const [orderId, tagNo] = await Promise.all([buildOrderId(c.env.DB), buildTagNo(c.env.DB)]);
+  const orderId = await buildOrderId(c.env.DB);
+  const tagNo = buildTagNo(orderId);
   const { setQty, pricePerDay } = calculatePricePerDay(suitcaseQty, backpackQty);
 
   let expectedStorageDays = 1;

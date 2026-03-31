@@ -1451,11 +1451,9 @@ customer.post("/customer/submit", async (c) => {
     return redirect(t("pickup_note", lang));
   }
 
-  // --- Generate order ID and tag number (parallel) ---
-  const [orderId, tagNo] = await Promise.all([
-    buildOrderId(c.env.DB),
-    buildTagNo(c.env.DB),
-  ]);
+  // --- Generate order ID and tag number ---
+  const orderId = await buildOrderId(c.env.DB);
+  const tagNo = buildTagNo(orderId);
 
   // --- Upload images ---
   let idImageUrl: string | null = null;
