@@ -726,7 +726,6 @@ const NOTE_CATEGORY_LABELS: Record<string, string> = {
 // GET /staff/handover — Handover notes list
 ops.get("/staff/handover", async (c) => {
   const staff = getStaff(c);
-  const activeTab = c.req.query("tab") === "experience" ? "experience" : "handover";
   const handoverQ = c.req.query("handover_q") || "";
 
   // Build notes query with optional search filter
@@ -739,7 +738,7 @@ ops.get("/staff/handover", async (c) => {
   }
   notesSql += ` ORDER BY is_pinned DESC, created_at DESC LIMIT 50`;
 
-  // Fetch notes with author names, read status, comments, edits, and experience visits in parallel
+  // Fetch notes with author names, read status, comments, and edits in parallel
   const [notes, reads, comments] = await Promise.all([
     c.env.DB.prepare(notesSql).bind(...notesParams).all<Record<string, unknown>>(),
     c.env.DB.prepare(
@@ -757,11 +756,6 @@ ops.get("/staff/handover", async (c) => {
      FROM luggage_handover_edits
      ORDER BY created_at DESC`
   ).all<{ note_id: number; staff_id: string; created_at: string }>();
-  const expVisits = await c.env.DB.prepare(
-    `SELECT *
-     FROM luggage_experience_visits
-     ORDER BY scheduled_date DESC, created_at DESC LIMIT 50`
-  ).all<Record<string, unknown>>();
   const handoverStaffNameMap = await fetchStaffNamesByIds(
     c.env,
     uniqueStaffIds([
@@ -769,10 +763,6 @@ ops.get("/staff/handover", async (c) => {
       ...reads.results.map((read) => read.staff_id),
       ...comments.results.map((comment) => comment.staff_id as string | null | undefined),
       ...edits.results.map((edit) => edit.staff_id),
-      ...expVisits.results.flatMap((visit) => [
-        visit.created_by_staff_id as string | null | undefined,
-        visit.processed_by_staff_id as string | null | undefined,
-      ]),
     ]),
   );
   const noteRows = notes.results.map((note) => ({
@@ -790,15 +780,6 @@ ops.get("/staff/handover", async (c) => {
   const editRows = edits.results.map((edit) => ({
     ...edit,
     editor_name: handoverStaffNameMap.get(edit.staff_id) || edit.staff_id,
-  }));
-  const expVisitRows = expVisits.results.map((visit) => ({
-    ...visit,
-    creator_name: (visit.created_by_staff_id as string | null)
-      ? handoverStaffNameMap.get(visit.created_by_staff_id as string) || null
-      : null,
-    processor_name: (visit.processed_by_staff_id as string | null)
-      ? handoverStaffNameMap.get(visit.processed_by_staff_id as string) || null
-      : null,
   }));
   const readNoteIds = new Set(reads.results.filter((r) => r.staff_id === staff.id).map((r) => r.note_id));
   const readersByNote = new Map<number, string[]>();
@@ -826,23 +807,14 @@ ops.get("/staff/handover", async (c) => {
         <StaffTopbar staff={staff} active="/staff/handover" />
         <main class="container">
 
-          {/* Tab navigation */}
-          <div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:2px solid #e2e8f0;padding-bottom:0">
-            <a href="/staff/handover?tab=handover" style={`display:inline-block;padding:8px 20px;border-radius:6px 6px 0 0;font-weight:600;font-size:14px;text-decoration:none;border:2px solid ${activeTab === "handover" ? "#2563eb" : "#e2e8f0"};border-bottom:none;background:${activeTab === "handover" ? "#2563eb" : "#f8fafc"};color:${activeTab === "handover" ? "white" : "#64748b"};margin-bottom:-2px`}>인수인계</a>
-            <a href="/staff/handover?tab=experience" style={`display:inline-block;padding:8px 20px;border-radius:6px 6px 0 0;font-weight:600;font-size:14px;text-decoration:none;border:2px solid ${activeTab === "experience" ? "#2563eb" : "#e2e8f0"};border-bottom:none;background:${activeTab === "experience" ? "#2563eb" : "#f8fafc"};color:${activeTab === "experience" ? "white" : "#64748b"};margin-bottom:-2px`}>체험단 관리</a>
-          </div>
-
-          {activeTab === "handover" && (
-            <>
-              {/* Search */}
-              <section class="card" style="margin-bottom:12px">
-                <form method="get" action="/staff/handover" style="display:flex;gap:8px;align-items:center">
-                  <input type="hidden" name="tab" value="handover" />
-                  <input class="control" type="text" name="handover_q" placeholder="노트 검색..." value={handoverQ} style="flex:1" />
-                  <button class="btn btn-primary" type="submit">검색</button>
-                  {handoverQ && <a href="/staff/handover?tab=handover" class="btn btn-secondary">초기화</a>}
-                </form>
-              </section>
+          {/* Search */}
+          <section class="card" style="margin-bottom:12px">
+            <form method="get" action="/staff/handover" style="display:flex;gap:8px;align-items:center">
+              <input class="control" type="text" name="handover_q" placeholder="노트 검색..." value={handoverQ} style="flex:1" />
+              <button class="btn btn-primary" type="submit">검색</button>
+              {handoverQ && <a href="/staff/handover" class="btn btn-secondary">초기화</a>}
+            </form>
+          </section>
 
               <section class="card">
                 <h3 class="card-title">노트 작성</h3>
@@ -953,134 +925,170 @@ ops.get("/staff/handover", async (c) => {
                   );
                 })}
               </div>
-            </>
-          )}
 
-          {activeTab === "experience" && (
-            <section class="card">
-              <h3 class="card-title">체험단 관리</h3>
-              <form method="post" action="/staff/handover/experience" style="margin-bottom:16px">
-                <div class="grid2">
-                  <label class="field">
-                    <span class="field-label">방문자 이름</span>
-                    <input class="control" type="text" name="visitor_name" required />
-                  </label>
-                  <label class="field">
-                    <span class="field-label">유형</span>
-                    <select class="control" name="visitor_type">
-                      <option value="BLOGGER">블로거</option>
-                      <option value="INFLUENCER">인플루언서</option>
-                      <option value="YOUTUBER">유튜버</option>
-                      <option value="OTHER">기타</option>
-                    </select>
-                  </label>
-                </div>
-                <div class="grid2">
-                  <label class="field">
-                    <span class="field-label">방문 예정일</span>
-                    <input class="control" type="date" name="scheduled_date" required />
-                  </label>
-                  <label class="field">
-                    <span class="field-label">혜택 유형</span>
-                    <select class="control" name="benefit_type">
-                      <option value="">선택</option>
-                      <option value="GIFT_CARD">상품권</option>
-                      <option value="CASH">지원금</option>
-                      <option value="PRODUCT">물품</option>
-                      <option value="OTHER">기타</option>
-                    </select>
-                  </label>
-                </div>
-                <div class="grid2">
-                  <label class="field">
-                    <span class="field-label">혜택 금액/내용</span>
-                    <input class="control" type="text" name="benefit_amount" placeholder="예: ¥3,000" />
-                  </label>
-                  <label class="field">
-                    <span class="field-label">메모</span>
-                    <input class="control" type="text" name="note" placeholder="메모" />
-                  </label>
-                </div>
-                <button class="btn btn-primary" type="submit">등록</button>
-              </form>
+        </main>
+        <NewOrderAlert />
+      </body>
+    </html>
+  );
+});
 
-              <div class="table-wrap" style="overflow-x:auto">
-                <table style="font-size:12px;border-collapse:collapse;width:100%;min-width:860px">
-                  <thead>
-                    <tr style="background:#f1f5f9;border-bottom:2px solid #cbd5e1">
-                      <th style="padding:4px 6px;text-align:left;font-size:11px">방문자</th>
-                      <th style="padding:4px 6px;text-align:left;font-size:11px">유형</th>
-                      <th style="padding:4px 6px;text-align:left;font-size:11px">예정일</th>
-                      <th style="padding:4px 6px;text-align:left;font-size:11px">혜택</th>
-                      <th style="padding:4px 6px;text-align:left;font-size:11px">금액</th>
-                      <th style="padding:4px 6px;text-align:center;font-size:11px">상태</th>
-                      <th style="padding:4px 6px;text-align:left;font-size:11px">처리자</th>
-                      <th style="padding:4px 6px;text-align:left;font-size:11px">메모</th>
-                      <th style="padding:4px 6px;text-align:center;font-size:11px">액션</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {expVisitRows.map((v: Record<string, unknown>) => {
-                      const st = v.status as string;
-                      const stColor = st === "SCHEDULED" ? "#64748b" : st === "VISITED" ? "#2563eb" : st === "RECEIVED" ? "#166534" : "#dc2626";
-                      const stLabel = st === "SCHEDULED" ? "예정" : st === "VISITED" ? "방문" : st === "RECEIVED" ? "수령완료" : "취소";
-                      const vtLabel = (v.visitor_type as string) === "BLOGGER" ? "블로거" : (v.visitor_type as string) === "INFLUENCER" ? "인플루언서" : (v.visitor_type as string) === "YOUTUBER" ? "유튜버" : "기타";
-                      const btLabel = (v.benefit_type as string) === "GIFT_CARD" ? "상품권" : (v.benefit_type as string) === "CASH" ? "지원금" : (v.benefit_type as string) === "PRODUCT" ? "물품" : (v.benefit_type as string) === "OTHER" ? "기타" : "-";
-                      return (
-                        <tr style="border-bottom:1px solid #e2e8f0">
-                          <td style="padding:3px 6px;font-weight:600">{v.visitor_name as string}</td>
-                          <td style="padding:3px 6px">{vtLabel}</td>
-                          <td style="padding:3px 6px;white-space:nowrap">{v.scheduled_date as string}</td>
-                          <td style="padding:3px 6px">{btLabel}</td>
-                          <td style="padding:3px 6px">{(v.benefit_amount as string) || "-"}</td>
-                          <td style="padding:3px 6px;text-align:center"><span style={`display:inline-block;padding:1px 8px;border-radius:9999px;font-size:10px;font-weight:600;color:white;background:${stColor}`}>{stLabel}</span></td>
-                          <td style="padding:3px 6px;font-size:11px">{(v.processor_name as string) || (v.creator_name as string) || "-"}</td>
-                          <td style="padding:3px 6px;font-size:11px;color:#64748b;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{(v.note as string) || "-"}</td>
-                          <td style="padding:3px 6px;text-align:center;white-space:nowrap">
-                            {/* Detail inline expand */}
-                            <details style="display:inline-block;margin-right:2px;text-align:left">
-                              <summary class="btn btn-sm" style="font-size:10px;cursor:pointer;list-style:none">상세</summary>
-                              <div style="position:absolute;z-index:10;background:white;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px;min-width:220px;font-size:11px;color:#37352f;box-shadow:0 4px 12px rgba(0,0,0,0.1);margin-top:4px">
-                                <p style="margin:2px 0"><strong>방문자:</strong> {v.visitor_name as string}</p>
-                                <p style="margin:2px 0"><strong>유형:</strong> {vtLabel}</p>
-                                <p style="margin:2px 0"><strong>예정일:</strong> {v.scheduled_date as string}</p>
-                                <p style="margin:2px 0"><strong>혜택:</strong> {btLabel} / {(v.benefit_amount as string) || "-"}</p>
-                                <p style="margin:2px 0"><strong>상태:</strong> {stLabel}</p>
-                                <p style="margin:2px 0"><strong>메모:</strong> {(v.note as string) || "-"}</p>
-                                <p style="margin:2px 0"><strong>등록자:</strong> {(v.creator_name as string) || "-"}</p>
-                                <p style="margin:2px 0"><strong>처리자:</strong> {(v.processor_name as string) || "-"}</p>
-                                <p style="margin:2px 0"><strong>수령자:</strong> {(v.received_by as string) || "-"}</p>
-                                <p style="margin:2px 0"><strong>수령일시:</strong> {v.received_at ? new Date(v.received_at as string + "Z").toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}</p>
-                                <p style="margin:2px 0"><strong>등록일시:</strong> {v.created_at ? new Date(v.created_at as string + "Z").toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}</p>
-                                <p style="margin:2px 0"><strong>수정일시:</strong> {v.updated_at ? new Date(v.updated_at as string + "Z").toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}</p>
-                              </div>
-                            </details>
-                            <a href={`/staff/handover/experience/${v.visit_id}/edit`} class="btn btn-sm" style="font-size:10px;margin-right:2px;text-decoration:none">수정</a>
-                            {st === "SCHEDULED" && (
-                              <form method="post" action={`/staff/handover/experience/${v.visit_id}/visit`} style="display:inline">
-                                <button class="btn btn-sm" type="submit" style="font-size:10px">방문확인</button>
-                              </form>
-                            )}
-                            {(st === "SCHEDULED" || st === "VISITED") && (
-                              <form method="post" action={`/staff/handover/experience/${v.visit_id}/receive`} style="display:inline;margin-left:2px">
-                                <button class="btn btn-sm btn-primary" type="submit" style="font-size:10px">수령처리</button>
-                              </form>
-                            )}
-                            {st !== "CANCELLED" && st !== "RECEIVED" && (
-                              <form method="post" action={`/staff/handover/experience/${v.visit_id}/cancel`} style="display:inline;margin-left:2px">
-                                <button class="btn btn-sm btn-secondary" type="submit" style="font-size:10px">취소</button>
-                              </form>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+// GET /staff/experience — Experience visits list
+ops.get("/staff/experience", async (c) => {
+  const staff = getStaff(c);
+
+  const expVisits = await c.env.DB.prepare(
+    `SELECT *
+     FROM luggage_experience_visits
+     ORDER BY scheduled_date DESC, created_at DESC LIMIT 50`
+  ).all<Record<string, unknown>>();
+  const expStaffNameMap = await fetchStaffNamesByIds(
+    c.env,
+    uniqueStaffIds([
+      ...expVisits.results.flatMap((visit) => [
+        visit.created_by_staff_id as string | null | undefined,
+        visit.processed_by_staff_id as string | null | undefined,
+      ]),
+    ]),
+  );
+  const expVisitRows = expVisits.results.map((visit) => ({
+    ...visit,
+    creator_name: (visit.created_by_staff_id as string | null)
+      ? expStaffNameMap.get(visit.created_by_staff_id as string) || null
+      : null,
+    processor_name: (visit.processed_by_staff_id as string | null)
+      ? expStaffNameMap.get(visit.processed_by_staff_id as string) || null
+      : null,
+  }));
+
+  return c.html(
+    <html lang="ko">
+      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>체험단 관리</title></head>
+      <body class="staff-site">
+        <StaffTopbar staff={staff} active="/staff/experience" />
+        <main class="container">
+          <section class="card">
+            <h3 class="card-title">체험단 관리</h3>
+            <form method="post" action="/staff/handover/experience" style="margin-bottom:16px">
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">방문자 이름</span>
+                  <input class="control" type="text" name="visitor_name" required />
+                </label>
+                <label class="field">
+                  <span class="field-label">유형</span>
+                  <select class="control" name="visitor_type">
+                    <option value="BLOGGER">블로거</option>
+                    <option value="INFLUENCER">인플루언서</option>
+                    <option value="YOUTUBER">유튜버</option>
+                    <option value="OTHER">기타</option>
+                  </select>
+                </label>
               </div>
-            </section>
-          )}
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">방문 예정일</span>
+                  <input class="control" type="date" name="scheduled_date" required />
+                </label>
+                <label class="field">
+                  <span class="field-label">혜택 유형</span>
+                  <select class="control" name="benefit_type">
+                    <option value="">선택</option>
+                    <option value="GIFT_CARD">상품권</option>
+                    <option value="CASH">지원금</option>
+                    <option value="PRODUCT">물품</option>
+                    <option value="OTHER">기타</option>
+                  </select>
+                </label>
+              </div>
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">혜택 금액/내용</span>
+                  <input class="control" type="text" name="benefit_amount" placeholder="예: ¥3,000" />
+                </label>
+                <label class="field">
+                  <span class="field-label">메모</span>
+                  <input class="control" type="text" name="note" placeholder="메모" />
+                </label>
+              </div>
+              <button class="btn btn-primary" type="submit">등록</button>
+            </form>
 
+            <div class="table-wrap" style="overflow-x:auto">
+              <table style="font-size:12px;border-collapse:collapse;width:100%;min-width:860px">
+                <thead>
+                  <tr style="background:#f1f5f9;border-bottom:2px solid #cbd5e1">
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">방문자</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">유형</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">예정일</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">혜택</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">금액</th>
+                    <th style="padding:4px 6px;text-align:center;font-size:11px">상태</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">처리자</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">메모</th>
+                    <th style="padding:4px 6px;text-align:center;font-size:11px">액션</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {expVisitRows.map((v: Record<string, unknown>) => {
+                    const st = v.status as string;
+                    const stColor = st === "SCHEDULED" ? "#64748b" : st === "VISITED" ? "#2563eb" : st === "RECEIVED" ? "#166534" : "#dc2626";
+                    const stLabel = st === "SCHEDULED" ? "예정" : st === "VISITED" ? "방문" : st === "RECEIVED" ? "수령완료" : "취소";
+                    const vtLabel = (v.visitor_type as string) === "BLOGGER" ? "블로거" : (v.visitor_type as string) === "INFLUENCER" ? "인플루언서" : (v.visitor_type as string) === "YOUTUBER" ? "유튜버" : "기타";
+                    const btLabel = (v.benefit_type as string) === "GIFT_CARD" ? "상품권" : (v.benefit_type as string) === "CASH" ? "지원금" : (v.benefit_type as string) === "PRODUCT" ? "물품" : (v.benefit_type as string) === "OTHER" ? "기타" : "-";
+                    return (
+                      <tr style="border-bottom:1px solid #e2e8f0">
+                        <td style="padding:3px 6px;font-weight:600">{v.visitor_name as string}</td>
+                        <td style="padding:3px 6px">{vtLabel}</td>
+                        <td style="padding:3px 6px;white-space:nowrap">{v.scheduled_date as string}</td>
+                        <td style="padding:3px 6px">{btLabel}</td>
+                        <td style="padding:3px 6px">{(v.benefit_amount as string) || "-"}</td>
+                        <td style="padding:3px 6px;text-align:center"><span style={`display:inline-block;padding:1px 8px;border-radius:9999px;font-size:10px;font-weight:600;color:white;background:${stColor}`}>{stLabel}</span></td>
+                        <td style="padding:3px 6px;font-size:11px">{(v.processor_name as string) || (v.creator_name as string) || "-"}</td>
+                        <td style="padding:3px 6px;font-size:11px;color:#64748b;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{(v.note as string) || "-"}</td>
+                        <td style="padding:3px 6px;text-align:center;white-space:nowrap">
+                          {/* Detail inline expand */}
+                          <details style="display:inline-block;margin-right:2px;text-align:left">
+                            <summary class="btn btn-sm" style="font-size:10px;cursor:pointer;list-style:none">상세</summary>
+                            <div style="position:absolute;z-index:10;background:white;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px;min-width:220px;font-size:11px;color:#37352f;box-shadow:0 4px 12px rgba(0,0,0,0.1);margin-top:4px">
+                              <p style="margin:2px 0"><strong>방문자:</strong> {v.visitor_name as string}</p>
+                              <p style="margin:2px 0"><strong>유형:</strong> {vtLabel}</p>
+                              <p style="margin:2px 0"><strong>예정일:</strong> {v.scheduled_date as string}</p>
+                              <p style="margin:2px 0"><strong>혜택:</strong> {btLabel} / {(v.benefit_amount as string) || "-"}</p>
+                              <p style="margin:2px 0"><strong>상태:</strong> {stLabel}</p>
+                              <p style="margin:2px 0"><strong>메모:</strong> {(v.note as string) || "-"}</p>
+                              <p style="margin:2px 0"><strong>등록자:</strong> {(v.creator_name as string) || "-"}</p>
+                              <p style="margin:2px 0"><strong>처리자:</strong> {(v.processor_name as string) || "-"}</p>
+                              <p style="margin:2px 0"><strong>수령자:</strong> {(v.received_by as string) || "-"}</p>
+                              <p style="margin:2px 0"><strong>수령일시:</strong> {v.received_at ? new Date(v.received_at as string + "Z").toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}</p>
+                              <p style="margin:2px 0"><strong>등록일시:</strong> {v.created_at ? new Date(v.created_at as string + "Z").toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}</p>
+                              <p style="margin:2px 0"><strong>수정일시:</strong> {v.updated_at ? new Date(v.updated_at as string + "Z").toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}</p>
+                            </div>
+                          </details>
+                          <a href={`/staff/handover/experience/${v.visit_id}/edit`} class="btn btn-sm" style="font-size:10px;margin-right:2px;text-decoration:none">수정</a>
+                          {st === "SCHEDULED" && (
+                            <form method="post" action={`/staff/handover/experience/${v.visit_id}/visit`} style="display:inline">
+                              <button class="btn btn-sm" type="submit" style="font-size:10px">방문확인</button>
+                            </form>
+                          )}
+                          {(st === "SCHEDULED" || st === "VISITED") && (
+                            <form method="post" action={`/staff/handover/experience/${v.visit_id}/receive`} style="display:inline;margin-left:2px">
+                              <button class="btn btn-sm btn-primary" type="submit" style="font-size:10px">수령처리</button>
+                            </form>
+                          )}
+                          {st !== "CANCELLED" && st !== "RECEIVED" && (
+                            <form method="post" action={`/staff/handover/experience/${v.visit_id}/cancel`} style="display:inline;margin-left:2px">
+                              <button class="btn btn-sm btn-secondary" type="submit" style="font-size:10px">취소</button>
+                            </form>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </main>
         <NewOrderAlert />
       </body>
@@ -1308,7 +1316,7 @@ ops.post("/staff/handover/experience", async (c) => {
     staff.id
   ).run();
 
-  return c.redirect("/staff/handover?tab=experience");
+  return c.redirect("/staff/experience");
 });
 
 // POST /staff/handover/experience/:id/visit — Mark as visited
@@ -1317,7 +1325,7 @@ ops.post("/staff/handover/experience/:id/visit", async (c) => {
   await c.env.DB.prepare(
     "UPDATE luggage_experience_visits SET status = 'VISITED', updated_at = datetime('now') WHERE visit_id = ? AND status = 'SCHEDULED'"
   ).bind(visitId).run();
-  return c.redirect("/staff/handover?tab=experience");
+  return c.redirect("/staff/experience");
 });
 
 // POST /staff/handover/experience/:id/receive — Mark as received
@@ -1328,7 +1336,7 @@ ops.post("/staff/handover/experience/:id/receive", async (c) => {
     `UPDATE luggage_experience_visits SET status = 'RECEIVED', processed_by_staff_id = ?, received_by = ?, received_at = datetime('now'), updated_at = datetime('now')
      WHERE visit_id = ? AND status IN ('SCHEDULED', 'VISITED')`
   ).bind(staff.id, getStaff(c).display_name || getStaff(c).username, visitId).run();
-  return c.redirect("/staff/handover?tab=experience");
+  return c.redirect("/staff/experience");
 });
 
 // POST /staff/handover/experience/:id/cancel — Cancel visit
@@ -1337,7 +1345,7 @@ ops.post("/staff/handover/experience/:id/cancel", async (c) => {
   await c.env.DB.prepare(
     "UPDATE luggage_experience_visits SET status = 'CANCELLED', updated_at = datetime('now') WHERE visit_id = ? AND status IN ('SCHEDULED', 'VISITED')"
   ).bind(visitId).run();
-  return c.redirect("/staff/handover?tab=experience");
+  return c.redirect("/staff/experience");
 });
 
 // GET /staff/handover/experience/:id/edit — Edit form for experience visit
@@ -1400,7 +1408,7 @@ ops.get("/staff/handover/experience/:id/edit", async (c) => {
               </div>
               <div style="display:flex;gap:8px;margin-top:8px">
                 <button class="btn btn-primary" type="submit">수정 저장</button>
-                <a href="/staff/handover?tab=experience" class="btn btn-secondary">취소</a>
+                <a href="/staff/experience" class="btn btn-secondary">취소</a>
               </div>
             </form>
           </section>
@@ -1432,7 +1440,7 @@ ops.post("/staff/handover/experience/:id/update", async (c) => {
     visitId
   ).run();
 
-  return c.redirect("/staff/handover?tab=experience");
+  return c.redirect("/staff/experience");
 });
 
 // ============================================================

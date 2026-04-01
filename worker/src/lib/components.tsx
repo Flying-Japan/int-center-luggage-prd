@@ -11,6 +11,7 @@ function getStaffNavLinks(role: string) {
   ];
   const secondaryLinks = [
     { href: "/staff/handover", label: "인수인계" },
+    { href: "/staff/experience", label: "체험단" },
     { href: "/staff/lost-found", label: "분실물" },
     { href: "/staff/schedule", label: "스케줄" },
     { href: "/staff/bug-report", label: "버그신고" },
