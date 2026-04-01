@@ -16,7 +16,7 @@ import { calculateStorageDays } from "../services/storage";
 import { buildOrderId, buildTagNo } from "../services/orderNumber";
 
 const customer = new Hono<AppType>();
-const LUGGAGE_GA4_MEASUREMENT_ID = "G-DLKGF3C7CS";
+const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
 
 // ---------------------------------------------------------------------------
 // GET /customer — Intake form (faithful port of original FastAPI template)

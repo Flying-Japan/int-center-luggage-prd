@@ -7,7 +7,7 @@ export async function securityHeaders(c: Context, next: Next) {
   await next();
   c.res.headers.set("X-Frame-Options", "DENY");
   c.res.headers.set("X-Content-Type-Options", "nosniff");
-  c.res.headers.set("Referrer-Policy", "no-referrer");
+  c.res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   c.res.headers.set("X-XSS-Protection", "1; mode=block");
   c.res.headers.set(
     "Permissions-Policy",
