@@ -1055,7 +1055,7 @@ tr.is-in-warehouse { border-left: 3px solid #94a3b8; }
 .detail-action-grid {
   margin-top: 12px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
