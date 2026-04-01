@@ -47,11 +47,11 @@ admin.get("/staff/admin/sales", async (c) => {
     `SELECT
       date(created_at, '+9 hours') as sale_date,
       COUNT(*) as order_count,
-      SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) THEN prepaid_amount + extra_amount ELSE 0 END) as cash,
-      SUM(CASE WHEN payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as qr,
-      SUM(prepaid_amount + extra_amount) as luggage_total
+      SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash,
+      SUM(CASE WHEN payment_method = 'PAY_QR' THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr,
+      SUM(COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount) as luggage_total
     FROM luggage_orders
-    WHERE status IN ('PAID', 'PICKED_UP')${actualWhereClause}
+    WHERE status IN ('PAID', 'PICKED_UP') AND manual_entry = 0${actualWhereClause}
     GROUP BY sale_date`
   ).bind(...actualParams).all<{ sale_date: string; order_count: number; cash: number; qr: number; luggage_total: number }>();
 
@@ -129,13 +129,13 @@ admin.get("/staff/admin/sales", async (c) => {
        COUNT(*) as order_count,
        SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN 1 ELSE 0 END) as paid_count,
        SUM(CASE WHEN status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') AND (payment_method = 'CASH' OR payment_method IS NULL) THEN prepaid_amount + extra_amount ELSE 0 END) as cash_total,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') AND payment_method = 'PAY_QR' THEN prepaid_amount + extra_amount ELSE 0 END) as qr_total,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN prepaid_amount + extra_amount ELSE 0 END) as revenue_total,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') AND (payment_method = 'CASH' OR payment_method IS NULL) THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash_total,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') AND payment_method = 'PAY_QR' THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr_total,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as revenue_total,
        SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN suitcase_qty ELSE 0 END) as suitcase_total,
        SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN backpack_qty ELSE 0 END) as backpack_total
      FROM luggage_orders
-     WHERE date(created_at, '+9 hours') = ?`
+     WHERE date(created_at, '+9 hours') = ? AND manual_entry = 0`
   ).bind(todayJST).first<{
     order_count: number; paid_count: number; pending_count: number;
     cash_total: number; qr_total: number; revenue_total: number;
@@ -147,11 +147,11 @@ admin.get("/staff/admin/sales", async (c) => {
   const todayLuggageRT = await c.env.DB.prepare(
     `SELECT
        COUNT(*) as people,
-       SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) AND status IN ('PAID','PICKED_UP') THEN prepaid_amount + extra_amount ELSE 0 END) as cash,
-       SUM(CASE WHEN payment_method = 'PAY_QR' AND status IN ('PAID','PICKED_UP') THEN prepaid_amount + extra_amount ELSE 0 END) as qr,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN prepaid_amount + extra_amount ELSE 0 END) as luggage_total
+       SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) AND status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash,
+       SUM(CASE WHEN payment_method = 'PAY_QR' AND status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as luggage_total
      FROM luggage_orders
-     WHERE date(created_at, '+9 hours') = ? AND status != 'CANCELLED'`
+     WHERE date(created_at, '+9 hours') = ? AND status != 'CANCELLED' AND manual_entry = 0`
   ).bind(todayJST).first<{ people: number; cash: number; qr: number; luggage_total: number }>();
   const tlrt = todayLuggageRT || { people: 0, cash: 0, qr: 0, luggage_total: 0 };
 
