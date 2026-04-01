@@ -145,7 +145,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
         SUM(CASE WHEN status = 'PICKED_UP' THEN 1 ELSE 0 END) as picked_up_count,
         SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) as cancelled_count,
         COUNT(*) as total_count
-      FROM luggage_orders`
+      FROM luggage_orders WHERE manual_entry = 0`
     ).first<{ pending_count: number; paid_count: number; picked_up_count: number; cancelled_count: number; total_count: number }>(),
     c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>(),
     c.env.DB.prepare("SELECT floor, count FROM luggage_referral_counts WHERE business_date = ?").bind(todayRef).all<{ floor: string; count: number }>(),
@@ -200,69 +200,50 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
           </section>
 
           <section class="card">
-            <h3 class="card-title">접수 검색</h3>
             <form id="staff-search-form" method="get" action="/staff/dashboard" class="staff-search-form">
               <input type="hidden" name="filter_applied" value="1" />
-              <div class="field">
-                <span class="field-label">상태 (복수 선택)</span>
-                <div class="status-filter-buttons" id="status-filter-buttons">
-                  <label class="status-filter-chip">
-                    <input class="status-filter-input" type="checkbox" name="status_filter" value="PAYMENT_PENDING" checked={statusFilters.includes("PAYMENT_PENDING")} />
-                    <span>결제대기 ({counts.pending_count})</span>
-                  </label>
-                  <label class="status-filter-chip">
-                    <input class="status-filter-input" type="checkbox" name="status_filter" value="PAID" checked={statusFilters.includes("PAID")} />
-                    <span>결제완료 ({counts.paid_count})</span>
-                  </label>
-                  <label class="status-filter-chip">
-                    <input class="status-filter-input" type="checkbox" name="status_filter" value="PICKED_UP" checked={statusFilters.includes("PICKED_UP")} />
-                    <span>수령완료 ({counts.picked_up_count})</span>
-                  </label>
-                  <label class="status-filter-chip">
-                    <input class="status-filter-input" type="checkbox" name="status_filter" value="CANCELLED" checked={statusFilters.includes("CANCELLED")} />
-                    <span>취소 ({counts.cancelled_count})</span>
-                  </label>
-                  <label class="status-filter-chip">
-                    <input class="status-filter-input" type="checkbox" name="show_all_picked_up" value="true" checked={showAllPickedUp} />
-                    <span>수령완료 전체보기</span>
-                  </label>
+
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+                <label class="status-filter-chip">
+                  <input class="status-filter-input" type="checkbox" name="status_filter" value="PAYMENT_PENDING" checked={statusFilters.includes("PAYMENT_PENDING")} />
+                  <span>결제대기 ({counts.pending_count})</span>
+                </label>
+                <label class="status-filter-chip">
+                  <input class="status-filter-input" type="checkbox" name="status_filter" value="PAID" checked={statusFilters.includes("PAID")} />
+                  <span>결제완료 ({counts.paid_count})</span>
+                </label>
+                <label class="status-filter-chip">
+                  <input class="status-filter-input" type="checkbox" name="status_filter" value="PICKED_UP" checked={statusFilters.includes("PICKED_UP")} />
+                  <span>수령완료 ({counts.picked_up_count})</span>
+                </label>
+                <label class="status-filter-chip">
+                  <input class="status-filter-input" type="checkbox" name="status_filter" value="CANCELLED" checked={statusFilters.includes("CANCELLED")} />
+                  <span>취소 ({counts.cancelled_count})</span>
+                </label>
+                <label class="status-filter-chip">
+                  <input class="status-filter-input" type="checkbox" name="show_all_picked_up" value="true" checked={showAllPickedUp} />
+                  <span>수령완료 전체보기</span>
+                </label>
+              </div>
+
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+                <span style="font-size:12px;font-weight:600;color:#64748b;white-space:nowrap">기간</span>
+                <input class="control" type="date" name="date_from" value={dateFrom} style="max-width:150px;padding:6px 8px;font-size:13px" />
+                <span style="color:#94a3b8">~</span>
+                <input class="control" type="date" name="date_to" value={dateTo} style="max-width:150px;padding:6px 8px;font-size:13px" />
+                <div style="display:flex;gap:4px;margin-left:4px">
+                  <button type="button" class="btn btn-sm" onclick="setDateRange('today')" style="padding:4px 10px;font-size:11px">오늘</button>
+                  <button type="button" class="btn btn-sm" onclick="setDateRange('week')" style="padding:4px 10px;font-size:11px">이번주</button>
+                  <button type="button" class="btn btn-sm" onclick="setDateRange('month')" style="padding:4px 10px;font-size:11px">이번달</button>
                 </div>
               </div>
 
-              <div class="staff-search-row">
-                <label class="field">
-                  <span class="field-label">기간</span>
-                  <input class="control" type="date" name="date_from" value={dateFrom} />
-                </label>
-                <span style="align-self:center;padding-top:20px">~</span>
-                <label class="field">
-                  <span class="field-label">&nbsp;</span>
-                  <input class="control" type="date" name="date_to" value={dateTo} />
-                </label>
-                <div style="display:flex;gap:4px;align-self:end;padding-bottom:2px">
-                  <button type="button" class="btn btn-sm" onclick="setDateRange('today')">오늘</button>
-                  <button type="button" class="btn btn-sm" onclick="setDateRange('week')">이번주</button>
-                  <button type="button" class="btn btn-sm" onclick="setDateRange('month')">이번달</button>
-                </div>
-              </div>
-
-              <div class="staff-search-row">
-                <label class="field">
-                  <span class="field-label">검색</span>
-                  <input id="search-q" class="control" type="text" name="q" value={q} placeholder="이름, 접수번호, 전화, 짐번호" autocomplete="off" />
-                </label>
-                <label class="button-wrap staff-search-button-wrap">
-                  <span class="field-label sr-only">조회</span>
-                  <button class="btn btn-primary" type="submit">조회</button>
-                </label>
-                <label class="button-wrap">
-                  <span class="field-label sr-only">초기화</span>
-                  <a class="btn btn-secondary" href="/staff/dashboard?reset_filter=true" style="font-size:12px">초기화</a>
-                </label>
+              <div style="display:flex;align-items:center;gap:8px">
+                <input id="search-q" class="control" type="text" name="q" value={q} placeholder="이름, 접수번호, 전화, 짐번호" autocomplete="off" style="flex:1;padding:8px 12px;font-size:13px" />
+                <button class="btn btn-primary" type="submit" style="padding:8px 20px;font-size:13px;white-space:nowrap">조회</button>
+                <a class="btn btn-secondary" href="/staff/dashboard?reset_filter=true" style="padding:8px 14px;font-size:12px;text-decoration:none;white-space:nowrap">초기화</a>
               </div>
             </form>
-
-            <p class="card-desc">접수 순서대로(오래된 순) 정렬됩니다.</p>
 
             <div class="bulk-action-bar" id="bulk-bar">
               <span class="bulk-action-label" id="bulk-count">0건 선택</span>
