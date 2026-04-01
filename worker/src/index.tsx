@@ -175,7 +175,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
     note_author: order.note_staff_id ? noteAuthorMap.get(order.note_staff_id) || order.note_staff_id : null,
   }));
 
-  const tabUrl = (s: string, extra?: Record<string, string>) => {
+  const buildDashboardUrl = (s: string, extra?: Record<string, string>) => {
     const u = new URLSearchParams();
     u.set("status", s);
     if (dateFrom) u.set("date_from", dateFrom);
@@ -201,7 +201,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             <div>
               <p class="hero-kicker">Operations</p>
               <h2 class="hero-title">짐보관 신청</h2>
-              <p class="hero-desc">{staff.display_name || staff.username} ({staff.role === "admin" ? "ADMIN" : staff.role === "editor" ? "EDITOR" : "VIEWER"}) · 전체 {counts.total_count}건</p>
+              <p class="hero-desc">{staff.display_name || staff.username} ({({ admin: "ADMIN", editor: "EDITOR" } as Record<string, string>)[staff.role] || "VIEWER"}) · 전체 {counts.total_count}건</p>
             </div>
           </section>
 
@@ -234,7 +234,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 { key: "CANCELLED", label: "취소", count: counts.cancelled_count },
               ].map((tab) => (
                 <a
-                  href={tabUrl(tab.key)}
+                  href={buildDashboardUrl(tab.key)}
                   style={`display:inline-block;padding:10px 20px;font-size:14px;font-weight:600;text-decoration:none;border-bottom:3px solid ${status === tab.key ? "#2563eb" : "transparent"};color:${status === tab.key ? "#2563eb" : "#64748b"};margin-bottom:-2px;white-space:nowrap;transition:color 0.15s`}
                 >
                   {tab.label} ({tab.count})
@@ -245,7 +245,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             {/* Show "수령완료 전체보기" toggle when on PICKED_UP tab */}
             {status === "PICKED_UP" && (
               <div style="margin-bottom:12px">
-                <a href={tabUrl("PICKED_UP", showAllPickedUp ? {} : { show_all_picked_up: "true" })}
+                <a href={buildDashboardUrl("PICKED_UP", showAllPickedUp ? {} : { show_all_picked_up: "true" })}
                    class="btn btn-sm" style={`font-size:12px;text-decoration:none;${showAllPickedUp ? "background:#2563eb;color:white;border-color:#2563eb" : ""}`}>
                   {showAllPickedUp ? "최근만 보기" : "수령완료 전체보기"}
                 </a>
@@ -397,43 +397,16 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 {totalPages > 1 && (
                   <div style="display:flex;gap:4px;margin-left:8px">
                     {page > 1 && (
-                      <a class="btn btn-sm btn-secondary" href={`/staff/dashboard?${(() => {
-                        const u = new URLSearchParams();
-                        u.set("status", status);
-                        if (showAllPickedUp) u.set("show_all_picked_up", "true");
-                        if (dateFrom) u.set("date_from", dateFrom);
-                        if (dateTo) u.set("date_to", dateTo);
-                        if (q) u.set("q", q);
-                        u.set("page", String(page - 1));
-                        return u.toString();
-                      })()}`}>이전</a>
+                      <a class="btn btn-sm btn-secondary" href={buildDashboardUrl(status, { ...(showAllPickedUp ? { show_all_picked_up: "true" } : {}), page: String(page - 1) })}>이전</a>
                     )}
                     {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
                       <a
                         class={`btn btn-sm ${p === page ? "btn-primary" : "btn-secondary"}`}
-                        href={`/staff/dashboard?${(() => {
-                          const u = new URLSearchParams();
-                          u.set("status", status);
-                          if (showAllPickedUp) u.set("show_all_picked_up", "true");
-                          if (dateFrom) u.set("date_from", dateFrom);
-                          if (dateTo) u.set("date_to", dateTo);
-                          if (q) u.set("q", q);
-                          u.set("page", String(p));
-                          return u.toString();
-                        })()}`}
+                        href={buildDashboardUrl(status, { ...(showAllPickedUp ? { show_all_picked_up: "true" } : {}), page: String(p) })}
                       >{p}</a>
                     ))}
                     {page < totalPages && (
-                      <a class="btn btn-sm btn-secondary" href={`/staff/dashboard?${(() => {
-                        const u = new URLSearchParams();
-                        u.set("status", status);
-                        if (showAllPickedUp) u.set("show_all_picked_up", "true");
-                        if (dateFrom) u.set("date_from", dateFrom);
-                        if (dateTo) u.set("date_to", dateTo);
-                        if (q) u.set("q", q);
-                        u.set("page", String(page + 1));
-                        return u.toString();
-                      })()}`}>다음</a>
+                      <a class="btn btn-sm btn-secondary" href={buildDashboardUrl(status, { ...(showAllPickedUp ? { show_all_picked_up: "true" } : {}), page: String(page + 1) })}>다음</a>
                     )}
                   </div>
                 )}
