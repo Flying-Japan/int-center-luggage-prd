@@ -1620,8 +1620,12 @@ ops.post("/staff/lost-found/:id/update", async (c) => {
   return c.redirect("/staff/lost-found");
 });
 
-// POST /staff/lost-found/:id/delete — Delete entry
+// POST /staff/lost-found/:id/delete — Delete entry (editor/admin only)
 ops.post("/staff/lost-found/:id/delete", async (c) => {
+  const staff = getStaff(c);
+  if (staff.role !== "admin" && staff.role !== "editor") {
+    return c.redirect("/staff/lost-found");
+  }
   const entryId = c.req.param("id");
   await c.env.DB.prepare("DELETE FROM luggage_lost_found_entries WHERE entry_id = ?").bind(entryId).run();
   return c.redirect("/staff/lost-found");

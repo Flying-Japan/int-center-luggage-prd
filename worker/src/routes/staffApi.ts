@@ -232,6 +232,9 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
   if (!body.order_ids?.length || !body.action) {
     return c.json({ error: "order_ids and action required" }, 400);
   }
+  if (body.order_ids.length > 100) {
+    return c.json({ error: "최대 100건까지 일괄 처리 가능합니다" }, 400);
+  }
 
   const validActions: Record<string, string> = {
     cancel: "CANCELLED",

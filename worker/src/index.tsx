@@ -140,7 +140,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
     FROM luggage_orders o
     LEFT JOIN note_edits ne ON ne.order_id = o.order_id AND ne.rn = 1
     ${whereClause}
-    ORDER BY o.created_at ASC LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`;
+    ORDER BY o.created_at ASC LIMIT ? OFFSET ?`;
 
   // Get today's referral counts
   const nowJSTRef = new Date(Date.now() + 9 * 60 * 60 * 1000);
@@ -149,7 +149,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   // Run order list, counts, filtered count, and referral counts in parallel
   const [orders, countsResult, filteredCountResult, refRows] = await Promise.all([
     c.env.DB.prepare(sql)
-      .bind(...params)
+      .bind(...params, pageSize, (page - 1) * pageSize)
       .all<{ order_id: string; name: string | null; tag_no: string | null; status: string; prepaid_amount: number; created_at: string; expected_pickup_at: string | null; note: string | null; payment_method: string | null; in_warehouse: number; parent_order_id: string | null; flying_pass_tier: string | null; note_staff_id: string | null; note_updated_at: string | null }>(),
     c.env.DB.prepare(
       `SELECT

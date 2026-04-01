@@ -1870,12 +1870,15 @@ a { color: inherit; text-decoration: none; }
               </div>
             </div>
             <div style="text-align:center;display:grid;gap:14px;padding-top:16px">
-              <div class="completion-msg" dangerouslySetInnerHTML={{__html: primaryMsg
-                .replace(/\n/g, "<br/>")
-                .replace(/(접수 된 순서대로 성함을 불러드리겠습니다|We will call your name in the order received|受付順にお名前をお呼びします)/g, '<strong style="font-size:15px;color:var(--text)">$1</strong>')
-                .replace(/(¥[\d,]+)/g, '<strong style="color:var(--primary);font-size:115%">$1</strong>')
-                .replace(/(정확한 금액은 변동 될 수 있음|The exact amount may vary\.|正確な金額は変動する場合があります。)/g, '<span style="font-size:11px;color:var(--muted)">$1</span>')
-              }} />
+              <div class="completion-msg" dangerouslySetInnerHTML={{__html: (() => {
+                // Sanitize DB-sourced content first to prevent XSS, then apply safe formatting
+                const escaped = primaryMsg.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+                return escaped
+                  .replace(/\n/g, "<br/>")
+                  .replace(/(접수 된 순서대로 성함을 불러드리겠습니다|We will call your name in the order received|受付順にお名前をお呼びします)/g, '<strong style="font-size:15px;color:var(--text)">$1</strong>')
+                  .replace(/(¥[\d,]+)/g, '<strong style="color:var(--primary);font-size:115%">$1</strong>')
+                  .replace(/(정확한 금액은 변동 될 수 있음|The exact amount may vary\.|正確な金額は変動する場合があります。)/g, '<span style="font-size:11px;color:var(--muted)">$1</span>');
+              })() }} />
               <div style="margin:0;padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;text-align:center">
                 <p style="margin:0;font-size:12px;font-weight:700;color:#dc2626">{lang === "ja" ? "⚠️ クレジットカード・デビットカード不可" : lang === "en" ? "⚠️ Credit/debit cards NOT accepted" : "⚠️ 신용카드/체크카드 결제 불가"}</p>
                 <p style="margin:4px 0 0;font-size:11px;font-weight:600;color:#166534;line-height:1.6">{lang === "ja" ? "✅ 現金 / PayPay / 楽天Pay" : lang === "en" ? "✅ Cash / KakaoPay / NaverPay" : "✅ 현금 / 카카오페이 / 네이버페이"}<br/>{lang === "ja" ? "d払い / auPay / メルペイ" : lang === "en" ? "TossPay / PayPay" : "토스페이 / PayPay"}</p>
