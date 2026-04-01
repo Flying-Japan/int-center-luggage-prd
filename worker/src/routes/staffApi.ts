@@ -149,7 +149,7 @@ staffApi.post("/staff/api/orders/:id/inline-update", async (c) => {
         if (isNaN(tagNum) || tagNum < 1 || tagNum > 100) {
           return c.json({ error: "tag_no must be an integer between 1 and 100" }, 400);
         }
-        values.push(tagNum);
+        values.push(String(tagNum));
       } else {
         values.push(val);
       }

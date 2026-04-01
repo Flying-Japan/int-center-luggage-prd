@@ -324,7 +324,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                         <span class="editable" data-field="name" data-order-id={o.order_id}>{o.name || "-"}</span>
                         {o.parent_order_id && <span class="extension-badge">연장</span>}
                       </td>
-                      <td data-col-key="tag_no"><span class={`editable tag-pill ${tagColorClass(o.tag_no)}`} data-field="tag_no" data-order-id={o.order_id}>{o.tag_no || "-"}</span></td>
+                      <td data-col-key="tag_no"><span class={`editable tag-pill ${tagColorClass(o.tag_no)}`} data-field="tag_no" data-order-id={o.order_id}>{o.tag_no ? String(o.tag_no).replace(/\.0$/, "") : "-"}</span></td>
                       <td data-col-key="created_time">{o.created_at ? new Date(o.created_at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
                       <td data-col-key="price" class="price-cell" data-order-id={o.order_id} data-tier={o.flying_pass_tier || "NONE"} data-method={o.payment_method || "CASH"} style="cursor:pointer;position:relative"><span class="price-display">{`¥${o.prepaid_amount.toLocaleString()}`}</span></td>
                       <td data-col-key="pickup_time"><span class="editable" data-field="expected_pickup_at" data-order-id={o.order_id} data-type="datetime-local" data-raw-value={o.expected_pickup_at ? new Date(new Date(o.expected_pickup_at).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16) : ""}>{o.expected_pickup_at ? new Date(o.expected_pickup_at).toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</span></td>
@@ -767,7 +767,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       ['접수번호',o.order_id],
                       ['이름',o.name||'-'],
                       ['전화',o.phone||'-'],
-                      ['짐번호',o.tag_no||'-'],
+                      ['짐번호',o.tag_no?String(o.tag_no).replace(/\.0$/,''):'-'],
                       ['상태',o.status],
                       ['결제수단',o.payment_method||'-'],
                       ['금액','¥'+Number(o.prepaid_amount||0).toLocaleString()],
@@ -791,6 +791,26 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     });
                     td.textContent='';
                     td.appendChild(grid);
+                    // Images section
+                    var imgWrap=document.createElement('div');
+                    imgWrap.style.cssText='display:flex;gap:12px;margin-top:12px;flex-wrap:wrap';
+                    if(o.id_image_url){
+                      var idImg=document.createElement('div');
+                      idImg.innerHTML='<div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px">신분증</div>';
+                      var img1=document.createElement('img');
+                      img1.src=o.id_image_url;img1.style.cssText='max-width:200px;max-height:150px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer';
+                      img1.onclick=function(){window.open(o.id_image_url,'_blank')};
+                      idImg.appendChild(img1);imgWrap.appendChild(idImg);
+                    }
+                    if(o.luggage_image_url){
+                      var lugImg=document.createElement('div');
+                      lugImg.innerHTML='<div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px">짐 사진</div>';
+                      var img2=document.createElement('img');
+                      img2.src=o.luggage_image_url;img2.style.cssText='max-width:200px;max-height:150px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer';
+                      img2.onclick=function(){window.open(o.luggage_image_url,'_blank')};
+                      lugImg.appendChild(img2);imgWrap.appendChild(lugImg);
+                    }
+                    if(o.id_image_url||o.luggage_image_url) td.appendChild(imgWrap);
                     var linkWrap=document.createElement('div');
                     linkWrap.style.marginTop='8px';
                     var a=document.createElement('a');
