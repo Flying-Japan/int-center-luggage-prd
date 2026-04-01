@@ -17,7 +17,7 @@ export async function buildOrderId(db: D1Database, nowUtc?: Date, overnight?: bo
 
   // Two counters: same-day (1~95) and overnight/next-day+ (96~)
   const counterKey = overnight ? `${businessDate}-overnight` : businessDate;
-  const startSeq = overnight ? 93 : 1;
+  const startSeq = overnight ? 92 : 1;
 
   const row = await db
     .prepare(
