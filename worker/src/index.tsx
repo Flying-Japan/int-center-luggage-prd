@@ -66,22 +66,12 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
   // Parse query params for search/filter
   const q = c.req.query("q") || "";
-  const hasFilterParam = c.req.url.includes("status_filter") || c.req.url.includes("reset_filter") || c.req.url.includes("filter_applied");
-  const isReset = c.req.query("reset_filter") === "true";
-  const defaultFilters = ["PAYMENT_PENDING", "PAID"];
-  const statusFilters = isReset ? defaultFilters : hasFilterParam ? (c.req.queries("status_filter") || []) : (() => {
-    // Read from cookie if no URL params
-    const cookie = c.req.header("cookie") || "";
-    const match = cookie.match(/luggage_filters=([^;]+)/);
-    return match ? decodeURIComponent(match[1]).split(",").filter(Boolean) : defaultFilters;
-  })();
+  const status = c.req.query("status") || "ALL";
   const showAllPickedUp = c.req.query("show_all_picked_up") === "true";
   const dateFrom = c.req.query("date_from") || "";
   const dateTo = c.req.query("date_to") || "";
   const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
   const pageSize = 100;
-  // Persist filter to cookie
-  c.header("Set-Cookie", `luggage_filters=${encodeURIComponent(statusFilters.join(","))};Path=/staff;Max-Age=86400;SameSite=Lax`);
 
   // Build counts WHERE clause (date + search only, no status filter)
   // so badge counts show per-status breakdown within current date/search context
@@ -106,9 +96,12 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   let whereClause = "WHERE 1=1";
   const params: string[] = [];
 
-  if (statusFilters.length > 0) {
-    whereClause += ` AND status IN (${statusFilters.map(() => "?").join(",")})`;
-    params.push(...statusFilters);
+  if (status === "ALL") {
+    // 전체 = show all except cancelled
+    whereClause += " AND o.status != 'CANCELLED'";
+  } else {
+    whereClause += " AND o.status = ?";
+    params.push(status);
   }
 
   if (q) {
@@ -116,8 +109,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
     params.push(like, like, like, like);
   }
 
-  // Hide old PICKED_UP orders (>2 days) unless show_all_picked_up is checked
-  if (!showAllPickedUp) {
+  // Hide old PICKED_UP orders (>2 days) unless show_all_picked_up is set
+  if (!showAllPickedUp && (status === "ALL" || status === "PICKED_UP")) {
     whereClause += " AND (o.status != 'PICKED_UP' OR o.created_at >= datetime('now', '-2 days'))";
   }
 
@@ -180,6 +173,16 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
     note_author: order.note_staff_id ? noteAuthorMap.get(order.note_staff_id) || order.note_staff_id : null,
   }));
 
+  const tabUrl = (s: string, extra?: Record<string, string>) => {
+    const u = new URLSearchParams();
+    u.set("status", s);
+    if (dateFrom) u.set("date_from", dateFrom);
+    if (dateTo) u.set("date_to", dateTo);
+    if (q) u.set("q", q);
+    if (extra) for (const [k, v] of Object.entries(extra)) u.set(k, v);
+    return `/staff/dashboard?${u.toString()}`;
+  };
+
   return c.html(
     <html lang="ko">
       <head>
@@ -218,32 +221,38 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
           </section>
 
           <section class="card">
-            <form id="staff-search-form" method="get" action="/staff/dashboard" class="staff-search-form">
-              <input type="hidden" name="filter_applied" value="1" />
+            {/* Status tab bar */}
+            <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px">
+              {[
+                { key: "ALL", label: "전체", count: counts.total_count },
+                { key: "PAYMENT_PENDING", label: "결제대기", count: counts.pending_count },
+                { key: "PAID", label: "결제완료", count: counts.paid_count },
+                { key: "PICKED_UP", label: "수령완료", count: counts.picked_up_count },
+                { key: "CANCELLED", label: "취소", count: counts.cancelled_count },
+              ].map((tab) => (
+                <a
+                  href={tabUrl(tab.key)}
+                  style={`display:inline-block;padding:10px 20px;font-size:14px;font-weight:600;text-decoration:none;border-bottom:3px solid ${status === tab.key ? "#2563eb" : "transparent"};color:${status === tab.key ? "#2563eb" : "#64748b"};margin-bottom:-2px;white-space:nowrap;transition:color 0.15s`}
+                >
+                  {tab.label} ({tab.count})
+                </a>
+              ))}
+            </div>
 
-              <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
-                <label class="status-filter-chip">
-                  <input class="status-filter-input" type="checkbox" name="status_filter" value="PAYMENT_PENDING" checked={statusFilters.includes("PAYMENT_PENDING")} />
-                  <span>결제대기 ({counts.pending_count})</span>
-                </label>
-                <label class="status-filter-chip">
-                  <input class="status-filter-input" type="checkbox" name="status_filter" value="PAID" checked={statusFilters.includes("PAID")} />
-                  <span>결제완료 ({counts.paid_count})</span>
-                </label>
-                <label class="status-filter-chip">
-                  <input class="status-filter-input" type="checkbox" name="status_filter" value="PICKED_UP" checked={statusFilters.includes("PICKED_UP")} />
-                  <span>수령완료 ({counts.picked_up_count})</span>
-                </label>
-                <label class="status-filter-chip">
-                  <input class="status-filter-input" type="checkbox" name="status_filter" value="CANCELLED" checked={statusFilters.includes("CANCELLED")} />
-                  <span>취소 ({counts.cancelled_count})</span>
-                </label>
-                <label class="status-filter-chip">
-                  <input class="status-filter-input" type="checkbox" name="show_all_picked_up" value="true" checked={showAllPickedUp} />
-                  <span>수령완료 전체보기</span>
-                </label>
+            {/* Show "수령완료 전체보기" toggle when on PICKED_UP tab */}
+            {status === "PICKED_UP" && (
+              <div style="margin-bottom:12px">
+                <a href={tabUrl("PICKED_UP", showAllPickedUp ? {} : { show_all_picked_up: "true" })}
+                   class="btn btn-sm" style={`font-size:12px;text-decoration:none;${showAllPickedUp ? "background:#2563eb;color:white;border-color:#2563eb" : ""}`}>
+                  {showAllPickedUp ? "최근만 보기" : "수령완료 전체보기"}
+                </a>
               </div>
+            )}
 
+            {/* Date range + presets */}
+            <form id="staff-search-form" method="get" action="/staff/dashboard">
+              <input type="hidden" name="status" value={status} />
+              {showAllPickedUp && <input type="hidden" name="show_all_picked_up" value="true" />}
               <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
                 <span style="font-size:12px;font-weight:600;color:#64748b;white-space:nowrap">기간</span>
                 <input class="control" type="date" name="date_from" value={dateFrom} style="max-width:150px;padding:6px 8px;font-size:13px" />
@@ -251,15 +260,16 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 <input class="control" type="date" name="date_to" value={dateTo} style="max-width:150px;padding:6px 8px;font-size:13px" />
                 <div style="display:flex;gap:4px;margin-left:4px">
                   <button type="button" class="btn btn-sm" onclick="setDateRange('today')" style="padding:4px 10px;font-size:11px">오늘</button>
+                  <button type="button" class="btn btn-sm" onclick="setDateRange('yesterday')" style="padding:4px 10px;font-size:11px">어제</button>
                   <button type="button" class="btn btn-sm" onclick="setDateRange('week')" style="padding:4px 10px;font-size:11px">이번주</button>
                   <button type="button" class="btn btn-sm" onclick="setDateRange('month')" style="padding:4px 10px;font-size:11px">이번달</button>
                 </div>
               </div>
 
+              {/* Search + reset */}
               <div style="display:flex;align-items:center;gap:8px">
                 <input id="search-q" class="control" type="text" name="q" value={q} placeholder="이름, 접수번호, 전화, 짐번호" autocomplete="off" style="flex:1;padding:8px 12px;font-size:13px" />
-                <button class="btn btn-primary" type="submit" style="padding:8px 20px;font-size:13px;white-space:nowrap">조회</button>
-                <a class="btn btn-secondary" href="/staff/dashboard?reset_filter=true" style="padding:8px 14px;font-size:12px;text-decoration:none;white-space:nowrap">초기화</a>
+                <a class="btn btn-secondary" href="/staff/dashboard" style="padding:8px 14px;font-size:12px;text-decoration:none;white-space:nowrap">초기화</a>
               </div>
             </form>
 
@@ -386,12 +396,11 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     {page > 1 && (
                       <a class="btn btn-sm btn-secondary" href={`/staff/dashboard?${(() => {
                         const u = new URLSearchParams();
-                        if (q) u.set("q", q);
-                        statusFilters.forEach((s) => u.append("status_filter", s));
+                        u.set("status", status);
                         if (showAllPickedUp) u.set("show_all_picked_up", "true");
                         if (dateFrom) u.set("date_from", dateFrom);
                         if (dateTo) u.set("date_to", dateTo);
-                        u.set("filter_applied", "1");
+                        if (q) u.set("q", q);
                         u.set("page", String(page - 1));
                         return u.toString();
                       })()}`}>이전</a>
@@ -401,12 +410,11 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                         class={`btn btn-sm ${p === page ? "btn-primary" : "btn-secondary"}`}
                         href={`/staff/dashboard?${(() => {
                           const u = new URLSearchParams();
-                          if (q) u.set("q", q);
-                          statusFilters.forEach((s) => u.append("status_filter", s));
+                          u.set("status", status);
                           if (showAllPickedUp) u.set("show_all_picked_up", "true");
                           if (dateFrom) u.set("date_from", dateFrom);
                           if (dateTo) u.set("date_to", dateTo);
-                          u.set("filter_applied", "1");
+                          if (q) u.set("q", q);
                           u.set("page", String(p));
                           return u.toString();
                         })()}`}
@@ -415,12 +423,11 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     {page < totalPages && (
                       <a class="btn btn-sm btn-secondary" href={`/staff/dashboard?${(() => {
                         const u = new URLSearchParams();
-                        if (q) u.set("q", q);
-                        statusFilters.forEach((s) => u.append("status_filter", s));
+                        u.set("status", status);
                         if (showAllPickedUp) u.set("show_all_picked_up", "true");
                         if (dateFrom) u.set("date_from", dateFrom);
                         if (dateTo) u.set("date_to", dateTo);
-                        u.set("filter_applied", "1");
+                        if (q) u.set("q", q);
                         u.set("page", String(page + 1));
                         return u.toString();
                       })()}`}>다음</a>
@@ -741,7 +748,12 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               var toEl=document.querySelector('[name=date_to]');
               toEl.value=today;
               if(range==='today') fromEl.value=today;
-              else if(range==='week'){
+              else if(range==='yesterday'){
+                var yd=new Date(now.getTime()-86400000);
+                var yy=yd.getUTCFullYear(),ym=String(yd.getUTCMonth()+1).padStart(2,'0'),ydd=String(yd.getUTCDate()).padStart(2,'0');
+                fromEl.value=yy+'-'+ym+'-'+ydd;
+                toEl.value=yy+'-'+ym+'-'+ydd;
+              } else if(range==='week'){
                 var dow=now.getUTCDay();
                 var mon=new Date(now.getTime()-(dow===0?6:dow-1)*86400000);
                 fromEl.value=mon.toISOString().slice(0,10);
