@@ -12,21 +12,24 @@ import { todayBusinessDate } from "./storage";
  * Generate next order_id for today using D1 luggage_daily_counters.
  * Uses atomic INSERT ON CONFLICT UPDATE with RETURNING to safely increment in one round-trip.
  */
-export async function buildOrderId(db: D1Database, nowUtc?: Date): Promise<string> {
+export async function buildOrderId(db: D1Database, nowUtc?: Date, overnight?: boolean): Promise<string> {
   const businessDate = nowUtc ? formatBusinessDate(nowUtc) : todayBusinessDate();
 
-  // Always increment counter — no reuse of cancelled IDs
+  // Two counters: same-day (1~95) and overnight/next-day+ (96~)
+  const counterKey = overnight ? `${businessDate}-overnight` : businessDate;
+  const startSeq = overnight ? 96 : 1;
+
   const row = await db
     .prepare(
       `INSERT INTO luggage_daily_counters (business_date, last_seq)
-       VALUES (?, 1)
+       VALUES (?, ?)
        ON CONFLICT(business_date) DO UPDATE SET last_seq = last_seq + 1
        RETURNING last_seq`
     )
-    .bind(businessDate)
+    .bind(counterKey, startSeq)
     .first<{ last_seq: number }>();
 
-  const seq = row?.last_seq ?? 1;
+  const seq = row?.last_seq ?? startSeq;
   return `${businessDate}-${String(seq).padStart(3, "0")}`;
 }
 
@@ -37,25 +40,10 @@ export async function buildOrderId(db: D1Database, nowUtc?: Date): Promise<strin
  *
  * If pickup is the next day or later (in JST), the tag starts from 91+.
  */
-export function buildTagNo(orderId: string, createdAt?: string, expectedPickupAt?: string): string {
-  // Extract sequence number from order_id format YYYYMMDD-NNN
-  const seq = parseInt(orderId.split("-")[1], 10);
-
-  // If pickup is next day or later, offset tag to 91+
-  if (createdAt && expectedPickupAt) {
-    const toJSTDate = (s: string) => {
-      const d = new Date(s);
-      const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
-      return Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate());
-    };
-    const createdDate = toJSTDate(createdAt);
-    const pickupDate = toJSTDate(expectedPickupAt);
-    if (pickupDate > createdDate) {
-      return String(90 + seq);
-    }
-  }
-
-  return String(seq);
+export function buildTagNo(orderId: string): string {
+  // tag_no = sequence from order_id (YYYYMMDD-NNN → NNN)
+  // Same-day: 1~95, overnight: 96+. Always matches order_id.
+  return String(parseInt(orderId.split("-")[1], 10));
 }
 
 /** Convert a UTC Date to JST business date string (YYYYMMDD). */

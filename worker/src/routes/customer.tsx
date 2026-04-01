@@ -1452,8 +1452,14 @@ customer.post("/customer/submit", async (c) => {
   }
 
   // --- Generate order ID and tag number ---
-  const orderId = await buildOrderId(c.env.DB);
-  const tagNo = buildTagNo(orderId, new Date().toISOString(), pickupDate.toISOString());
+  // Check if pickup is next day or later (overnight) → order starts from 96
+  const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const pickupJST = new Date(pickupDate.getTime() + 9 * 60 * 60 * 1000);
+  const isOvernight = pickupJST.getUTCDate() !== nowJST.getUTCDate()
+    || pickupJST.getUTCMonth() !== nowJST.getUTCMonth()
+    || pickupJST.getUTCFullYear() !== nowJST.getUTCFullYear();
+  const orderId = await buildOrderId(c.env.DB, undefined, isOvernight);
+  const tagNo = buildTagNo(orderId);
 
   // --- Upload images ---
   let idImageUrl: string | null = null;

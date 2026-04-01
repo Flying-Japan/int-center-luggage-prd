@@ -498,8 +498,18 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
     return c.redirect("/staff/dashboard?error=이름, 전화번호, 짐 수량이 필요합니다");
   }
 
-  const orderId = await buildOrderId(c.env.DB);
-  const tagNo = buildTagNo(orderId, new Date().toISOString(), expectedPickupAt || undefined);
+  // Check if pickup is next day or later → overnight counter (96+)
+  let isOvernight = false;
+  if (expectedPickupAt) {
+    const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const pickupD = new Date(expectedPickupAt.includes("+") || expectedPickupAt.includes("Z") ? expectedPickupAt : expectedPickupAt + ":00+09:00");
+    const pickupJST = new Date(pickupD.getTime() + 9 * 60 * 60 * 1000);
+    isOvernight = pickupJST.getUTCDate() !== nowJST.getUTCDate()
+      || pickupJST.getUTCMonth() !== nowJST.getUTCMonth()
+      || pickupJST.getUTCFullYear() !== nowJST.getUTCFullYear();
+  }
+  const orderId = await buildOrderId(c.env.DB, undefined, isOvernight);
+  const tagNo = buildTagNo(orderId);
   const { setQty, pricePerDay } = calculatePricePerDay(suitcaseQty, backpackQty);
 
   let expectedStorageDays = 1;
