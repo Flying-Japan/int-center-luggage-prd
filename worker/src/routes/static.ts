@@ -1749,7 +1749,15 @@ body.staff-site .control {
 
 body.staff-site .control:focus { border-color: #87b1f6; box-shadow: 0 0 0 3px rgba(46, 123, 244, 0.12); }
 
-body.staff-site form { margin-top: 12px; }
+/* Prevent iOS Safari zoom on input focus */
+body.staff-site input[type="number"],
+body.staff-site input[type="text"],
+body.staff-site input[type="datetime-local"],
+body.staff-site select,
+body.staff-site textarea { font-size: 16px; }
+
+body.staff-site .card > form,
+body.staff-site .form-section { margin-top: 12px; }
 body.staff-site .field-label { font-size: 12px; color: var(--subtext); font-weight: 600; }
 body.staff-site .field-hint { color: var(--muted); font-size: 11px; }
 
@@ -1909,7 +1917,10 @@ body.staff-site .col-resize-handle::after { background: rgba(47, 128, 248, 0.4);
 
 /* ── Responsive ── */
 @media (max-width: 860px) {
-  .grid2, .grid3, .summary-grid, .detail-action-grid, .pickup-time-grid, .preview-with-options {
+  .grid2, .grid3, .summary-grid, .pickup-time-grid, .preview-with-options {
+    grid-template-columns: 1fr;
+  }
+  body.staff-site .detail-action-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1934,7 +1945,8 @@ body.staff-site .col-resize-handle::after { background: rgba(47, 128, 248, 0.4);
   body.staff-site .bulk-action-bar { padding: 8px 16px; }
   body.staff-site .topbar-inner { padding: 8px 16px; }
 
-  .cash-denom-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cash-denom-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .cash-denom-item .control { min-height: 44px; }
   .cash-summary-grid { grid-template-columns: 1fr; }
 
   .account-create-grid, .account-update-grid { grid-template-columns: 1fr; }

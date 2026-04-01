@@ -156,10 +156,10 @@ CREATE TABLE IF NOT EXISTS luggage_cash_closing_audits (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Analytics: Rental daily sales
+-- Analytics: Rental daily sales (synced from Supabase product_orders via cron)
 CREATE TABLE IF NOT EXISTS luggage_rental_daily_sales (
   rental_id INTEGER PRIMARY KEY AUTOINCREMENT,
-  business_date TEXT,
+  business_date TEXT UNIQUE,
   revenue_amount INTEGER NOT NULL DEFAULT 0,
   customer_count INTEGER NOT NULL DEFAULT 0,
   note TEXT,
@@ -167,6 +167,7 @@ CREATE TABLE IF NOT EXISTS luggage_rental_daily_sales (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rental_daily_sales_date ON luggage_rental_daily_sales(business_date);
 
 -- Config: App settings (key-value)
 CREATE TABLE IF NOT EXISTS luggage_app_settings (

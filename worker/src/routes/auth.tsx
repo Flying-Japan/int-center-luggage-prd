@@ -27,7 +27,7 @@ auth.get("/staff/login", (c) => {
               <p class="login-subtitle">Flying Japan 직원 전용 콘솔</p>
             </div>
 
-            {error && <p class="error">{error}</p>}
+            {error && <p class="error" id="page-alert" role="alert">{error}</p>}
 
             <a class="btn btn-google btn-lg" href="/auth/google">
               <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">

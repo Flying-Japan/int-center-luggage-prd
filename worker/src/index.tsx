@@ -11,6 +11,7 @@ import { securityHeaders, errorHandler, notFoundHandler, createRateLimiter } fro
 import { staffAuth, getStaff } from "./middleware/auth";
 import { runRetentionCleanup } from "./services/retention";
 import { syncDailySales } from "./services/dailySalesSync";
+import { syncRentalRevenue } from "./services/rentalRevenueSync";
 import { tagColorClass, TAG_COLOR_RANGES } from "./lib/tagColors";
 import { StaffTopbar, NewOrderAlert } from "./lib/components";
 import { fetchStaffNamesByIds } from "./lib/staffProfiles";
@@ -867,6 +868,10 @@ export default {
         if (env.GOOGLE_SHEETS_CREDENTIALS) {
           const syncResult = await syncDailySales(env.DB, env.GOOGLE_SHEETS_CREDENTIALS);
           console.log(`Daily sales sync complete: ${JSON.stringify(syncResult)}`);
+        }
+        if (env.NAVER_ORDERS_SUPABASE_URL && env.NAVER_ORDERS_SUPABASE_KEY) {
+          const rentalResult = await syncRentalRevenue(env.DB, env.NAVER_ORDERS_SUPABASE_URL, env.NAVER_ORDERS_SUPABASE_KEY);
+          console.log(`Rental revenue sync complete: ${JSON.stringify(rentalResult)}`);
         }
       })()
     );

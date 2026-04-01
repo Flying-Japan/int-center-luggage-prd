@@ -32,28 +32,41 @@ admin.get("/staff/admin/sales", async (c) => {
     params.push(startDate, endDate);
   }
 
-  const dailyRows = await c.env.DB.prepare(
-    `SELECT sale_date, people, cash, qr, luggage_total, rental_total FROM luggage_daily_sales${whereClause} ORDER BY sale_date DESC`
-  ).bind(...params).all<{ sale_date: string; people: number; cash: number; qr: number; luggage_total: number; rental_total: number }>();
-
-  // Fetch actual luggage revenue from D1 orders (more accurate than Sheets)
+  let rentalWhereClause = "";
+  if (startDate && endDate) {
+    rentalWhereClause = " WHERE business_date BETWEEN ? AND ?";
+  }
   let actualWhereClause = "";
   const actualParams: string[] = [];
   if (startDate && endDate) {
     actualWhereClause = " AND date(created_at, '+9 hours') BETWEEN ? AND ?";
     actualParams.push(startDate, endDate);
   }
-  const actualLuggageRows = await c.env.DB.prepare(
-    `SELECT
-      date(created_at, '+9 hours') as sale_date,
-      COUNT(*) as order_count,
-      SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash,
-      SUM(CASE WHEN payment_method = 'PAY_QR' THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr,
-      SUM(COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount) as luggage_total
-    FROM luggage_orders
-    WHERE status IN ('PAID', 'PICKED_UP') AND manual_entry = 0${actualWhereClause}
-    GROUP BY sale_date`
-  ).bind(...actualParams).all<{ sale_date: string; order_count: number; cash: number; qr: number; luggage_total: number }>();
+
+  const [dailyRows, rentalRows, actualLuggageRows] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT sale_date, people, cash, qr, luggage_total, rental_total FROM luggage_daily_sales${whereClause} ORDER BY sale_date DESC`
+    ).bind(...params).all<{ sale_date: string; people: number; cash: number; qr: number; luggage_total: number; rental_total: number }>(),
+    c.env.DB.prepare(
+      `SELECT business_date as sale_date, revenue_amount as rental_total FROM luggage_rental_daily_sales${rentalWhereClause} ORDER BY business_date DESC`
+    ).bind(...params).all<{ sale_date: string; rental_total: number }>(),
+    c.env.DB.prepare(
+      `SELECT
+        date(created_at, '+9 hours') as sale_date,
+        COUNT(*) as order_count,
+        SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash,
+        SUM(CASE WHEN payment_method = 'PAY_QR' THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr,
+        SUM(COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount) as luggage_total
+      FROM luggage_orders
+      WHERE status IN ('PAID', 'PICKED_UP') AND manual_entry = 0${actualWhereClause}
+      GROUP BY sale_date`
+    ).bind(...actualParams).all<{ sale_date: string; order_count: number; cash: number; qr: number; luggage_total: number }>(),
+  ]);
+
+  const rentalByDate = new Map<string, number>();
+  for (const r of rentalRows.results) {
+    rentalByDate.set(r.sale_date, r.rental_total);
+  }
 
   // Build lookup map for actual luggage data by date
   const actualByDate = new Map<string, { order_count: number; cash: number; qr: number; luggage_total: number }>();
@@ -96,26 +109,40 @@ admin.get("/staff/admin/sales", async (c) => {
     return { isWeekend, jp, kr };
   }
 
+  // Sheet data lookup (fallback for luggage on pre-migration dates)
+  const sheetByDate = new Map<string, { people: number; cash: number; qr: number; luggage_total: number; rental_total: number }>();
+  for (const r of dailyRows.results) {
+    sheetByDate.set(r.sale_date, r);
+  }
+
   interface MergedRow { date: string; dateJP: string; orders: number; cash: number; qr: number; luggage: number; rental: number; combined: number; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
-  const mergedRows: MergedRow[] = dailyRows.results.map(r => {
-    const dow = DOW_JP[new Date(r.sale_date + "T12:00:00Z").getUTCDay()];
-    const flags = getHolidayFlags(r.sale_date);
-    const actual = actualByDate.get(r.sale_date);
-    // Use DB data only if it has more orders than Sheets (avoids stale pre-migration dates)
-    const useDB = actual && actual.order_count > (r.people || 0) * 0.5;
-    const cash = useDB ? actual.cash : r.cash;
-    const qr = useDB ? actual.qr : r.qr;
+  // Build rows from all data sources
+  const allDates = new Set([
+    ...actualLuggageRows.results.map(r => r.sale_date),
+    ...dailyRows.results.map(r => r.sale_date),
+    ...rentalRows.results.map(r => r.sale_date),
+  ]);
+  const mergedRows: MergedRow[] = [...allDates].sort((a, b) => b.localeCompare(a)).map(date => {
+    const dow = DOW_JP[new Date(date + "T12:00:00Z").getUTCDay()];
+    const flags = getHolidayFlags(date);
+    const actual = actualByDate.get(date);
+    const sheet = sheetByDate.get(date);
+    // DB orders are primary; fall back to sheet for dates before migration
+    const cash = actual ? actual.cash : (sheet?.cash || 0);
+    const qr = actual ? actual.qr : (sheet?.qr || 0);
     const luggage = cash + qr;
-    const orders = useDB ? actual.order_count : r.people;
+    const orders = actual ? actual.order_count : (sheet?.people || 0);
+    // Rental from our own system (luggage_rental_daily_sales)
+    const rental = rentalByDate.get(date) || 0;
     return {
-      date: r.sale_date,
-      dateJP: `${r.sale_date.replace(/-/g, "/")}/${dow}`,
+      date,
+      dateJP: `${date.replace(/-/g, "/")}/${dow}`,
       orders,
       cash,
       qr,
       luggage,
-      rental: r.rental_total,
-      combined: luggage + r.rental_total,
+      rental,
+      combined: luggage + rental,
       isWeekend: flags.isWeekend,
       jpHoliday: flags.jp,
       krHoliday: flags.kr,
@@ -159,6 +186,7 @@ admin.get("/staff/admin/sales", async (c) => {
   const todayIdx = mergedRows.findIndex(r => r.date === todayJST);
   const todayDow = DOW_JP[new Date(todayJST + "T12:00:00Z").getUTCDay()];
   const todayFlags = getHolidayFlags(todayJST);
+  const todayRental = rentalByDate.get(todayJST) || 0;
   const todayRTRow: MergedRow & { isRealtime?: boolean } = {
     date: todayJST,
     dateJP: `${todayJST.replace(/-/g, "/")}/${todayDow}`,
@@ -166,8 +194,8 @@ admin.get("/staff/admin/sales", async (c) => {
     cash: tlrt.cash,
     qr: tlrt.qr,
     luggage: tlrt.luggage_total,
-    rental: todayIdx >= 0 ? mergedRows[todayIdx].rental : 0,
-    combined: tlrt.luggage_total + (todayIdx >= 0 ? mergedRows[todayIdx].rental : 0),
+    rental: todayRental,
+    combined: tlrt.luggage_total + todayRental,
     isWeekend: todayFlags.isWeekend,
     jpHoliday: todayFlags.jp,
     krHoliday: todayFlags.kr,
@@ -219,7 +247,7 @@ admin.get("/staff/admin/sales", async (c) => {
       <body class="staff-site">
         <StaffTopbar staff={staff} active="/staff/admin/sales" />
         <main class="container">
-        {successMsg && <p class="success-note">{successMsg}</p>}
+        {successMsg && <p class="success-note" id="page-alert" role="alert">{successMsg}</p>}
         <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div></section>
 
         <section style="margin-bottom:16px;padding:16px;background:#fff;border:1px solid #e2e8f0;border-radius:12px">
@@ -350,7 +378,12 @@ admin.get("/staff/admin/sales", async (c) => {
         </section>
 
         <section class="card">
-        <h3 class="card-title">일별 매출 상세</h3>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <h3 class="card-title">일별 매출 상세</h3>
+          <form method="post" action="/staff/admin/sales/backfill" style="margin:0">
+            <button type="submit" class="btn btn-secondary" style="font-size:11px;min-height:28px;padding:4px 10px" onclick="return confirm('Google Sheet 전체 데이터를 DB로 가져옵니다. 계속하시겠습니까?')">시트 백필</button>
+          </form>
+        </div>
         <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="border-bottom:2px solid var(--line)">
@@ -360,7 +393,7 @@ admin.get("/staff/admin/sales", async (c) => {
             <th class="sales-th sales-th--right">Pay</th>
             <th class="sales-th sales-th--right sales-td--luggage">Luggage</th>
             <th class="sales-th sales-th--right sales-td--rental">Rental</th>
-            <th class="sales-th sales-th--right sales-td--bold">Luggage + Rental Daily</th>
+            <th class="sales-th sales-th--right sales-td--bold">Daily Total</th>
           </tr></thead>
           <tbody>
           {mergedRows.length === 0 && (
@@ -705,8 +738,8 @@ admin.get("/staff/admin/staff-accounts", async (c) => {
       <body class="staff-site">
         <StaffTopbar staff={staff} active="/staff/admin/staff-accounts" />
         <main class="container">
-        {successMsg && <p class="success-note">{successMsg}</p>}
-        {errorMsg && <p class="error">{decodeURIComponent(errorMsg)}</p>}
+        {successMsg && <p class="success-note" id="page-alert" role="alert">{successMsg}</p>}
+        {errorMsg && <p class="error" id="page-alert" role="alert">{decodeURIComponent(errorMsg)}</p>}
         <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">직원 계정</h2></div></section>
 
         <section class="card">
@@ -1084,7 +1117,7 @@ admin.get("/staff/admin/completion-message", async (c) => {
       <body class="staff-site">
         <StaffTopbar staff={staff} active="/staff/admin/completion-message" />
         <main class="container">
-        {successMsg && <p class="success-note">{successMsg}</p>}
+        {successMsg && <p class="success-note" id="page-alert" role="alert">{successMsg}</p>}
         <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">작성완료 문구 수정</h2><p class="hero-desc">한국어로 입력하면 영어/일본어 문구가 자동 생성됩니다.</p></div></section>
 
         <section class="card" style="padding:16px">
@@ -1165,6 +1198,15 @@ admin.post("/staff/admin/completion-message", async (c) => {
   await c.env.DB.batch(stmts);
 
   return c.redirect("/staff/admin/completion-message?success=저장되었습니다 (자동 번역 포함)");
+});
+
+// POST /staff/admin/sales/backfill — One-time full backfill from Google Sheets
+admin.post("/staff/admin/sales/backfill", async (c) => {
+  const creds = c.env.GOOGLE_SHEETS_CREDENTIALS;
+  if (!creds) return c.json({ success: false, error: "GOOGLE_SHEETS_CREDENTIALS not configured" }, 400);
+  const { backfillAllDailySales } = await import("../services/dailySalesSync");
+  const result = await backfillAllDailySales(c.env.DB, creds);
+  return c.redirect(`/staff/admin/sales?success=시트 백필 완료: ${result.months}개월, ${result.synced}건 동기화`);
 });
 
 // POST /staff/admin/retention/run — Manual retention cleanup

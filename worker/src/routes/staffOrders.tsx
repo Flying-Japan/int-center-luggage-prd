@@ -600,8 +600,8 @@ staffOrders.get("/staff/bug-report", (c) => {
         <StaffTopbar staff={staff} active="/staff/bug-report" />
         <main class="container">
           <section class="hero"><div><p class="hero-kicker">Operations</p><h2 class="hero-title">버그 신고</h2></div></section>
-          {success && <p class="success-note">버그 신고가 접수되었습니다. 감사합니다!</p>}
-          {error && <p class="error">신고 중 오류가 발생했습니다. 다시 시도해주세요.</p>}
+          {success && <p class="success-note" id="page-alert" role="alert">버그 신고가 접수되었습니다. 감사합니다!</p>}
+          {error && <p class="error" id="page-alert" role="alert">신고 중 오류가 발생했습니다. 다시 시도해주세요.</p>}
           <section class="card">
             <h3 class="card-title">버그 신고</h3>
             <form method="post" action="/staff/bug-report" enctype="multipart/form-data" class="grid2">

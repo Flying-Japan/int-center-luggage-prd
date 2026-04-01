@@ -14,8 +14,12 @@ export type Env = {
   ASANA_PAT: string;
   ASANA_BUG_PROJECT_GID: string;
 
-  // Google Sheets (rental revenue sync)
+  // Google Sheets (luggage daily sales sync)
   GOOGLE_SHEETS_CREDENTIALS?: string;
+
+  // Naver Orders Supabase (rental revenue sync)
+  NAVER_ORDERS_SUPABASE_URL?: string;
+  NAVER_ORDERS_SUPABASE_KEY?: string;
 
   // Brevo (email)
   BREVO_API_KEY: string;

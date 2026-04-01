@@ -197,19 +197,26 @@ async function resolveAutoSalesSummaryForDate(db: D1Database, businessDate: stri
 
 // GET /staff/cash-closing — Cash closing list & form
 ops.get("/staff/cash-closing", async (c) => {
+  // Show the latest closing per date with closing count to detect multi-closing dates
   const closings = await c.env.DB.prepare(
-    `SELECT * FROM luggage_cash_closings
-     ORDER BY business_date DESC, closing_id DESC LIMIT 400`
+    `SELECT c.*, latest.closing_count FROM luggage_cash_closings c
+     INNER JOIN (
+       SELECT business_date, MAX(closing_id) as max_id, COUNT(*) as closing_count
+       FROM luggage_cash_closings
+       GROUP BY business_date
+     ) latest ON c.closing_id = latest.max_id
+     ORDER BY c.business_date DESC LIMIT 400`
   ).all<Record<string, unknown>>();
   const staffNameMap = await fetchStaffNamesByIds(
     c.env,
     closings.results.map((closing) => closing.staff_id as string | null | undefined),
   );
-  const closingRows: Array<Record<string, unknown> & { staff_name: string | null }> = closings.results.map((closing) => ({
+  const closingRows: Array<Record<string, unknown> & { staff_name: string | null; has_multi: boolean }> = closings.results.map((closing) => ({
     ...closing,
     staff_name: (closing.staff_id as string | null)
       ? staffNameMap.get(closing.staff_id as string) || (closing.owner_name as string) || null
       : (closing.owner_name as string) || null,
+    has_multi: ((closing.closing_count as number) || 0) > 1,
   }));
   const autoSalesByDate = await resolveAutoSalesSummariesByDate(
     c.env.DB,
@@ -315,7 +322,7 @@ ops.get("/staff/cash-closing", async (c) => {
                     const diff = (((cl.total_amount as number) || 0) - STARTING_FLOAT + ((cl.paypay_amount as number) || 0)) - autoAmount;
                     return (
                       <tr style="border-bottom:1px solid #e2e8f0">
-                        <td style={`padding:2px 6px;white-space:nowrap;${dateDisplay.style}`} title={dateDisplay.title}><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:inherit;font-weight:600">{dateDisplay.label}{dateDisplay.suffix}</a></td>
+                        <td style={`padding:2px 6px;white-space:nowrap;${dateDisplay.style}`} title={dateDisplay.title}><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:inherit;font-weight:600">{dateDisplay.label}{dateDisplay.suffix}</a>{(cl as Record<string, unknown> & { has_multi: boolean }).has_multi && <span style="margin-left:4px;font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:3px;vertical-align:middle">+1</span>}</td>
                         <td style="padding:2px 4px;text-align:right">{((cl.count_10000 as number) || 0).toLocaleString()}</td>
                         <td style="padding:2px 4px;text-align:right">{((cl.count_5000 as number) || 0).toLocaleString()}</td>
                         <td style="padding:2px 4px;text-align:right">{((cl.count_2000 as number) || 0).toLocaleString()}</td>
@@ -433,6 +440,13 @@ ops.get("/staff/cash-closing/:id", async (c) => {
   const staff = getStaff(c);
   const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, String((closing as Record<string, unknown>).business_date || ""));
 
+  // Fetch morning handover for the same date (if this is FINAL_CLOSE)
+  const morningClosing = closing.closing_type === "FINAL_CLOSE"
+    ? await c.env.DB.prepare(
+        `SELECT * FROM luggage_cash_closings WHERE business_date = ? AND closing_type = 'MORNING_HANDOVER'`
+      ).bind(closing.business_date as string).first<Record<string, unknown>>()
+    : null;
+
   const audits = await c.env.DB.prepare(
     `SELECT *
      FROM luggage_cash_closing_audits
@@ -446,6 +460,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
     uniqueStaffIds([
       closing.staff_id as string | null | undefined,
       ...audits.results.map((audit) => audit.staff_id as string | null | undefined),
+      morningClosing?.staff_id as string | null | undefined,
     ]),
   );
   const auditRows = audits.results.map((audit) => ({
@@ -545,6 +560,41 @@ ops.get("/staff/cash-closing/:id", async (c) => {
               </div>
             )}
           </section>
+
+          {morningClosing && (() => {
+            const mc = morningClosing as Record<string, unknown>;
+            const morningStaffName = (mc.staff_id as string | null)
+              ? cashClosingStaffNameMap.get(mc.staff_id as string) || (mc.owner_name as string) || "-"
+              : (mc.owner_name as string) || "-";
+            return (
+              <section class="card" style="border-left:3px solid #fbbf24">
+                <h3 class="card-title" style="color:#92400e">오전 인수인계 마감</h3>
+                <div class="stat-grid" style="margin-bottom:12px">
+                  <div class="card stat-card">
+                    <p class="stat-label">현금 합계</p>
+                    <p class="stat-value">¥{((mc.total_amount as number) || 0).toLocaleString()}</p>
+                  </div>
+                  <div class="card stat-card">
+                    <p class="stat-label">PayPay</p>
+                    <p class="stat-value">¥{((mc.paypay_amount as number) || 0).toLocaleString()}</p>
+                  </div>
+                  <div class="card stat-card">
+                    <p class="stat-label">QR 실제</p>
+                    <p class="stat-value">¥{((mc.actual_qr_amount as number) || 0).toLocaleString()}</p>
+                  </div>
+                </div>
+                <div class="summary-grid" style="font-size:13px">
+                  <p><strong>렌탈 현금</strong><span>¥{((mc.rental_cash as number) || 0).toLocaleString()}</span></p>
+                  <p><strong>지팡이 환불</strong><span>¥{((mc.wand_refund as number) || 0).toLocaleString()}</span></p>
+                  <p><strong>작성자</strong><span>{morningStaffName}</span></p>
+                  <p><strong>메모</strong><span>{(mc.note as string) || "-"}</span></p>
+                </div>
+                <div style="margin-top:8px">
+                  <a href={`/staff/cash-closing/${mc.closing_id}`} style="color:var(--primary);font-size:12px">오전 마감 상세 보기 →</a>
+                </div>
+              </section>
+            );
+          })()}
 
           <section class="card">
             <h3 class="card-title">감사 로그</h3>
