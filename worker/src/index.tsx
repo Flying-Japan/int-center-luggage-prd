@@ -66,7 +66,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
   // Parse query params for search/filter
   const q = c.req.query("q") || "";
-  const status = c.req.query("status") || "ALL";
+  const status = c.req.query("status") || "UNPICKED";
   const showAllPickedUp = c.req.query("show_all_picked_up") === "true";
   const dateFrom = c.req.query("date_from") || "";
   const dateTo = c.req.query("date_to") || "";
@@ -96,7 +96,9 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   let whereClause = "WHERE 1=1";
   const params: string[] = [];
 
-  if (status === "ALL") {
+  if (status === "UNPICKED") {
+    whereClause += " AND o.status IN ('PAYMENT_PENDING', 'PAID')";
+  } else if (status === "ALL") {
     // 전체 = show all except cancelled
     whereClause += " AND o.status != 'CANCELLED'";
   } else {
@@ -224,6 +226,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             {/* Status tab bar */}
             <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px">
               {[
+                { key: "UNPICKED", label: "미수령", count: (counts.pending_count ?? 0) + (counts.paid_count ?? 0) },
                 { key: "ALL", label: "전체", count: counts.total_count },
                 { key: "PAYMENT_PENDING", label: "결제대기", count: counts.pending_count },
                 { key: "PAID", label: "결제완료", count: counts.paid_count },

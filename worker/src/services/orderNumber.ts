@@ -34,10 +34,27 @@ export async function buildOrderId(db: D1Database, nowUtc?: Date): Promise<strin
  * Derive tag_no from an order_id's sequence number.
  * Since buildOrderId already handles reuse and sequential numbering,
  * the tag_no is simply the NNN part of YYYYMMDD-NNN — keeping them in sync.
+ *
+ * If pickup is the next day or later (in JST), the tag starts from 91+.
  */
-export function buildTagNo(orderId: string): string {
+export function buildTagNo(orderId: string, createdAt?: string, expectedPickupAt?: string): string {
   // Extract sequence number from order_id format YYYYMMDD-NNN
   const seq = parseInt(orderId.split("-")[1], 10);
+
+  // If pickup is next day or later, offset tag to 91+
+  if (createdAt && expectedPickupAt) {
+    const toJSTDate = (s: string) => {
+      const d = new Date(s);
+      const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+      return Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate());
+    };
+    const createdDate = toJSTDate(createdAt);
+    const pickupDate = toJSTDate(expectedPickupAt);
+    if (pickupDate > createdDate) {
+      return String(90 + seq);
+    }
+  }
+
   return String(seq);
 }
 

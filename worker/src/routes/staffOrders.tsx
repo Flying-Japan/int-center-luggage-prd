@@ -499,7 +499,7 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
   }
 
   const orderId = await buildOrderId(c.env.DB);
-  const tagNo = buildTagNo(orderId);
+  const tagNo = buildTagNo(orderId, new Date().toISOString(), expectedPickupAt || undefined);
   const { setQty, pricePerDay } = calculatePricePerDay(suitcaseQty, backpackQty);
 
   let expectedStorageDays = 1;

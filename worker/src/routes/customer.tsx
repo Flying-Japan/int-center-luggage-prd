@@ -1453,7 +1453,7 @@ customer.post("/customer/submit", async (c) => {
 
   // --- Generate order ID and tag number ---
   const orderId = await buildOrderId(c.env.DB);
-  const tagNo = buildTagNo(orderId);
+  const tagNo = buildTagNo(orderId, new Date().toISOString(), pickupDate.toISOString());
 
   // --- Upload images ---
   let idImageUrl: string | null = null;
