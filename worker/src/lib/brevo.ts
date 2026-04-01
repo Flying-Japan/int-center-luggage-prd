@@ -46,14 +46,17 @@ export async function sendOrderConfirmation(
 
   const rentalCardsHtml = rentalItems.map((item, index) => {
     const label = lang === "ja" ? item.ja : lang === "en" ? item.en : item.ko;
-    return `${index % 2 === 0 ? "<tr>" : ""}
-          <td style="padding:${index < 2 ? "4px 6px 10px 0" : "10px 6px 0 0"};text-align:center;width:50%;vertical-align:top">
-            <a href="${item.url}" style="display:block;border:1px solid #dbe4f2;border-radius:12px;overflow:hidden;background:#f8fbff;text-decoration:none">
+    const isRowStart = index % 3 === 0;
+    const isRowEnd = index % 3 === 2 || index === rentalItems.length - 1;
+    const missingCells = index === rentalItems.length - 1 ? (3 - ((index % 3) + 1)) % 3 : 0;
+    return `${isRowStart ? "<tr>" : ""}
+          <td style="padding:${index < 3 ? "4px 6px 10px 0" : "10px 6px 0 0"};text-align:center;width:33.33%;vertical-align:top">
+            <a href="${item.url}" style="display:block;border:1px solid #dbe4f2;border-radius:10px;overflow:hidden;background:#f8fbff;text-decoration:none">
               <img src="${item.img}" alt="${label}" width="100%" style="display:block;width:100%;height:auto;border:0" />
-              <span style="display:block;padding:9px 8px 10px;font-size:11px;line-height:1.35;color:#191f28;font-weight:700">${label}</span>
+              <span style="display:block;padding:7px 6px 8px;font-size:10px;line-height:1.3;color:#191f28;font-weight:700">${label}</span>
             </a>
           </td>
-          ${index % 2 === 1 || index === rentalItems.length - 1 ? `${index % 2 === 0 ? '<td style="width:50%"></td>' : ""}</tr>` : ""}`;
+          ${isRowEnd ? `${"<td style=\"width:33.33%\"></td>".repeat(missingCells)}</tr>` : ""}`;
   }).join("");
 
   const html = `
