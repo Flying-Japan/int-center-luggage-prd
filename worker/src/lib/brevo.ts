@@ -3,6 +3,7 @@
 import { RENTAL_PROMO_LINKS } from "./rentalLinks";
 
 const BREVO_API = "https://api.brevo.com/v3/smtp/email";
+const STATIC_ASSET_VERSION = "20260401-2";
 
 interface OrderConfirmationData {
   orderId: string;
@@ -35,13 +36,13 @@ export async function sendOrderConfirmation(
     : `[Flying Japan] 짐 보관 접수 완료 (${orderId})`;
 
   const rentalItems = [
-    { img: "https://luggage.flyingjp.com/static/rental-item-mario-band.jpg", ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: RENTAL_PROMO_LINKS.usj.email },
-    { img: "https://luggage.flyingjp.com/static/rental-item-hp-wand.jpg", ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: RENTAL_PROMO_LINKS.usj.email },
-    { img: "https://luggage.flyingjp.com/static/rental-item-dyson-straight.jpg", ko: "다이슨 에어스트레이트", en: "Dyson Airstraight", ja: "ダイソン ストレートナー", url: RENTAL_PROMO_LINKS.dyson.email },
-    { img: "https://luggage.flyingjp.com/static/rental-item-dyson-airwrap.jpg", ko: "다이슨 에어랩", en: "Dyson Airwrap", ja: "ダイソン エアラップ", url: RENTAL_PROMO_LINKS.dyson.email },
-    { img: "https://luggage.flyingjp.com/static/rental-item-cybex-stroller.jpg", ko: "cybex 유모차", en: "Cybex Stroller", ja: "サイベックス ベビーカー", url: RENTAL_PROMO_LINKS.stroller.email },
-    { img: "https://luggage.flyingjp.com/static/rental-item-kidstravel-stroller.jpg", ko: "키즈트레블 유모차", en: "Kids Travel Stroller", ja: "キッズトラベル ベビーカー", url: RENTAL_PROMO_LINKS.stroller.email },
-    { img: "https://luggage.flyingjp.com/static/rental-item-trike-stroller.jpg", ko: "트라이크 유모차", en: "Trike Stroller", ja: "トライク ベビーカー", url: RENTAL_PROMO_LINKS.stroller.email },
+    { img: `https://luggage.flyingjp.com/static/rental-item-mario-band.jpg?v=${STATIC_ASSET_VERSION}`, ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: RENTAL_PROMO_LINKS.usj.email },
+    { img: `https://luggage.flyingjp.com/static/rental-item-hp-wand.jpg?v=${STATIC_ASSET_VERSION}`, ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: RENTAL_PROMO_LINKS.usj.email },
+    { img: `https://luggage.flyingjp.com/static/rental-item-dyson-straight.jpg?v=${STATIC_ASSET_VERSION}`, ko: "다이슨 에어스트레이트", en: "Dyson Airstraight", ja: "ダイソン ストレートナー", url: RENTAL_PROMO_LINKS.dyson.email },
+    { img: `https://luggage.flyingjp.com/static/rental-item-dyson-airwrap.jpg?v=${STATIC_ASSET_VERSION}`, ko: "다이슨 에어랩", en: "Dyson Airwrap", ja: "ダイソン エアラップ", url: RENTAL_PROMO_LINKS.dyson.email },
+    { img: `https://luggage.flyingjp.com/static/rental-item-cybex-stroller.jpg?v=${STATIC_ASSET_VERSION}`, ko: "cybex 유모차", en: "Cybex Stroller", ja: "サイベックス ベビーカー", url: RENTAL_PROMO_LINKS.stroller.email },
+    { img: `https://luggage.flyingjp.com/static/rental-item-kidstravel-stroller.jpg?v=${STATIC_ASSET_VERSION}`, ko: "키즈트레블 유모차", en: "Kids Travel Stroller", ja: "キッズトラベル ベビーカー", url: RENTAL_PROMO_LINKS.stroller.email },
+    { img: `https://luggage.flyingjp.com/static/rental-item-trike-stroller.jpg?v=${STATIC_ASSET_VERSION}`, ko: "트라이크 유모차", en: "Trike Stroller", ja: "トライク ベビーカー", url: RENTAL_PROMO_LINKS.stroller.email },
   ] as const;
 
   const rentalCardsHtml = rentalItems.map((item, index) => {
@@ -124,6 +125,15 @@ export async function sendOrderConfirmation(
           <li>${lang === "ja" ? "写真は本人確認用で、2週間後に自動削除されます" : lang === "en" ? "Photos for ID verification only, auto-deleted after 2 weeks" : "사진은 본인 확인용이며, 2주 후 자동 삭제"}</li>
         </ul>
       </div>
+    </div>
+
+    <!-- Flying Pass White benefit -->
+    <div style="padding:0 24px 24px">
+      <img
+        src="https://luggage.flyingjp.com/static/flying-pass-white.jpg?v=20260401-2"
+        alt="Flying Pass White + EDION Coupon"
+        style="display:block;width:100%;max-width:472px;height:auto;margin:0 auto;border:1px solid #e5edf9;border-radius:16px;background:#fff"
+      />
     </div>
 
     <!-- Rental suggestions -->

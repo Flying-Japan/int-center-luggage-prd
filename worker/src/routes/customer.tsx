@@ -17,6 +17,7 @@ import { buildOrderId, buildTagNo } from "../services/orderNumber";
 
 const customer = new Hono<AppType>();
 const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
+const STATIC_ASSET_VERSION = "20260401-2";
 
 // ---------------------------------------------------------------------------
 // GET /customer — Intake form (faithful port of original FastAPI template)
@@ -1903,16 +1904,13 @@ a { color: inherit; text-decoration: none; }
           </div>
 
           {/* Benefits card — separate */}
-          {(() => {
-            const lines = secondaryMsg.split("\n");
-            const title = lines[0] || "";
-            return (
-              <div class="card" style="text-align:center;padding:16px 20px;display:grid;gap:8px">
-                <p style="font-size:20px;font-weight:800;color:var(--text);margin:0;letter-spacing:-0.02em" dangerouslySetInnerHTML={{__html: title }} />
-                <img src="/static/flying-pass-white.jpg" alt="Flying Pass White + EDION Coupon" style="width:100%;max-width:260px;margin:2px auto 0;display:block" />
-              </div>
-            );
-          })()}
+          <div class="card" style="text-align:center;padding:14px 14px 16px">
+            <img
+              src={`/static/flying-pass-white.jpg?v=${STATIC_ASSET_VERSION}`}
+              alt="Flying Pass White + EDION Coupon"
+              style="width:100%;max-width:620px;margin:0 auto;display:block"
+            />
+          </div>
 
           {/* Rental suggestion */}
           {(() => {
@@ -1927,13 +1925,13 @@ a { color: inherit; text-decoration: none; }
               ja: "センターですぐレンタルできるサービス",
             };
             const rentalItems = [
-              { img: "/static/rental-item-mario-band.jpg", imgLg: "/static/rental-item-mario-band-lg.jpg", ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: RENTAL_PROMO_LINKS.usj.finish },
-              { img: "/static/rental-item-hp-wand.jpg", imgLg: "/static/rental-item-hp-wand-lg.jpg", ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: RENTAL_PROMO_LINKS.usj.finish },
-              { img: "/static/rental-item-dyson-straight.jpg", imgLg: "/static/rental-item-dyson-straight-lg.jpg", ko: "다이슨 에어스트레이트", en: "Dyson Airstraight", ja: "ダイソン ストレートナー", url: RENTAL_PROMO_LINKS.dyson.finish },
-              { img: "/static/rental-item-dyson-airwrap.jpg", imgLg: "/static/rental-item-dyson-airwrap-lg.jpg", ko: "다이슨 에어랩", en: "Dyson Airwrap", ja: "ダイソン エアラップ", url: RENTAL_PROMO_LINKS.dyson.finish },
-              { img: "/static/rental-item-cybex-stroller.jpg", imgLg: "/static/rental-item-cybex-stroller-lg.jpg", ko: "cybex 유모차", en: "Cybex Stroller", ja: "サイベックス ベビーカー", url: RENTAL_PROMO_LINKS.stroller.finish },
-              { img: "/static/rental-item-kidstravel-stroller.jpg", imgLg: "/static/rental-item-kidstravel-stroller-lg.jpg", ko: "키즈트레블 유모차", en: "Kids Travel Stroller", ja: "キッズトラベル ベビーカー", url: RENTAL_PROMO_LINKS.stroller.finish },
-              { img: "/static/rental-item-trike-stroller.jpg", imgLg: "/static/rental-item-trike-stroller-lg.jpg", ko: "트라이크 유모차", en: "Trike Stroller", ja: "トライク ベビーカー", url: RENTAL_PROMO_LINKS.stroller.finish },
+              { img: `/static/rental-item-mario-band.jpg?v=${STATIC_ASSET_VERSION}`, ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: RENTAL_PROMO_LINKS.usj.finish },
+              { img: `/static/rental-item-hp-wand.jpg?v=${STATIC_ASSET_VERSION}`, ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: RENTAL_PROMO_LINKS.usj.finish },
+              { img: `/static/rental-item-dyson-straight.jpg?v=${STATIC_ASSET_VERSION}`, ko: "다이슨 에어스트레이트", en: "Dyson Airstraight", ja: "ダイソン ストレートナー", url: RENTAL_PROMO_LINKS.dyson.finish },
+              { img: `/static/rental-item-dyson-airwrap.jpg?v=${STATIC_ASSET_VERSION}`, ko: "다이슨 에어랩", en: "Dyson Airwrap", ja: "ダイソン エアラップ", url: RENTAL_PROMO_LINKS.dyson.finish },
+              { img: `/static/rental-item-cybex-stroller.jpg?v=${STATIC_ASSET_VERSION}`, ko: "cybex 유모차", en: "Cybex Stroller", ja: "サイベックス ベビーカー", url: RENTAL_PROMO_LINKS.stroller.finish },
+              { img: `/static/rental-item-kidstravel-stroller.jpg?v=${STATIC_ASSET_VERSION}`, ko: "키즈트레블 유모차", en: "Kids Travel Stroller", ja: "キッズトラベル ベビーカー", url: RENTAL_PROMO_LINKS.stroller.finish },
+              { img: `/static/rental-item-trike-stroller.jpg?v=${STATIC_ASSET_VERSION}`, ko: "트라이크 유모차", en: "Trike Stroller", ja: "トライク ベビーカー", url: RENTAL_PROMO_LINKS.stroller.finish },
             ];
             return (
               <div class="card" style="padding:20px;background:linear-gradient(135deg,rgba(234,242,255,0.9) 0%,rgba(255,255,255,0.95) 50%,rgba(234,242,255,0.9) 100%);border:1px solid rgba(47,128,248,0.15)">

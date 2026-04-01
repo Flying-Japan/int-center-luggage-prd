@@ -103,10 +103,21 @@ staticRoutes.get("/static/rental-banner-stroller-small.jpg", async (c) => {
 });
 
 // Rental item card images (served from R2)
-staticRoutes.get("/static/rental-item-:name.jpg", async (c) => {
-  const name = c.req.param("name");
-  return serveR2Image(c, `static/rental-item-${name}.jpg`, "image/jpeg");
-});
+const rentalItemImageNames = [
+  "rental-item-mario-band.jpg",
+  "rental-item-hp-wand.jpg",
+  "rental-item-dyson-straight.jpg",
+  "rental-item-dyson-airwrap.jpg",
+  "rental-item-cybex-stroller.jpg",
+  "rental-item-kidstravel-stroller.jpg",
+  "rental-item-trike-stroller.jpg",
+] as const;
+
+for (const fileName of rentalItemImageNames) {
+  staticRoutes.get(`/static/${fileName}`, async (c) => {
+    return serveR2Image(c, `static/${fileName}`, "image/jpeg");
+  });
+}
 
 // Embedded CSS — ported from original FastAPI app.css
 const CSS_CONTENT = `
