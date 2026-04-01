@@ -671,15 +671,34 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               });
             });
 
-            /* ── Column resize ── */
+            /* ── Column resize (persisted to localStorage) ── */
+            var COL_WIDTHS_KEY='luggage_col_widths';
+            function saveColWidths(widths){try{localStorage.setItem(COL_WIDTHS_KEY,JSON.stringify(widths))}catch(e){}}
+            function loadColWidths(){try{return JSON.parse(localStorage.getItem(COL_WIDTHS_KEY)||'{}')}catch(e){return {}}}
+
             var table=document.getElementById('staff-orders-table');
             if(table){
+              // Restore saved widths
+              var saved=loadColWidths();
+              if(Object.keys(saved).length>0){
+                table.style.tableLayout='fixed';
+                Object.keys(saved).forEach(function(key){
+                  var col=table.querySelector('col[data-col-key="'+key+'"]');
+                  if(col)col.style.width=saved[key]+'px';
+                });
+              }
+
               var cols=table.querySelectorAll('colgroup col');
               table.querySelectorAll('th .col-resize').forEach(function(handle){
                 var th=handle.parentElement;
                 var colKey=th.getAttribute('data-col-key');
                 var col=table.querySelector('col[data-col-key="'+colKey+'"]');
                 var startX,startW;
+                function persistWidth(newW){
+                  var widths=loadColWidths();
+                  widths[colKey]=newW;
+                  saveColWidths(widths);
+                }
                 handle.addEventListener('mousedown',function(e){
                   e.preventDefault();e.stopPropagation();
                   startX=e.pageX;startW=th.offsetWidth;
@@ -692,6 +711,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   function onUp(){
                     document.removeEventListener('mousemove',onMove);
                     document.removeEventListener('mouseup',onUp);
+                    persistWidth(th.offsetWidth);
                   }
                   document.addEventListener('mousemove',onMove);
                   document.addEventListener('mouseup',onUp);
@@ -708,6 +728,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   function onUp(){
                     document.removeEventListener('touchmove',onMove);
                     document.removeEventListener('touchend',onUp);
+                    persistWidth(th.offsetWidth);
                   }
                   document.addEventListener('touchmove',onMove,{passive:true});
                   document.addEventListener('touchend',onUp);
@@ -800,7 +821,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       var idImg=document.createElement('div');
                       idImg.innerHTML='<div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px">신분증</div>';
                       var img1=document.createElement('img');
-                      img1.src=idImgUrl;img1.style.cssText='max-width:280px;max-height:200px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer';
+                      img1.src=idImgUrl;img1.style.cssText='max-width:360px;max-height:270px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer';
                       img1.onclick=function(){window.open(idImgUrl,'_blank')};
                       idImg.appendChild(img1);imgWrap.appendChild(idImg);
                     }
@@ -808,7 +829,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       var lugImg=document.createElement('div');
                       lugImg.innerHTML='<div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px">짐 사진</div>';
                       var img2=document.createElement('img');
-                      img2.src=lugImgUrl;img2.style.cssText='max-width:280px;max-height:200px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer';
+                      img2.src=lugImgUrl;img2.style.cssText='max-width:360px;max-height:270px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer';
                       img2.onclick=function(){window.open(lugImgUrl,'_blank')};
                       lugImg.appendChild(img2);imgWrap.appendChild(lugImg);
                     }
