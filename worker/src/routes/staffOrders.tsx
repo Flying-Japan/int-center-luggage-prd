@@ -509,7 +509,7 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
       || pickupJST.getUTCFullYear() !== nowJST.getUTCFullYear();
   }
   const orderId = await buildOrderId(c.env.DB, undefined, isOvernight);
-  const tagNo = buildTagNo(orderId);
+  const tagNo = await buildTagNo(c.env.DB, orderId);
   const { setQty, pricePerDay } = calculatePricePerDay(suitcaseQty, backpackQty);
 
   let expectedStorageDays = 1;

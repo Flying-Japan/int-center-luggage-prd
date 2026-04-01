@@ -1459,7 +1459,7 @@ customer.post("/customer/submit", async (c) => {
     || pickupJST.getUTCMonth() !== nowJST.getUTCMonth()
     || pickupJST.getUTCFullYear() !== nowJST.getUTCFullYear();
   const orderId = await buildOrderId(c.env.DB, undefined, isOvernight);
-  const tagNo = buildTagNo(orderId);
+  const tagNo = await buildTagNo(c.env.DB, orderId);
 
   // --- Upload images ---
   let idImageUrl: string | null = null;

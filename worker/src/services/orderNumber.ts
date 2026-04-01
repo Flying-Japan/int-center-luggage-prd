@@ -1,21 +1,21 @@
 /**
  * Sequential order ID and tag number generation.
- * Ported from Python: app/services/order_number.py
  *
- * Order ID format: YYYYMMDD-NNN (e.g., 20260219-001)
- * Tag number: numeric sequence per business day
+ * Order ID: YYYYMMDD-NNN — always unique, always increments, never reused.
+ * Tag number: physical luggage tag.
+ *   - Same-day pickup: 1~91, recycled from CANCELLED/PICKED_UP when full.
+ *   - Overnight pickup: 92~, always matches order_id seq.
  */
 
 import { todayBusinessDate } from "./storage";
 
 /**
  * Generate next order_id for today using D1 luggage_daily_counters.
- * Uses atomic INSERT ON CONFLICT UPDATE with RETURNING to safely increment in one round-trip.
+ * Atomic INSERT ON CONFLICT UPDATE with RETURNING.
  */
 export async function buildOrderId(db: D1Database, nowUtc?: Date, overnight?: boolean): Promise<string> {
   const businessDate = nowUtc ? formatBusinessDate(nowUtc) : todayBusinessDate();
 
-  // Two counters: same-day (1~95) and overnight/next-day+ (96~)
   const counterKey = overnight ? `${businessDate}-overnight` : businessDate;
   const startSeq = overnight ? 92 : 1;
 
@@ -34,16 +34,58 @@ export async function buildOrderId(db: D1Database, nowUtc?: Date, overnight?: bo
 }
 
 /**
- * Derive tag_no from an order_id's sequence number.
- * Since buildOrderId already handles reuse and sequential numbering,
- * the tag_no is simply the NNN part of YYYYMMDD-NNN — keeping them in sync.
+ * Generate tag_no for an order.
  *
- * If pickup is the next day or later (in JST), the tag starts from 91+.
+ * Overnight: tag = order_id seq (92+), always matches.
+ * Same-day:
+ *   - If seq ≤ 91: tag = seq (matches order_id)
+ *   - If seq > 91: recycle lowest tag 1~91 from CANCELLED/PICKED_UP orders today
  */
-export function buildTagNo(orderId: string): string {
-  // tag_no = sequence from order_id (YYYYMMDD-NNN → NNN)
-  // Same-day: 1~95, overnight: 96+. Always matches order_id.
-  return String(parseInt(orderId.split("-")[1], 10));
+export async function buildTagNo(db: D1Database, orderId: string): Promise<string> {
+  const seq = parseInt(orderId.split("-")[1], 10);
+  const businessDate = orderId.split("-")[0]; // YYYYMMDD
+
+  // Overnight or within range: tag = seq
+  if (seq >= 92 || seq <= 91) {
+    // For same-day ≤ 91, check if this tag is already taken by an active order
+    if (seq <= 91) {
+      const conflict = await db
+        .prepare(
+          `SELECT 1 FROM luggage_orders
+           WHERE order_id LIKE ? AND tag_no = ? AND status IN ('PAYMENT_PENDING', 'PAID')
+           LIMIT 1`
+        )
+        .bind(`${businessDate}-%`, String(seq))
+        .first();
+
+      if (!conflict) {
+        return String(seq);
+      }
+      // Tag taken by active order — fall through to recycle
+    } else {
+      // Overnight (92+): always use seq
+      return String(seq);
+    }
+  }
+
+  // Recycle: find lowest tag 1~91 not used by an active (PAYMENT_PENDING/PAID) order today
+  const activeTagsResult = await db
+    .prepare(
+      `SELECT CAST(tag_no AS INTEGER) as num FROM luggage_orders
+       WHERE order_id LIKE ? AND status IN ('PAYMENT_PENDING', 'PAID')
+       AND CAST(tag_no AS INTEGER) BETWEEN 1 AND 91
+       ORDER BY num ASC`
+    )
+    .bind(`${businessDate}-%`)
+    .all<{ num: number }>();
+
+  const activeTags = new Set(activeTagsResult.results.map((r) => r.num));
+  for (let i = 1; i <= 91; i++) {
+    if (!activeTags.has(i)) return String(i);
+  }
+
+  // All 91 tags active (extremely unlikely) — use seq as fallback
+  return String(seq);
 }
 
 /** Convert a UTC Date to JST business date string (YYYYMMDD). */
