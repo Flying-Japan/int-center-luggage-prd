@@ -83,6 +83,25 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   // Persist filter to cookie
   c.header("Set-Cookie", `luggage_filters=${encodeURIComponent(statusFilters.join(","))};Path=/staff;Max-Age=86400;SameSite=Lax`);
 
+  // Build counts WHERE clause (date + search only, no status filter)
+  // so badge counts show per-status breakdown within current date/search context
+  let countsWhere = "WHERE manual_entry = 0";
+  const countsParams: string[] = [];
+  const like = q ? `%${q}%` : "";
+
+  if (q) {
+    countsWhere += " AND (name LIKE ? OR order_id LIKE ? OR tag_no LIKE ? OR phone LIKE ?)";
+    countsParams.push(like, like, like, like);
+  }
+  if (dateFrom) {
+    countsWhere += " AND created_at >= ?";
+    countsParams.push(dateFrom + " 00:00:00");
+  }
+  if (dateTo) {
+    countsWhere += " AND created_at <= ?";
+    countsParams.push(dateTo + " 23:59:59");
+  }
+
   // Build shared WHERE clause and params (used for both count and list queries)
   let whereClause = "WHERE 1=1";
   const params: string[] = [];
@@ -94,7 +113,6 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
   if (q) {
     whereClause += " AND (o.name LIKE ? OR o.order_id LIKE ? OR o.tag_no LIKE ? OR o.phone LIKE ?)";
-    const like = `%${q}%`;
     params.push(like, like, like, like);
   }
 
@@ -105,11 +123,11 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
   if (dateFrom) {
     whereClause += " AND o.created_at >= ?";
-    params.push(dateFrom + "T00:00:00Z");
+    params.push(dateFrom + " 00:00:00");
   }
   if (dateTo) {
     whereClause += " AND o.created_at <= ?";
-    params.push(dateTo + "T23:59:59Z");
+    params.push(dateTo + " 23:59:59");
   }
 
   const countSql = `SELECT COUNT(*) as total FROM luggage_orders o ${whereClause}`;
@@ -145,8 +163,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
         SUM(CASE WHEN status = 'PICKED_UP' THEN 1 ELSE 0 END) as picked_up_count,
         SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) as cancelled_count,
         COUNT(*) as total_count
-      FROM luggage_orders WHERE manual_entry = 0`
-    ).first<{ pending_count: number; paid_count: number; picked_up_count: number; cancelled_count: number; total_count: number }>(),
+      FROM luggage_orders ${countsWhere}`
+    ).bind(...countsParams).first<{ pending_count: number; paid_count: number; picked_up_count: number; cancelled_count: number; total_count: number }>(),
     c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>(),
     c.env.DB.prepare("SELECT floor, count FROM luggage_referral_counts WHERE business_date = ?").bind(todayRef).all<{ floor: string; count: number }>(),
   ]);
