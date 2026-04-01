@@ -176,12 +176,16 @@ async function resolveAutoSalesSummariesByDate(db: D1Database, businessDates: st
       result.set(businessDate, live);
       continue;
     }
-    if (daily) {
+    if (daily && daily.totalAmount > 0) {
       result.set(businessDate, daily);
       continue;
     }
-    if (live) {
+    if (live && live.totalAmount > 0) {
       result.set(businessDate, live);
+      continue;
+    }
+    if (daily) {
+      result.set(businessDate, daily);
     }
   }
   return result;
