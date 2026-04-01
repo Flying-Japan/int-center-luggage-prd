@@ -1906,15 +1906,9 @@ a { color: inherit; text-decoration: none; }
           {(() => {
             const lines = secondaryMsg.split("\n");
             const title = lines[0] || "";
-            const body = lines.slice(1).join("\n");
             return (
               <div class="card" style="text-align:center;padding:16px 20px;display:grid;gap:8px">
                 <p style="font-size:20px;font-weight:800;color:var(--text);margin:0;letter-spacing:-0.02em" dangerouslySetInnerHTML={{__html: title }} />
-                <p class="secondary-msg" style="margin:0;font-size:13px;line-height:1.6" dangerouslySetInnerHTML={{__html: body
-                  .replace(/\n/g, "<br/>")
-                  .replace(/(최대 17% 할인!|up to 17% off|最大17%割引)/g, '<strong style="color:var(--primary)">$1</strong>')
-                  .replace(/(플라잉 화이트패스|Flying White Pass|フライングホワイトパス)/g, '<strong>$1</strong>')
-                }} />
                 <img src="/static/flying-pass-white.jpg" alt="Flying Pass White + EDION Coupon" style="width:100%;max-width:260px;margin:2px auto 0;display:block" />
               </div>
             );
@@ -1933,12 +1927,13 @@ a { color: inherit; text-decoration: none; }
               ja: "センターですぐレンタルできるサービス",
             };
             const rentalItems = [
-              { emoji: "🎮", ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: RENTAL_PROMO_LINKS.usj.finish },
-              { emoji: "🪄", ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: RENTAL_PROMO_LINKS.usj.finish },
-              { emoji: "💇", ko: "다이슨 에어랩", en: "Dyson Airwrap", ja: "ダイソン エアラップ", url: RENTAL_PROMO_LINKS.dyson.finish },
-              { emoji: "✨", ko: "다이슨 고데기", en: "Dyson Airstraight", ja: "ダイソン ストレートナー", url: RENTAL_PROMO_LINKS.dyson.finish },
-              { emoji: "👶", ko: "유모차 대여", en: "Stroller Rental", ja: "ベビーカーレンタル", url: RENTAL_PROMO_LINKS.stroller.finish },
-              { emoji: "🎫", ko: "플라잉패스 먹방패스", en: "Flying Food Pass", ja: "フライングフードパス", url: RENTAL_PROMO_LINKS.usj.finish },
+              { img: "/static/rental-item-mario-band.jpg", imgLg: "/static/rental-item-mario-band-lg.jpg", ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: RENTAL_PROMO_LINKS.usj.finish },
+              { img: "/static/rental-item-hp-wand.jpg", imgLg: "/static/rental-item-hp-wand-lg.jpg", ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: RENTAL_PROMO_LINKS.usj.finish },
+              { img: "/static/rental-item-dyson-straight.jpg", imgLg: "/static/rental-item-dyson-straight-lg.jpg", ko: "다이슨 에어스트레이트", en: "Dyson Airstraight", ja: "ダイソン ストレートナー", url: RENTAL_PROMO_LINKS.dyson.finish },
+              { img: "/static/rental-item-dyson-airwrap.jpg", imgLg: "/static/rental-item-dyson-airwrap-lg.jpg", ko: "다이슨 에어랩", en: "Dyson Airwrap", ja: "ダイソン エアラップ", url: RENTAL_PROMO_LINKS.dyson.finish },
+              { img: "/static/rental-item-cybex-stroller.jpg", imgLg: "/static/rental-item-cybex-stroller-lg.jpg", ko: "cybex 유모차", en: "Cybex Stroller", ja: "サイベックス ベビーカー", url: RENTAL_PROMO_LINKS.stroller.finish },
+              { img: "/static/rental-item-kidstravel-stroller.jpg", imgLg: "/static/rental-item-kidstravel-stroller-lg.jpg", ko: "키즈트레블 유모차", en: "Kids Travel Stroller", ja: "キッズトラベル ベビーカー", url: RENTAL_PROMO_LINKS.stroller.finish },
+              { img: "/static/rental-item-trike-stroller.jpg", imgLg: "/static/rental-item-trike-stroller-lg.jpg", ko: "트라이크 유모차", en: "Trike Stroller", ja: "トライク ベビーカー", url: RENTAL_PROMO_LINKS.stroller.finish },
             ];
             return (
               <div class="card" style="padding:20px;background:linear-gradient(135deg,rgba(234,242,255,0.9) 0%,rgba(255,255,255,0.95) 50%,rgba(234,242,255,0.9) 100%);border:1px solid rgba(47,128,248,0.15)">
@@ -1946,9 +1941,8 @@ a { color: inherit; text-decoration: none; }
                 <p style="text-align:center;font-size:12px;color:var(--primary);margin:0 0 16px;font-weight:500">✨ {rentalSub[lang] || rentalSub.ko} ✨</p>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
                   {rentalItems.map(item => (
-                    <a href={item.url} target="_blank" rel="noopener" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:var(--radius-md);border:1px solid var(--line);text-decoration:none;color:var(--text);transition:border-color .2s,box-shadow .2s;background:var(--surface)">
-                      <span style="font-size:28px">{item.emoji}</span>
-                      <span style="font-size:12px;font-weight:600;text-align:center;line-height:1.3">{lang === "en" ? item.en : lang === "ja" ? item.ja : item.ko}</span>
+                    <a href={item.url} target="_blank" rel="noopener" style="display:block;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--line);text-decoration:none;transition:border-color .2s,box-shadow .2s;background:var(--surface)">
+                      <img src={item.img} alt={lang === "en" ? item.en : lang === "ja" ? item.ja : item.ko} style="display:block;width:100%;height:auto" loading="lazy" />
                     </a>
                   ))}
                 </div>

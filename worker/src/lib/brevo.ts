@@ -34,6 +34,28 @@ export async function sendOrderConfirmation(
     ? `[Flying Japan] Luggage Storage Confirmed (${orderId})`
     : `[Flying Japan] 짐 보관 접수 완료 (${orderId})`;
 
+  const rentalItems = [
+    { img: "https://luggage.flyingjp.com/static/rental-item-mario-band.jpg", ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: RENTAL_PROMO_LINKS.usj.email },
+    { img: "https://luggage.flyingjp.com/static/rental-item-hp-wand.jpg", ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: RENTAL_PROMO_LINKS.usj.email },
+    { img: "https://luggage.flyingjp.com/static/rental-item-dyson-straight.jpg", ko: "다이슨 에어스트레이트", en: "Dyson Airstraight", ja: "ダイソン ストレートナー", url: RENTAL_PROMO_LINKS.dyson.email },
+    { img: "https://luggage.flyingjp.com/static/rental-item-dyson-airwrap.jpg", ko: "다이슨 에어랩", en: "Dyson Airwrap", ja: "ダイソン エアラップ", url: RENTAL_PROMO_LINKS.dyson.email },
+    { img: "https://luggage.flyingjp.com/static/rental-item-cybex-stroller.jpg", ko: "cybex 유모차", en: "Cybex Stroller", ja: "サイベックス ベビーカー", url: RENTAL_PROMO_LINKS.stroller.email },
+    { img: "https://luggage.flyingjp.com/static/rental-item-kidstravel-stroller.jpg", ko: "키즈트레블 유모차", en: "Kids Travel Stroller", ja: "キッズトラベル ベビーカー", url: RENTAL_PROMO_LINKS.stroller.email },
+    { img: "https://luggage.flyingjp.com/static/rental-item-trike-stroller.jpg", ko: "트라이크 유모차", en: "Trike Stroller", ja: "トライク ベビーカー", url: RENTAL_PROMO_LINKS.stroller.email },
+  ] as const;
+
+  const rentalCardsHtml = rentalItems.map((item, index) => {
+    const label = lang === "ja" ? item.ja : lang === "en" ? item.en : item.ko;
+    return `${index % 2 === 0 ? "<tr>" : ""}
+          <td style="padding:${index < 2 ? "4px 6px 10px 0" : "10px 6px 0 0"};text-align:center;width:50%;vertical-align:top">
+            <a href="${item.url}" style="display:block;border:1px solid #dbe4f2;border-radius:12px;overflow:hidden;background:#f8fbff;text-decoration:none">
+              <img src="${item.img}" alt="${label}" width="100%" style="display:block;width:100%;height:auto;border:0" />
+              <span style="display:block;padding:9px 8px 10px;font-size:11px;line-height:1.35;color:#191f28;font-weight:700">${label}</span>
+            </a>
+          </td>
+          ${index % 2 === 1 || index === rentalItems.length - 1 ? `${index % 2 === 0 ? '<td style="width:50%"></td>' : ""}</tr>` : ""}`;
+  }).join("");
+
   const html = `
 <!DOCTYPE html>
 <html lang="${lang}">
@@ -105,16 +127,7 @@ export async function sendOrderConfirmation(
     <div style="padding:0 24px 24px">
       <p style="text-align:center;font-size:14px;font-weight:700;margin:0 0 12px">${lang === "ja" ? "センターでレンタルもできます ✈️" : lang === "en" ? "Rentals available at our center ✈️" : "센터에서 대여도 가능해요 ✈️"}</p>
       <table style="width:100%;border-collapse:collapse">
-        <tr>
-          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.usj.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🎮 ${lang === "ja" ? "マリオバンド" : lang === "en" ? "Mario Band" : "마리오밴드"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.usj.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🪄 ${lang === "ja" ? "HP杖" : lang === "en" ? "HP Wand" : "해리포터 지팡이"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.dyson.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">💇 ${lang === "ja" ? "エアラップ" : lang === "en" ? "Airwrap" : "다이슨 에어랩"}</a></td>
-        </tr>
-        <tr>
-          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.dyson.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">✨ ${lang === "ja" ? "ストレートナー" : lang === "en" ? "Straightener" : "다이슨 고데기"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.stroller.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">👶 ${lang === "ja" ? "ベビーカー" : lang === "en" ? "Stroller" : "유모차"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.usj.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🎫 ${lang === "ja" ? "フードパス" : lang === "en" ? "Food Pass" : "먹방패스"}</a></td>
-        </tr>
+        ${rentalCardsHtml}
       </table>
     </div>
 

@@ -102,6 +102,12 @@ staticRoutes.get("/static/rental-banner-stroller-small.jpg", async (c) => {
   return serveR2Image(c, "static/rental-banner-stroller-small.jpg", "image/jpeg");
 });
 
+// Rental item card images (served from R2)
+staticRoutes.get("/static/rental-item-:name.jpg", async (c) => {
+  const name = c.req.param("name");
+  return serveR2Image(c, `static/rental-item-${name}.jpg`, "image/jpeg");
+});
+
 // Embedded CSS — ported from original FastAPI app.css
 const CSS_CONTENT = `
 /* ============================================================
