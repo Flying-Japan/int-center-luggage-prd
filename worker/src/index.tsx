@@ -794,20 +794,22 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     // Images section
                     var imgWrap=document.createElement('div');
                     imgWrap.style.cssText='display:flex;gap:12px;margin-top:12px;flex-wrap:wrap';
+                    var idImgUrl='/staff/orders/'+o.order_id+'/id-image';
+                    var lugImgUrl='/staff/orders/'+o.order_id+'/luggage-image';
                     if(o.id_image_url){
                       var idImg=document.createElement('div');
                       idImg.innerHTML='<div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px">신분증</div>';
                       var img1=document.createElement('img');
-                      img1.src=o.id_image_url;img1.style.cssText='max-width:200px;max-height:150px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer';
-                      img1.onclick=function(){window.open(o.id_image_url,'_blank')};
+                      img1.src=idImgUrl;img1.style.cssText='max-width:280px;max-height:200px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer';
+                      img1.onclick=function(){window.open(idImgUrl,'_blank')};
                       idImg.appendChild(img1);imgWrap.appendChild(idImg);
                     }
                     if(o.luggage_image_url){
                       var lugImg=document.createElement('div');
                       lugImg.innerHTML='<div style="font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px">짐 사진</div>';
                       var img2=document.createElement('img');
-                      img2.src=o.luggage_image_url;img2.style.cssText='max-width:200px;max-height:150px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer';
-                      img2.onclick=function(){window.open(o.luggage_image_url,'_blank')};
+                      img2.src=lugImgUrl;img2.style.cssText='max-width:280px;max-height:200px;border-radius:8px;border:1px solid #e2e8f0;cursor:pointer';
+                      img2.onclick=function(){window.open(lugImgUrl,'_blank')};
                       lugImg.appendChild(img2);imgWrap.appendChild(lugImg);
                     }
                     if(o.id_image_url||o.luggage_image_url) td.appendChild(imgWrap);
