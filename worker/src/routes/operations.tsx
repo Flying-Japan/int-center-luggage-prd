@@ -1015,8 +1015,7 @@ ops.get("/staff/handover", async (c) => {
                         <span style={`font-size:9px;padding:2px 6px;border-radius:4px;font-weight:600;white-space:nowrap;${catStyle}`}>{catLabel}</span>
                         {!isRead && !isMine && <span style="font-size:9px;padding:2px 6px;border-radius:4px;font-weight:700;background:#dc2626;color:#fff">NEW</span>}
                       </div>
-                      <p class="ops-item-content" style={`white-space:pre-line;margin:8px 0;font-size:13px;line-height:1.6;color:#37352f${contentStr.length > 200 ? ";max-height:100px;overflow:hidden;mask-image:linear-gradient(180deg,#000 60%,transparent)" : ""}`}>{contentStr}</p>
-                      {contentStr.length > 200 && <a href={`/staff/handover/${noteId}/edit`} style="font-size:11px;color:var(--primary)">더 보기 →</a>}
+                      <p class="ops-item-content" style="white-space:pre-line;margin:8px 0;font-size:13px;line-height:1.6;color:#37352f">{contentStr}</p>
                       <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
                         <small style="color:#94a3b8;font-size:11px">
                           {(note.author_name as string) || "알수없음"} · {note.created_at ? new Date(note.created_at as string + "Z").toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}
