@@ -998,61 +998,70 @@ ops.get("/staff/handover", async (c) => {
                 {noteRows.map((note: Record<string, unknown>) => {
                   const noteId = note.note_id as number;
                   const isRead = readNoteIds.has(noteId);
+                  const isMine = (note.staff_id as string) === staff.id;
                   const noteComments = commentsByNote.get(noteId) || [];
-                  const catLabel = NOTE_CATEGORY_LABELS[note.category as string] || (note.category as string);
+                  const cat = note.category as string;
+                  const catLabel = NOTE_CATEGORY_LABELS[cat] || cat;
+                  const catColors: Record<string, string> = { URGENT: "background:#fef2f2;color:#dc2626;border:1px solid #fca5a5", NOTICE: "background:#eff6ff;color:#2563eb;border:1px solid #93c5fd", HANDOVER: "background:#f0fdf4;color:#166534;border:1px solid #86efac", EXPERIENCE: "background:#fdf4ff;color:#9333ea;border:1px solid #d8b4fe" };
+                  const catStyle = catColors[cat] || "background:#f1f5f9;color:#475569;border:1px solid #cbd5e1";
+                  const isPinned = !!(note.is_pinned as number);
+                  const unreadStyle = !isRead && !isMine ? "border-left:4px solid var(--primary);background:linear-gradient(90deg,rgba(47,128,248,0.04) 0%,transparent 30%)" : isPinned ? "border-left:4px solid #f59e0b" : "";
+                  const contentStr = note.content as string;
                   return (
-                    <div class={`ops-item ${isRead ? "" : "ops-item-unread"}`} style={isRead ? "" : "border-left:3px solid var(--primary)"}>
-                      <div class="ops-item-head">
-                        <strong>{(note.is_pinned as number) ? "[고정] " : ""}{note.title as string}</strong>
-                        <span class="ops-item-meta">
-                          <span class="status-pill" style="font-size:10px">{catLabel}</span>
-                          {isRead ? <span class="status-pill">읽음</span> : <span class="status-pill">새글</span>}
-                        </span>
+                    <div class="ops-item" style={unreadStyle}>
+                      <div class="ops-item-head" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                        {isPinned && <span style="font-size:11px;color:#f59e0b;font-weight:700">📌</span>}
+                        <strong style="flex:1;min-width:0">{note.title as string}</strong>
+                        <span style={`font-size:9px;padding:2px 6px;border-radius:4px;font-weight:600;white-space:nowrap;${catStyle}`}>{catLabel}</span>
+                        {!isRead && !isMine && <span style="font-size:9px;padding:2px 6px;border-radius:4px;font-weight:700;background:#dc2626;color:#fff">NEW</span>}
                       </div>
-                      <p class="ops-item-content" style="white-space:pre-line">{note.content as string}</p>
-                      <small class="ops-item-date">
-                        {(note.author_name as string) || "알수없음"} · {note.created_at ? new Date(note.created_at as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}
-                      </small>
-                      {(() => {
-                        const readers = readersByNote.get(noteId) || [];
-                        return readers.length > 0 ? (
-                          <small style="display:block;margin-top:4px;color:#94a3b8;font-size:11px">읽음: {readers.join(", ")}</small>
-                        ) : null;
-                      })()}
-                      {!isRead && (
-                        <form method="post" action={`/staff/handover/${noteId}/read`} style="display:inline-block;margin-top:4px">
-                          <button class="btn btn-sm" type="submit">읽음 표시</button>
-                        </form>
-                      )}
+                      <p class="ops-item-content" style={`white-space:pre-line;margin:8px 0;font-size:13px;line-height:1.6;color:#37352f${contentStr.length > 200 ? ";max-height:100px;overflow:hidden;mask-image:linear-gradient(180deg,#000 60%,transparent)" : ""}`}>{contentStr}</p>
+                      {contentStr.length > 200 && <a href={`/staff/handover/${noteId}/edit`} style="font-size:11px;color:var(--primary)">더 보기 →</a>}
+                      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
+                        <small style="color:#94a3b8;font-size:11px">
+                          {(note.author_name as string) || "알수없음"} · {note.created_at ? new Date(note.created_at as string + "Z").toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}
+                        </small>
+                        {(() => {
+                          const readers = readersByNote.get(noteId) || [];
+                          return readers.length > 0 ? (
+                            <small style="color:#cbd5e1;font-size:10px">👁 {readers.length}명 읽음</small>
+                          ) : null;
+                        })()}
+                        {!isRead && !isMine && (
+                          <form method="post" action={`/staff/handover/${noteId}/read`} style="display:inline">
+                            <button class="btn btn-sm" type="submit" style="font-size:10px;min-height:24px;padding:2px 8px">읽음 표시</button>
+                          </form>
+                        )}
+                      </div>
 
                       {/* Comments */}
                       {noteComments.length > 0 && (
-                        <div style="margin-top:8px;padding-left:12px;border-left:2px solid #e5e5e5">
+                        <div style="margin-top:10px;padding:8px 0 0;border-top:1px solid #f0f0ee">
                           {noteComments.map((cm) => (
-                            <div style="margin-bottom:6px;font-size:12px">
-                              <strong style="color:#37352f">{(cm.author_name as string) || "알수없음"}</strong>
-                              <span style="color:#999;margin-left:6px">{cm.created_at ? new Date(cm.created_at as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}</span>
-                              <p style="margin:2px 0 0;color:#555">{cm.content as string}</p>
+                            <div style="margin-bottom:6px;font-size:12px;padding-left:10px;border-left:2px solid #e2e8f0">
+                              <strong style="color:#37352f;font-size:11px">{(cm.author_name as string) || "알수없음"}</strong>
+                              <span style="color:#94a3b8;margin-left:6px;font-size:10px">{cm.created_at ? new Date(cm.created_at as string + "Z").toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}</span>
+                              <p style="margin:2px 0 0;color:#555;font-size:12px">{cm.content as string}</p>
                             </div>
                           ))}
                         </div>
                       )}
 
-                      {/* Comment form */}
-                      <form method="post" action={`/staff/handover/${noteId}/comments`} style="display:flex;gap:6px;margin-top:8px">
-                        <input class="control" type="text" name="content" placeholder="댓글 입력..." required style="flex:1;font-size:12px;padding:4px 8px" />
-                        <button class="btn btn-sm btn-secondary" type="submit">댓글</button>
-                      </form>
-
-                      {/* Edit/Delete (author or admin) */}
-                      {((note.staff_id as string) === staff.id || staff.role === "admin") && (
-                        <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
-                          <a href={`/staff/handover/${noteId}/edit`} class="btn btn-sm" style="font-size:11px;text-decoration:none">수정</a>
-                          <form method="post" action={`/staff/handover/${noteId}/delete`} style="display:inline" onsubmit="return confirm('이 노트를 삭제하시겠습니까?')">
-                            <button class="btn btn-sm btn-secondary" style="font-size:11px" type="submit">삭제</button>
-                          </form>
-                        </div>
-                      )}
+                      {/* Comment form + actions */}
+                      <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
+                        <form method="post" action={`/staff/handover/${noteId}/comments`} style="display:flex;gap:4px;flex:1">
+                          <input class="control" type="text" name="content" placeholder="댓글..." required style="flex:1;font-size:11px;padding:4px 8px;min-height:28px" />
+                          <button class="btn btn-sm btn-secondary" type="submit" style="font-size:10px;min-height:28px;padding:2px 8px">댓글</button>
+                        </form>
+                        {(isMine || staff.role === "admin") && (
+                          <>
+                            <a href={`/staff/handover/${noteId}/edit`} style="font-size:10px;color:var(--primary);white-space:nowrap">수정</a>
+                            <form method="post" action={`/staff/handover/${noteId}/delete`} style="display:inline" onsubmit="return confirm('삭제하시겠습니까?')">
+                              <button type="submit" style="font-size:10px;color:#94a3b8;background:none;border:none;cursor:pointer;padding:0;min-height:auto;box-shadow:none">삭제</button>
+                            </form>
+                          </>
+                        )}
+                      </div>
                       {/* Edit history */}
                       {(() => {
                         const noteEdits = editsByNote.get(noteId) || [];

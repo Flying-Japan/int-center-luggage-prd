@@ -85,8 +85,9 @@ staffApi.get("/staff/api/handover/unread", async (c) => {
   const staff = getStaff(c);
   const row = await c.env.DB.prepare(
     `SELECT COUNT(*) as count FROM luggage_handover_notes n
-     WHERE NOT EXISTS (SELECT 1 FROM luggage_handover_reads r WHERE r.note_id = n.note_id AND r.staff_id = ?)`
-  ).bind(staff.id).first<{ count: number }>();
+     WHERE n.staff_id != ?
+       AND NOT EXISTS (SELECT 1 FROM luggage_handover_reads r WHERE r.note_id = n.note_id AND r.staff_id = ?)`
+  ).bind(staff.id, staff.id).first<{ count: number }>();
   return c.json({ count: row?.count ?? 0 });
 });
 
