@@ -1023,7 +1023,7 @@ ops.get("/staff/handover", async (c) => {
                         {(() => {
                           const readers = readersByNote.get(noteId) || [];
                           return readers.length > 0 ? (
-                            <small style="color:#cbd5e1;font-size:10px">👁 {readers.length}명 읽음</small>
+                            <small style="color:#94a3b8;font-size:10px">👁 {readers.join(", ")}</small>
                           ) : null;
                         })()}
                         {!isRead && !isMine && (
