@@ -362,6 +362,60 @@ ops.get("/staff/cash-closing", async (c) => {
                     );
                   })}
                 </tbody>
+                {closingRows.length > 0 && (() => {
+                  const rows = closingRows.map((cl) => {
+                    const auto = autoSalesByDate.get(cl.business_date as string)?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
+                    return {
+                      total: (cl.total_amount as number) || 0,
+                      paypay: (cl.paypay_amount as number) || 0,
+                      auto,
+                      diff: ((cl.total_amount as number) || 0) + ((cl.paypay_amount as number) || 0) - auto,
+                      f4: (cl.floor_4f_count as number) || 0,
+                      f8: (cl.floor_8f_count as number) || 0,
+                    };
+                  });
+                  const n = rows.length;
+                  const sum = (fn: (r: typeof rows[0]) => number) => rows.reduce((s, r) => s + fn(r), 0);
+                  const avg = (fn: (r: typeof rows[0]) => number) => Math.round(sum(fn) / n);
+                  const mn = (fn: (r: typeof rows[0]) => number) => Math.min(...rows.map(fn));
+                  const mx = (fn: (r: typeof rows[0]) => number) => Math.max(...rows.map(fn));
+                  const st = "padding:3px 6px;text-align:right;font-size:10px;font-weight:600";
+                  const lb = "padding:3px 6px;font-size:10px;font-weight:700";
+                  return (
+                    <tfoot style="border-top:2px solid #cbd5e1">
+                      <tr style="background:#f8fafc">
+                        <td style={lb}>Avg</td><td colSpan={10}></td>
+                        <td style={st}>¥{avg(r => r.total).toLocaleString()}</td>
+                        <td style={st}>¥{avg(r => r.paypay).toLocaleString()}</td>
+                        <td style={`${st};color:#2563eb`}>¥{avg(r => r.auto).toLocaleString()}</td>
+                        <td style={st}>{avg(r => r.diff).toLocaleString()}</td>
+                        <td style={st}>{avg(r => r.f4) > 0 ? avg(r => r.f4) : "-"}</td>
+                        <td style={st}>{avg(r => r.f8) > 0 ? avg(r => r.f8) : "-"}</td>
+                        <td colSpan={3}></td>
+                      </tr>
+                      <tr>
+                        <td style={lb}>Min</td><td colSpan={10}></td>
+                        <td style={st}>¥{mn(r => r.total).toLocaleString()}</td>
+                        <td style={st}>¥{mn(r => r.paypay).toLocaleString()}</td>
+                        <td style={`${st};color:#2563eb`}>¥{mn(r => r.auto).toLocaleString()}</td>
+                        <td style={st}>{mn(r => r.diff).toLocaleString()}</td>
+                        <td style={st}>{mn(r => r.f4) > 0 ? mn(r => r.f4) : "-"}</td>
+                        <td style={st}>{mn(r => r.f8) > 0 ? mn(r => r.f8) : "-"}</td>
+                        <td colSpan={3}></td>
+                      </tr>
+                      <tr style="background:#f8fafc">
+                        <td style={lb}>Max</td><td colSpan={10}></td>
+                        <td style={st}>¥{mx(r => r.total).toLocaleString()}</td>
+                        <td style={st}>¥{mx(r => r.paypay).toLocaleString()}</td>
+                        <td style={`${st};color:#2563eb`}>¥{mx(r => r.auto).toLocaleString()}</td>
+                        <td style={st}>{mx(r => r.diff).toLocaleString()}</td>
+                        <td style={st}>{mx(r => r.f4) > 0 ? mx(r => r.f4) : "-"}</td>
+                        <td style={st}>{mx(r => r.f8) > 0 ? mx(r => r.f8) : "-"}</td>
+                        <td colSpan={3}></td>
+                      </tr>
+                    </tfoot>
+                  );
+                })()}
               </table>
             </div>
           </section>
