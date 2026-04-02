@@ -226,13 +226,15 @@ admin.get("/staff/admin/sales", async (c) => {
 
   // Min / Max stats (only from days with data)
   const activeDays = mergedRows.filter(r => r.combined > 0);
+  const activePastDays = activeDays.filter(r => r.date !== todayJST);
+  const minSrc = activePastDays.length > 0 ? activePastDays : activeDays;
   const minMax = activeDays.length > 0 ? {
-    people: { min: Math.min(...activeDays.map(r => r.orders)), max: Math.max(...activeDays.map(r => r.orders)) },
-    cash: { min: Math.min(...activeDays.map(r => r.cash)), max: Math.max(...activeDays.map(r => r.cash)) },
-    qr: { min: Math.min(...activeDays.map(r => r.qr)), max: Math.max(...activeDays.map(r => r.qr)) },
-    luggage: { min: Math.min(...activeDays.map(r => r.luggage)), max: Math.max(...activeDays.map(r => r.luggage)) },
-    rental: { min: Math.min(...activeDays.map(r => r.rental)), max: Math.max(...activeDays.map(r => r.rental)) },
-    combined: { min: Math.min(...activeDays.map(r => r.combined)), max: Math.max(...activeDays.map(r => r.combined)) },
+    people: { min: Math.min(...minSrc.map(r => r.orders)), max: Math.max(...activeDays.map(r => r.orders)) },
+    cash: { min: Math.min(...minSrc.map(r => r.cash)), max: Math.max(...activeDays.map(r => r.cash)) },
+    qr: { min: Math.min(...minSrc.map(r => r.qr)), max: Math.max(...activeDays.map(r => r.qr)) },
+    luggage: { min: Math.min(...minSrc.map(r => r.luggage)), max: Math.max(...activeDays.map(r => r.luggage)) },
+    rental: { min: Math.min(...minSrc.map(r => r.rental)), max: Math.max(...activeDays.map(r => r.rental)) },
+    combined: { min: Math.min(...minSrc.map(r => r.combined)), max: Math.max(...activeDays.map(r => r.combined)) },
   } : null;
 
   // Average daily revenue (excluding today's real-time row for a fair historical avg)
@@ -464,8 +466,8 @@ admin.get("/staff/admin/sales", async (c) => {
             <tr class="sales-min-row">
               <td class="sales-td">Min</td>
               <td class="sales-td sales-td--right">{minMax.people.min}</td>
-              <td class="sales-td sales-td--right" style="color:#64748b">{Math.min(...activeDays.map(r => r.suitcases))}</td>
-              <td class="sales-td sales-td--right" style="color:#64748b">{Math.min(...activeDays.map(r => r.backpacks))}</td>
+              <td class="sales-td sales-td--right" style="color:#64748b">{Math.min(...minSrc.map(r => r.suitcases))}</td>
+              <td class="sales-td sales-td--right" style="color:#64748b">{Math.min(...minSrc.map(r => r.backpacks))}</td>
               <td class="sales-td sales-td--right">¥{minMax.cash.min.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.qr.min.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.luggage.min.toLocaleString()}</td>
