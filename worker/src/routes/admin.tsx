@@ -49,13 +49,15 @@ admin.get("/staff/admin/sales", async (c) => {
       `SELECT
         date(created_at, '+9 hours') as sale_date,
         COUNT(*) as order_count,
+        SUM(suitcase_qty) as suitcase_total,
+        SUM(backpack_qty) as backpack_total,
         SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash,
         SUM(CASE WHEN payment_method = 'PAY_QR' THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr,
         SUM(COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount) as luggage_total
       FROM luggage_orders
       WHERE status IN ('PAID', 'PICKED_UP') AND manual_entry = 0${actualWhereClause}
       GROUP BY sale_date`
-    ).bind(...actualParams).all<{ sale_date: string; order_count: number; cash: number; qr: number; luggage_total: number }>(),
+    ).bind(...actualParams).all<{ sale_date: string; order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number }>(),
   ]);
 
   const rentalByDate = new Map<string, number>();
@@ -64,7 +66,7 @@ admin.get("/staff/admin/sales", async (c) => {
   }
 
   // Build lookup map for actual luggage data by date
-  const actualByDate = new Map<string, { order_count: number; cash: number; qr: number; luggage_total: number }>();
+  const actualByDate = new Map<string, { order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number }>();
   for (const row of actualLuggageRows.results) {
     actualByDate.set(row.sale_date, row);
   }
@@ -110,7 +112,7 @@ admin.get("/staff/admin/sales", async (c) => {
     sheetByDate.set(r.sale_date, r);
   }
 
-  interface MergedRow { date: string; dateJP: string; orders: number; cash: number; qr: number; luggage: number; rental: number; combined: number; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
+  interface MergedRow { date: string; dateJP: string; orders: number; suitcases: number; backpacks: number; cash: number; qr: number; luggage: number; rental: number; combined: number; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
   // Build rows from all data sources
   const allDates = new Set([
     ...actualLuggageRows.results.map(r => r.sale_date),
@@ -133,6 +135,8 @@ admin.get("/staff/admin/sales", async (c) => {
       date,
       dateJP: `${date.replace(/-/g, "/")}/${dow}`,
       orders,
+      suitcases: actual?.suitcase_total || 0,
+      backpacks: actual?.backpack_total || 0,
       cash,
       qr,
       luggage,
@@ -186,6 +190,8 @@ admin.get("/staff/admin/sales", async (c) => {
     date: todayJST,
     dateJP: `${todayJST.replace(/-/g, "/")}/${todayDow}`,
     orders: tlrt.people,
+    suitcases: ts.suitcase_total,
+    backpacks: ts.backpack_total,
     cash: tlrt.cash,
     qr: tlrt.qr,
     luggage: tlrt.luggage_total,
@@ -213,6 +219,8 @@ admin.get("/staff/admin/sales", async (c) => {
   const totalRental = mergedRows.reduce((s, r) => s + r.rental, 0);
   const totalCombined = totalLuggage + totalRental;
   const totalPeople = mergedRows.reduce((s, r) => s + r.orders, 0);
+  const totalSuitcases = mergedRows.reduce((s, r) => s + r.suitcases, 0);
+  const totalBackpacks = mergedRows.reduce((s, r) => s + r.backpacks, 0);
   const totalCash = mergedRows.reduce((s, r) => s + r.cash, 0);
   const totalQr = mergedRows.reduce((s, r) => s + r.qr, 0);
 
@@ -384,6 +392,8 @@ admin.get("/staff/admin/sales", async (c) => {
           <thead><tr style="border-bottom:2px solid var(--line)">
             <th class="sales-th">Date</th>
             <th class="sales-th sales-th--right">People</th>
+            <th class="sales-th sales-th--right" style="color:#64748b">🧳</th>
+            <th class="sales-th sales-th--right" style="color:#64748b">🎒</th>
             <th class="sales-th sales-th--right">Cash</th>
             <th class="sales-th sales-th--right">Pay</th>
             <th class="sales-th sales-th--right sales-td--luggage">Luggage</th>
@@ -392,7 +402,7 @@ admin.get("/staff/admin/sales", async (c) => {
           </tr></thead>
           <tbody>
           {mergedRows.length === 0 && (
-            <tr><td colspan={7} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
+            <tr><td colspan={9} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
           )}
           {(mergedRows as Array<MergedRow & { isRealtime?: boolean }>).map((r) => {
             const lPct = r.combined > 0 ? Math.round(r.luggage / r.combined * 100) : 0;
@@ -406,6 +416,8 @@ admin.get("/staff/admin/sales", async (c) => {
                   {r.isRealtime && <span style="margin-left:6px;font-size:9px;font-weight:700;color:#2563eb;background:#dbeafe;padding:1px 5px;border-radius:4px;letter-spacing:0.02em">실시간</span>}
                 </td>
                 <td class="sales-td sales-td--right">{r.orders || "-"}</td>
+                <td class="sales-td sales-td--right" style="color:#64748b">{r.suitcases || "-"}</td>
+                <td class="sales-td sales-td--right" style="color:#64748b">{r.backpacks || "-"}</td>
                 <td class="sales-td sales-td--right">{r.cash ? `¥${r.cash.toLocaleString()}` : "-"}</td>
                 <td class="sales-td sales-td--right">{r.qr ? `¥${r.qr.toLocaleString()}` : "-"}</td>
                 <td class="sales-td sales-td--right sales-td--luggage">{r.luggage ? <>{`¥${r.luggage.toLocaleString()}`} <span class="sales-td--muted">({lPct}%)</span></> : "-"}</td>
@@ -418,6 +430,8 @@ admin.get("/staff/admin/sales", async (c) => {
             <tr class="sales-total-row">
               <td class="sales-td">Total</td>
               <td class="sales-td sales-td--right">{totalPeople.toLocaleString()}</td>
+              <td class="sales-td sales-td--right" style="color:#64748b">{totalSuitcases.toLocaleString()}</td>
+              <td class="sales-td sales-td--right" style="color:#64748b">{totalBackpacks.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{totalCash.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{totalQr.toLocaleString()}</td>
               <td class="sales-td sales-td--right sales-td--luggage">¥{totalLuggage.toLocaleString()} <span class="sales-td--muted">({totalCombined > 0 ? Math.round(totalLuggage / totalCombined * 100) : 0}%)</span></td>
@@ -427,6 +441,8 @@ admin.get("/staff/admin/sales", async (c) => {
             <tr class="sales-avg-row">
               <td class="sales-td">Daily Avg</td>
               <td class="sales-td sales-td--right">{Math.round(totalPeople / dayCount)}</td>
+              <td class="sales-td sales-td--right" style="color:#64748b">{Math.round(totalSuitcases / dayCount)}</td>
+              <td class="sales-td sales-td--right" style="color:#64748b">{Math.round(totalBackpacks / dayCount)}</td>
               <td class="sales-td sales-td--right">¥{Math.round(totalCash / dayCount).toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{Math.round(totalQr / dayCount).toLocaleString()}</td>
               <td class="sales-td sales-td--right sales-td--luggage">¥{Math.round(totalLuggage / dayCount).toLocaleString()}</td>
@@ -437,6 +453,8 @@ admin.get("/staff/admin/sales", async (c) => {
             <tr class="sales-max-row">
               <td class="sales-td">Max</td>
               <td class="sales-td sales-td--right">{minMax.people.max}</td>
+              <td class="sales-td sales-td--right" style="color:#64748b">{Math.max(...activeDays.map(r => r.suitcases))}</td>
+              <td class="sales-td sales-td--right" style="color:#64748b">{Math.max(...activeDays.map(r => r.backpacks))}</td>
               <td class="sales-td sales-td--right">¥{minMax.cash.max.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.qr.max.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.luggage.max.toLocaleString()}</td>
@@ -446,6 +464,8 @@ admin.get("/staff/admin/sales", async (c) => {
             <tr class="sales-min-row">
               <td class="sales-td">Min</td>
               <td class="sales-td sales-td--right">{minMax.people.min}</td>
+              <td class="sales-td sales-td--right" style="color:#64748b">{Math.min(...activeDays.map(r => r.suitcases))}</td>
+              <td class="sales-td sales-td--right" style="color:#64748b">{Math.min(...activeDays.map(r => r.backpacks))}</td>
               <td class="sales-td sales-td--right">¥{minMax.cash.min.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.qr.min.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.luggage.min.toLocaleString()}</td>
