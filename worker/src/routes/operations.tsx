@@ -279,6 +279,17 @@ ops.get("/staff/cash-closing", async (c) => {
                 </label>
               </div>
 
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">4층 위탁 건수</span>
+                  <input class="control" type="number" name="floor_4f_count" defaultValue="0" min="0" />
+                </label>
+                <label class="field">
+                  <span class="field-label">8층 위탁 건수</span>
+                  <input class="control" type="number" name="floor_8f_count" defaultValue="0" min="0" />
+                </label>
+              </div>
+
               <label class="field">
                 <span class="field-label">메모</span>
                 <textarea class="control" name="note"></textarea>
@@ -308,6 +319,8 @@ ops.get("/staff/cash-closing", async (c) => {
                     <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">PayPay</th>
                     <th title="짐보관 신청서 기준 합계" style="padding:3px 6px;text-align:right;font-size:10px;color:#2563eb">자동매출</th>
                     <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">차액</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">4F</th>
+                    <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">8F</th>
                     <th style="padding:3px 4px;text-align:left;font-size:10px;color:#475569">작성자</th>
                     <th style="padding:3px 4px;text-align:left;font-size:10px;color:#475569">메모</th>
                     <th style="padding:3px 4px;font-size:10px"></th>
@@ -337,6 +350,8 @@ ops.get("/staff/cash-closing", async (c) => {
                         <td style="padding:2px 6px;text-align:right">¥{(cl.paypay_amount as number).toLocaleString()}</td>
                         <td style="padding:2px 6px;text-align:right;color:#2563eb">¥{autoAmount.toLocaleString()}</td>
                         <td style={`padding:2px 6px;text-align:right;font-weight:600;color:${diff === 0 ? '#166534' : '#dc2626'}`}>{diff > 0 ? "+" : ""}{diff.toLocaleString()}</td>
+                        <td style="padding:2px 4px;text-align:right">{((cl.floor_4f_count as number) || 0) > 0 ? (cl.floor_4f_count as number) : "-"}</td>
+                        <td style="padding:2px 4px;text-align:right">{((cl.floor_8f_count as number) || 0) > 0 ? (cl.floor_8f_count as number) : "-"}</td>
                         <td style="padding:2px 4px;white-space:nowrap">{(cl.staff_name as string) || "-"}</td>
                         <td style="padding:2px 4px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b">{noteStr.length > 20 ? noteStr.slice(0, 20) + "…" : noteStr || "-"}</td>
                         <td style="padding:2px 4px;white-space:nowrap">
@@ -375,6 +390,8 @@ ops.post("/staff/cash-closing", async (c) => {
   const actualQrAmount = parseInt(String(body.actual_qr_amount || "0"), 10);
   const rentalCash = parseInt(String(body.rental_cash || "0"), 10) || 0;
   const wandRefund = parseInt(String(body.wand_refund || "0"), 10) || 0;
+  const floor4fCount = parseInt(String(body.floor_4f_count || "0"), 10) || 0;
+  const floor8fCount = parseInt(String(body.floor_8f_count || "0"), 10) || 0;
   const closingType = String(body.closing_type || "FINAL_CLOSE");
 
   // Prevent duplicate closings for same date + type
@@ -399,8 +416,9 @@ ops.post("/staff/cash-closing", async (c) => {
        actual_amount, check_auto_amount, expected_amount,
        difference_amount, qr_difference_amount,
        rental_cash, wand_refund,
+       floor_4f_count, floor_8f_count,
        staff_id, note
-     ) VALUES (?, ?, 'SUBMITTED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, 'SUBMITTED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       businessDate, closingType,
@@ -408,6 +426,7 @@ ops.post("/staff/cash-closing", async (c) => {
       actualAmount, checkAutoAmount, expectedAmount,
       differenceAmount, qrDifferenceAmount,
       rentalCash, wandRefund,
+      floor4fCount, floor8fCount,
       staff.id, String(body.note || "") || null
     )
     .run();
@@ -542,6 +561,8 @@ ops.get("/staff/cash-closing/:id", async (c) => {
               <p><strong>총 실제액</strong><span>¥{(cl.actual_amount as number).toLocaleString()}</span></p>
               <p><strong>렌탈 현금</strong><span>¥{((cl.rental_cash as number) || 0).toLocaleString()}</span></p>
               <p><strong>지팡이 환불</strong><span>¥{((cl.wand_refund as number) || 0).toLocaleString()}</span></p>
+              <p><strong>4층 위탁</strong><span>{((cl.floor_4f_count as number) || 0)}건</span></p>
+              <p><strong>8층 위탁</strong><span>{((cl.floor_8f_count as number) || 0)}건</span></p>
               <p><strong>QR 차액</strong><span style={`color:${(cl.qr_difference_amount as number) === 0 ? '#166534' : '#dc2626'}`}>¥{(cl.qr_difference_amount as number).toLocaleString()}</span></p>
               <p><strong>작성자</strong><span>{closingStaffName}</span></p>
               <p><strong>메모</strong><span>{(cl.note as string) || "-"}</span></p>
@@ -680,6 +701,17 @@ ops.get("/staff/cash-closing/:id/edit", async (c) => {
                 </label>
               </div>
 
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">4층 위탁 건수</span>
+                  <input class="control" type="number" name="floor_4f_count" defaultValue={String(cl.floor_4f_count ?? 0)} min="0" />
+                </label>
+                <label class="field">
+                  <span class="field-label">8층 위탁 건수</span>
+                  <input class="control" type="number" name="floor_8f_count" defaultValue={String(cl.floor_8f_count ?? 0)} min="0" />
+                </label>
+              </div>
+
               <label class="field">
                 <span class="field-label">메모</span>
                 <textarea class="control" name="note">{(cl.note as string) || ""}</textarea>
@@ -721,6 +753,8 @@ ops.post("/staff/cash-closing/:id/edit", async (c) => {
   const actualQrAmount = parseInt(String(body.actual_qr_amount || "0"), 10);
   const rentalCash = parseInt(String(body.rental_cash || "0"), 10) || 0;
   const wandRefund = parseInt(String(body.wand_refund || "0"), 10) || 0;
+  const floor4fCount = parseInt(String(body.floor_4f_count || "0"), 10) || 0;
+  const floor8fCount = parseInt(String(body.floor_8f_count || "0"), 10) || 0;
   // 차액 = (현금Total - 시제40000) + PayPay - 자동매출
   const cl = existing as Record<string, unknown>;
   const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, cl.business_date as string);
@@ -736,6 +770,7 @@ ops.post("/staff/cash-closing/:id/edit", async (c) => {
        total_amount = ?, paypay_amount = ?, actual_qr_amount = ?,
        actual_amount = ?, check_auto_amount = ?, expected_amount = ?, difference_amount = ?, qr_difference_amount = ?,
        rental_cash = ?, wand_refund = ?,
+       floor_4f_count = ?, floor_8f_count = ?,
        note = ?, updated_at = datetime('now')
      WHERE closing_id = ?`
   )
@@ -743,6 +778,7 @@ ops.post("/staff/cash-closing/:id/edit", async (c) => {
       ...denomValues, totalAmount, paypayAmount, actualQrAmount,
       actualAmount, expectedAmount, expectedAmount, differenceAmount, qrDiff,
       rentalCash, wandRefund,
+      floor4fCount, floor8fCount,
       String(body.note || "") || null, closingId
     )
     .run();

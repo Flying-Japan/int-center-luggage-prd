@@ -138,6 +138,8 @@ CREATE TABLE IF NOT EXISTS luggage_cash_closings (
   check_qr_match INTEGER NOT NULL DEFAULT 0,
   check_pending_items INTEGER NOT NULL DEFAULT 0,
   check_handover_note INTEGER NOT NULL DEFAULT 0,
+  floor_4f_count INTEGER NOT NULL DEFAULT 0,
+  floor_8f_count INTEGER NOT NULL DEFAULT 0,
   owner_name TEXT,
   note TEXT,
   staff_id TEXT,
