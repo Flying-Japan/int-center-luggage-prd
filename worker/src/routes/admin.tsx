@@ -21,16 +21,11 @@ admin.use("/staff/admin/extensions*", adminAuth);
 
 // GET /staff/admin/sales — Sales analytics
 admin.get("/staff/admin/sales", async (c) => {
-  const startDate = c.req.query("start_date") || "";
-  const endDate = c.req.query("end_date") || "";
+  const startDate = c.req.query("start_date") || "2025-10-01";
+  const endDate = c.req.query("end_date") || new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-  // Query from luggage_daily_sales (imported from Google Sheets)
-  let whereClause = "";
-  const params: string[] = [];
-  if (startDate && endDate) {
-    whereClause = " WHERE sale_date BETWEEN ? AND ?";
-    params.push(startDate, endDate);
-  }
+  const whereClause = " WHERE sale_date BETWEEN ? AND ?";
+  const params: string[] = [startDate, endDate];
 
   let rentalWhereClause = "";
   if (startDate && endDate) {
