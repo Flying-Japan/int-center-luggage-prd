@@ -363,9 +363,11 @@ ops.get("/staff/cash-closing", async (c) => {
                   })}
                 </tbody>
                 {closingRows.length > 0 && (() => {
+                  const todayJST = formatDateJST(new Date());
                   const rows = closingRows.map((cl) => {
                     const auto = autoSalesByDate.get(cl.business_date as string)?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
                     return {
+                      date: cl.business_date as string,
                       total: (cl.total_amount as number) || 0,
                       paypay: (cl.paypay_amount as number) || 0,
                       auto,
@@ -374,10 +376,11 @@ ops.get("/staff/cash-closing", async (c) => {
                       f8: (cl.floor_8f_count as number) || 0,
                     };
                   });
+                  const pastRows = rows.filter(r => r.date !== todayJST);
                   const n = rows.length;
                   const sum = (fn: (r: typeof rows[0]) => number) => rows.reduce((s, r) => s + fn(r), 0);
                   const avg = (fn: (r: typeof rows[0]) => number) => Math.round(sum(fn) / n);
-                  const mn = (fn: (r: typeof rows[0]) => number) => Math.min(...rows.map(fn));
+                  const mn = (fn: (r: typeof rows[0]) => number) => pastRows.length > 0 ? Math.min(...pastRows.map(fn)) : 0;
                   const mx = (fn: (r: typeof rows[0]) => number) => Math.max(...rows.map(fn));
                   const st = "padding:3px 6px;text-align:right;font-size:10px;font-weight:600";
                   const lb = "padding:3px 6px;font-size:10px;font-weight:700";
