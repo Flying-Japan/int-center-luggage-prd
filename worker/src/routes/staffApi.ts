@@ -80,6 +80,16 @@ staffApi.get("/staff/api/referral", async (c) => {
   return c.json(counts);
 });
 
+// GET /staff/api/handover/unread — Unread handover notes count for current staff
+staffApi.get("/staff/api/handover/unread", async (c) => {
+  const staff = getStaff(c);
+  const row = await c.env.DB.prepare(
+    `SELECT COUNT(*) as count FROM luggage_handover_notes n
+     WHERE NOT EXISTS (SELECT 1 FROM luggage_handover_reads r WHERE r.note_id = n.note_id AND r.staff_id = ?)`
+  ).bind(staff.id).first<{ count: number }>();
+  return c.json({ count: row?.count ?? 0 });
+});
+
 // GET /staff/api/orders/new — Check for new orders since a timestamp
 staffApi.get("/staff/api/orders/new", async (c) => {
   const raw = c.req.query("since") || "";
