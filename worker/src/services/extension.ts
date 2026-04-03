@@ -70,7 +70,7 @@ async function buildExtensionOrderRecord(
  */
 export async function generateExtensionOrders(
   db: D1Database
-): Promise<{ created: number; skippedDup: number }> {
+): Promise<{ created: number; skippedDup: number; extendedOrders: Array<{ parentOrderId: string; extOrderId: string; name: string; email: string | null; phone: string; tagNo: string; amount: number }> }> {
   const now = new Date();
   const jstMs = now.getTime() + JST_OFFSET_MS;
   const jst = new Date(jstMs);
@@ -87,7 +87,7 @@ export async function generateExtensionOrders(
     .all<Record<string, unknown>>();
 
   if (overdueRows.results.length === 0) {
-    return { created: 0, skippedDup: 0 };
+    return { created: 0, skippedDup: 0, extendedOrders: [] };
   }
 
   // 2. Dedup: find extensions already created today for these root order IDs
@@ -114,6 +114,7 @@ export async function generateExtensionOrders(
 
   let created = 0;
   let skippedDup = 0;
+  const extendedOrders: Array<{ parentOrderId: string; extOrderId: string; name: string; email: string | null; phone: string; tagNo: string; amount: number }> = [];
 
   for (const order of overdueRows.results) {
     const orderId = String(order.order_id);
@@ -179,8 +180,30 @@ export async function generateExtensionOrders(
       )
       .run();
 
+    extendedOrders.push({
+      parentOrderId: orderId,
+      extOrderId: String(record.order_id),
+      name: String(order.name || ""),
+      email: (order.email as string) || null,
+      phone: String(order.phone || ""),
+      tagNo: String(order.tag_no || ""),
+      amount: Number(record.prepaid_amount || 0),
+    });
     created++;
   }
 
-  return { created, skippedDup };
+  // Create handover note if any extensions were made
+  if (created > 0) {
+    const jstDateStr = `${jst.getUTCFullYear()}-${String(jst.getUTCMonth() + 1).padStart(2, "0")}-${String(jst.getUTCDate()).padStart(2, "0")}`;
+    const lines = extendedOrders.map(o => `• ${o.tagNo} ${o.name} → ${o.extOrderId} (¥${o.amount.toLocaleString()})`);
+    await db.prepare(
+      `INSERT INTO luggage_handover_notes (category, title, content, staff_id, created_at)
+       VALUES ('URGENT', ?, ?, 'SYSTEM', datetime('now'))`
+    ).bind(
+      `[자동] 미수령 연장 ${created}건 (${jstDateStr})`,
+      `다음 주문이 수령 기한 초과로 자동 연장 처리되었습니다.\n추가 요금 수령이 필요합니다.\n\n${lines.join("\n")}`
+    ).run();
+  }
+
+  return { created, skippedDup, extendedOrders };
 }

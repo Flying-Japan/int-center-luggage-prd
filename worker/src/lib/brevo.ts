@@ -186,3 +186,59 @@ export async function sendOrderConfirmation(
     return false;
   }
 }
+
+/** Send extension notification email to customer */
+export async function sendExtensionNotification(
+  apiKey: string,
+  data: { name: string; email: string; tagNo: string; amount: number }
+): Promise<boolean> {
+  const { name, email, tagNo, amount } = data;
+  const subject = `[Flying Japan] 보관 연장 안내 — 추가 요금 ¥${amount.toLocaleString()}`;
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/></head>
+<body style="margin:0;padding:0;background:#f7f7f5;font-family:'Pretendard',sans-serif">
+  <div style="max-width:480px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e5e3">
+    <div style="background:linear-gradient(135deg,#1e3a5f,#2563eb);padding:24px;text-align:center">
+      <img src="https://luggage.flyingjp.com/static/logo-horizontal-white.png" height="28" alt="Flying Japan" style="display:inline-block"/>
+    </div>
+    <div style="padding:24px">
+      <h2 style="margin:0 0 16px;font-size:18px;color:#1e293b">보관 기한 연장 안내</h2>
+      <p style="margin:0 0 12px;font-size:14px;color:#37352f;line-height:1.6">
+        안녕하세요 <strong>${name}</strong>님,<br/>
+        보관하신 짐(${tagNo})의 수령 예정 시간이 지나 <strong>자동으로 1일 연장</strong> 처리되었습니다.
+      </p>
+      <div style="margin:16px 0;padding:16px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;text-align:center">
+        <p style="margin:0;font-size:13px;color:#dc2626;font-weight:700">추가 요금</p>
+        <p style="margin:6px 0 0;font-size:24px;font-weight:800;color:#dc2626">¥${amount.toLocaleString()}</p>
+      </div>
+      <p style="margin:12px 0;font-size:13px;color:#64748b;line-height:1.6">
+        수령 시 추가 요금을 결제해주세요.<br/>
+        영업시간: 09:00~21:00
+      </p>
+      <div style="text-align:center;margin-top:16px">
+        <a href="https://pf.kakao.com/_Nrxbcj" style="display:inline-block;padding:10px 24px;background:#FEE500;color:#3C1E1E;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none">💬 카카오톡 문의</a>
+      </div>
+    </div>
+    <div style="padding:16px 24px;background:#f7f7f5;text-align:center;font-size:11px;color:#94a3b8;border-top:1px solid #e5e5e3">
+      <p style="margin:0">Flying Inc. · 大阪府大阪市中央区難波3-2-18 1F</p>
+    </div>
+  </div>
+</body></html>`;
+
+  try {
+    const resp = await fetch(BREVO_API, {
+      method: "POST",
+      headers: { "api-key": apiKey, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        sender: { name: "Flying Japan", email: "noreply@flyingjp.com" },
+        to: [{ email, name }],
+        subject,
+        htmlContent: html,
+      }),
+    });
+    if (!resp.ok) { console.error(`Brevo extension email error: ${resp.status}`); return false; }
+    return true;
+  } catch (err) {
+    console.error("Failed to send extension email", err);
+    return false;
+  }
+}
