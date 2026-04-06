@@ -16,7 +16,12 @@ import { todayBusinessDate } from "./storage";
 export async function buildOrderId(db: D1Database, nowUtc?: Date, overnight?: boolean, counterPrefix?: string): Promise<string> {
   const businessDate = nowUtc ? formatBusinessDate(nowUtc) : todayBusinessDate();
 
-  const counterKey = counterPrefix ? `${businessDate}-${counterPrefix}` : overnight ? `${businessDate}-overnight` : businessDate;
+  let counterKey = businessDate;
+  if (counterPrefix) {
+    counterKey = `${businessDate}-${counterPrefix}`;
+  } else if (overnight) {
+    counterKey = `${businessDate}-overnight`;
+  }
   const startSeq = overnight ? 92 : 1;
 
   const row = await db
