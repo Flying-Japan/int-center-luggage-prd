@@ -172,7 +172,7 @@ admin.get("/staff/admin/sales", async (c) => {
   // Real-time luggage breakdown for today (for mergedRows override)
   const todayLuggageRT = await c.env.DB.prepare(
     `SELECT
-       SUM(1 + companion_count) as people,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN 1 + companion_count ELSE 0 END) as people,
        SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) AND status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash,
        SUM(CASE WHEN payment_method = 'PAY_QR' AND status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr,
        SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as luggage_total
