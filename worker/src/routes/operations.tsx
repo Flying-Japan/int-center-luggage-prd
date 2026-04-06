@@ -135,7 +135,6 @@ async function fetchLiveOrderSalesSummariesByDate(db: D1Database, businessDates:
      WHERE date(created_at, '+9 hours') >= ?
        AND date(created_at, '+9 hours') <= ?
        AND status != 'CANCELLED'
-       AND manual_entry = 0
      GROUP BY date(created_at, '+9 hours')`
   ).bind(dateRange.rangeStart, dateRange.rangeEnd).all<{
     business_date: string;

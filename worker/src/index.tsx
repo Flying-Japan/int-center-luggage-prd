@@ -76,7 +76,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
   // Build counts WHERE clause (date + search only, no status filter)
   // so badge counts show per-status breakdown within current date/search context
-  let countsWhere = "WHERE manual_entry = 0";
+  let countsWhere = "WHERE 1=1";
   const countsParams: string[] = [];
   const like = q ? `%${q}%` : "";
 
@@ -328,7 +328,20 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       <td data-col-key="tag_no"><span class={`editable tag-pill ${tagColorClass(o.tag_no)}`} data-field="tag_no" data-order-id={o.order_id}>{o.tag_no ? String(o.tag_no).replace(/\.0$/, "") : "-"}</span></td>
                       <td data-col-key="created_time">{o.created_at ? new Date(o.created_at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
                       <td data-col-key="price" class="price-cell" data-order-id={o.order_id} data-tier={o.flying_pass_tier || "NONE"} data-method={o.payment_method || "CASH"} style="cursor:pointer;position:relative"><span class="price-display">{`¥${o.prepaid_amount.toLocaleString()}`}</span></td>
-                      <td data-col-key="pickup_time"><span class="editable" data-field="expected_pickup_at" data-order-id={o.order_id} data-type="datetime-local" data-raw-value={o.expected_pickup_at ? new Date(new Date(o.expected_pickup_at).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16) : ""}>{o.expected_pickup_at ? new Date(o.expected_pickup_at).toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</span></td>
+                      <td data-col-key="pickup_time">{(() => {
+                        let pickupStyle = "";
+                        if (o.expected_pickup_at) {
+                          const pJst = new Date(new Date(o.expected_pickup_at).getTime() + 9 * 60 * 60 * 1000);
+                          const cJst = new Date(new Date(o.created_at).getTime() + 9 * 60 * 60 * 1000);
+                          const pHour = pJst.getUTCHours();
+                          const isNextDay = pJst.toISOString().slice(0, 10) !== cJst.toISOString().slice(0, 10);
+                          if (pHour >= 20) pickupStyle = "color:#dc2626;font-weight:700";
+                          else if (isNextDay) pickupStyle = "color:#2563eb;font-weight:700";
+                        }
+                        return (
+                          <span class="editable" data-field="expected_pickup_at" data-order-id={o.order_id} data-type="datetime-local" data-raw-value={o.expected_pickup_at ? new Date(new Date(o.expected_pickup_at).getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 16) : ""} style={pickupStyle || undefined}>{o.expected_pickup_at ? new Date(o.expected_pickup_at).toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</span>
+                        );
+                      })()}</td>
                       <td data-col-key="pay_status">{(() => {
                         const isPaid = o.status === "PAID" || o.status === "PICKED_UP";
                         const isCancelled = o.status === "CANCELLED";
@@ -848,8 +861,33 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               });
             });
 
+            /* ── Changelog modal ── */
+            var CL_VER='2026-04-06';
+            if(localStorage.getItem('changelog_seen')!==CL_VER){
+              var overlay=document.getElementById('changelog-overlay');
+              if(overlay) overlay.style.display='flex';
+            }
+            var clBtn=document.getElementById('changelog-close');
+            if(clBtn) clBtn.addEventListener('click',function(){
+              localStorage.setItem('changelog_seen',CL_VER);
+              document.getElementById('changelog-overlay').style.display='none';
+            });
+
           })();
         ` }} />
+        <div id="changelog-overlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.4);align-items:center;justify-content:center">
+          <div style="background:#fff;border-radius:12px;padding:24px 28px;max-width:420px;width:90%;box-shadow:0 8px 30px rgba(0,0,0,0.15)">
+            <h3 style="margin:0 0 12px;font-size:16px;font-weight:700">업데이트 안내 (4/6)</h3>
+            <ul style="margin:0 0 16px;padding-left:20px;font-size:13px;line-height:1.8;color:#334155">
+              <li>수기 등록 건이 정산에 포함됩니다</li>
+              <li>수령시간 20시 이후 <span style="color:#dc2626;font-weight:700">빨간색</span> 표시</li>
+              <li>익일 수령 주문 시간 <span style="color:#2563eb;font-weight:700">파란색</span> 표시</li>
+              <li>동행인원 수가 팀 수 대신 표시됩니다</li>
+              <li>번호 꼬임 현상 수정</li>
+            </ul>
+            <button id="changelog-close" class="btn btn-primary" style="width:100%;padding:10px">확인</button>
+          </div>
+        </div>
         <NewOrderAlert />
       </body>
     </html>

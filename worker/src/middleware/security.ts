@@ -1,10 +1,38 @@
 import { type Context, type Next } from "hono";
 
+const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
+const LUGGAGE_GA4_SNIPPET =
+  `<script async src="https://www.googletagmanager.com/gtag/js?id=${LUGGAGE_GA4_MEASUREMENT_ID}"></script>` +
+  `<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${LUGGAGE_GA4_MEASUREMENT_ID}');</script>`;
+
+function injectGa4Snippet(html: string) {
+  if (
+    html.includes(`gtag/js?id=${LUGGAGE_GA4_MEASUREMENT_ID}`) ||
+    html.includes(`gtag('config','${LUGGAGE_GA4_MEASUREMENT_ID}')`)
+  ) {
+    return html;
+  }
+
+  return html.replace(/<\/head>/i, `${LUGGAGE_GA4_SNIPPET}</head>`);
+}
+
 /**
  * Middleware: add standard security headers to every response.
  */
 export async function securityHeaders(c: Context, next: Next) {
   await next();
+
+  const contentType = c.res.headers.get("Content-Type") || "";
+  if (contentType.includes("text/html")) {
+    const html = await c.res.text();
+    const injectedHtml = injectGa4Snippet(html);
+    c.res = new Response(injectedHtml, {
+      status: c.res.status,
+      statusText: c.res.statusText,
+      headers: new Headers(c.res.headers),
+    });
+  }
+
   c.res.headers.set("X-Frame-Options", "DENY");
   c.res.headers.set("X-Content-Type-Options", "nosniff");
   c.res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -15,7 +43,7 @@ export async function securityHeaders(c: Context, next: Next) {
   );
   c.res.headers.set(
     "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://www.googletagmanager.com https://*.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://*.googletagmanager.com https://static.cloudflareinsights.com; frame-src https://calendar.google.com https://docs.google.com; frame-ancestors 'none'"
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://www.googletagmanager.com https://*.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://www.google-analytics.com https://*.google-analytics.com https://analytics.google.com https://*.analytics.google.com https://www.googletagmanager.com https://*.googletagmanager.com https://stats.g.doubleclick.net https://static.cloudflareinsights.com; frame-src https://calendar.google.com https://docs.google.com; frame-ancestors 'none'"
   );
 }
 

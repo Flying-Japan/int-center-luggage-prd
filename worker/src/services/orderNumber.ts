@@ -13,10 +13,10 @@ import { todayBusinessDate } from "./storage";
  * Generate next order_id for today using D1 luggage_daily_counters.
  * Atomic INSERT ON CONFLICT UPDATE with RETURNING.
  */
-export async function buildOrderId(db: D1Database, nowUtc?: Date, overnight?: boolean): Promise<string> {
+export async function buildOrderId(db: D1Database, nowUtc?: Date, overnight?: boolean, counterPrefix?: string): Promise<string> {
   const businessDate = nowUtc ? formatBusinessDate(nowUtc) : todayBusinessDate();
 
-  const counterKey = overnight ? `${businessDate}-overnight` : businessDate;
+  const counterKey = counterPrefix ? `${businessDate}-${counterPrefix}` : overnight ? `${businessDate}-overnight` : businessDate;
   const startSeq = overnight ? 92 : 1;
 
   const row = await db
@@ -45,27 +45,23 @@ export async function buildTagNo(db: D1Database, orderId: string): Promise<strin
   const seq = parseInt(orderId.split("-")[1], 10);
   const businessDate = orderId.split("-")[0]; // YYYYMMDD
 
-  // Overnight or within range: tag = seq
-  if (seq >= 92 || seq <= 91) {
-    // For same-day ≤ 91, check if this tag is already taken by an active order
-    if (seq <= 91) {
-      const conflict = await db
-        .prepare(
-          `SELECT 1 FROM luggage_orders
-           WHERE order_id LIKE ? AND tag_no = ? AND status IN ('PAYMENT_PENDING', 'PAID')
-           LIMIT 1`
-        )
-        .bind(`${businessDate}-%`, String(seq))
-        .first();
+  // Overnight (92+): always use seq as tag
+  if (seq >= 92) {
+    return String(seq);
+  }
 
-      if (!conflict) {
-        return String(seq);
-      }
-      // Tag taken by active order — fall through to recycle
-    } else {
-      // Overnight (92+): always use seq
-      return String(seq);
-    }
+  // Same-day (1~91): use seq if not taken by active order
+  const conflict = await db
+    .prepare(
+      `SELECT 1 FROM luggage_orders
+       WHERE order_id LIKE ? AND tag_no = ? AND status IN ('PAYMENT_PENDING', 'PAID')
+       LIMIT 1`
+    )
+    .bind(`${businessDate}-%`, String(seq))
+    .first();
+
+  if (!conflict) {
+    return String(seq);
   }
 
   // Recycle: find lowest tag 1~91 not used by an active (PAYMENT_PENDING/PAID) order today

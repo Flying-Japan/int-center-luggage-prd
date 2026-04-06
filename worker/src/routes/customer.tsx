@@ -76,6 +76,16 @@ customer.get("/customer", (c) => {
   const payQrNote: Record<string, string> = {
     ko: "카카오페이 · 네이버페이 · 토스페이 · PayPay", en: "KakaoPay · NaverPay · TossPay · PayPay", ja: "KakaoPay・NaverPay・TossPay・PayPay",
   };
+  const paymentMethodChangePrimary: Record<string, string> = {
+    ko: "결제 방법은 결제 시에 변경해도 됩니다.",
+    en: "You can change the payment method at the time of payment.",
+    ja: "お支払い方法は、お会計時に変更しても大丈夫です。",
+  };
+  const paymentMethodChangeSecondary: Record<string, string> = {
+    ko: "일행분들과 각각 나눠서 내셔도 됩니다.",
+    en: "Your group can also split the payment and pay separately.",
+    ja: "ご同行者様と分けて、それぞれお支払いいただくことも可能です。",
+  };
   const noCardWarning: Record<string, string> = {
     ko: "⚠️ 신용카드/체크카드 결제 불가", en: "⚠️ Credit/debit cards NOT accepted", ja: "⚠️ クレジットカード・デビットカード不可",
   };
@@ -370,6 +380,7 @@ form { margin-top: 16px; }
   cursor: pointer; white-space: nowrap; font-family: inherit;
 }
 .file-name {
+  display: flex; align-items: center; padding-left: 4px;
   color: var(--subtext); font-size: 13px; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -788,6 +799,14 @@ form { margin-top: 16px; }
                         <span>{t("payment_method_pay_qr", lang)}</span>
                       </label>
                     </div>
+                    <p style="margin:8px 0 0;font-size:11px;line-height:1.55;color:var(--text)">
+                      <span style="display:block;font-weight:600">
+                        {paymentMethodChangePrimary[lang] || paymentMethodChangePrimary.ko}
+                      </span>
+                      <span style="display:block;margin-top:2px;font-weight:500">
+                        {paymentMethodChangeSecondary[lang] || paymentMethodChangeSecondary.ko}
+                      </span>
+                    </p>
                     <div style="margin-top:6px;padding:8px 10px;background:#fef2f2;border-radius:6px;font-size:11px;line-height:1.5">
                       <p style="margin:0;font-weight:700;color:#dc2626">{noCardWarning[lang] || noCardWarning.ko}</p>
                       <p style="margin:3px 0 0;font-weight:600;color:#166534">✅ {payQrNote[lang] || payQrNote.ko}</p>

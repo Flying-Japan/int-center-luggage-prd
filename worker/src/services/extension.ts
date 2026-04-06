@@ -17,16 +17,12 @@ async function buildExtensionOrderRecord(
   const jstMs = now.getTime() + JST_OFFSET_MS;
   const jst = new Date(jstMs);
 
-  // Target pickup: today at 21:00 JST
-  const pickupJst = new Date(
-    Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate(), 21 - 9, 0, 0)
-  );
-  // 21:00 JST = 12:00 UTC
+  // Target pickup: today at 21:00 JST = 12:00 UTC
   const pickupUtc = new Date(
     Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate(), 12, 0, 0)
   );
 
-  const orderId = `EXT-${await buildOrderId(db, now)}`;
+  const orderId = `EXT-${await buildOrderId(db, now, false, 'ext')}`;
   const pricePerDay = Number(parent.price_per_day ?? 0);
 
   return {
