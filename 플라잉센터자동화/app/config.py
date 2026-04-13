@@ -18,6 +18,10 @@ def _env_bool(name: str, default: bool) -> bool:
 DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+if IS_PRODUCTION and not SUPABASE_URL:
+    raise RuntimeError("SUPABASE_URL must be set in production")
+if IS_PRODUCTION and not SUPABASE_SERVICE_ROLE_KEY:
+    raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY must be set in production")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "").rstrip("/")
 
 _secret_key_raw = os.getenv("APP_SECRET_KEY", "")

@@ -204,6 +204,45 @@ CREATE TABLE IF NOT EXISTS luggage_daily_sales (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Operations: Referral counts (4F/8F daily)
+CREATE TABLE IF NOT EXISTS luggage_referral_counts (
+  business_date TEXT NOT NULL,
+  floor TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (business_date, floor)
+);
+
+-- Operations: Experience visits (체험단)
+CREATE TABLE IF NOT EXISTS luggage_experience_visits (
+  visit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  visitor_name TEXT,
+  visitor_type TEXT NOT NULL DEFAULT 'BLOGGER',
+  scheduled_date TEXT,
+  benefit_type TEXT,
+  benefit_amount INTEGER,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'SCHEDULED',
+  created_by_staff_id TEXT,
+  processed_by_staff_id TEXT,
+  received_by TEXT,
+  received_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Operations: Handover note edit history
+CREATE TABLE IF NOT EXISTS luggage_handover_edits (
+  edit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  note_id INTEGER NOT NULL,
+  staff_id TEXT NOT NULL,
+  old_title TEXT,
+  old_content TEXT,
+  new_title TEXT,
+  new_content TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_luggage_orders_status ON luggage_orders(status);
 CREATE INDEX IF NOT EXISTS idx_luggage_orders_created_at ON luggage_orders(created_at);
@@ -213,3 +252,5 @@ CREATE INDEX IF NOT EXISTS idx_luggage_audit_logs_order_id ON luggage_audit_logs
 CREATE INDEX IF NOT EXISTS idx_luggage_handover_notes_created ON luggage_handover_notes(created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_closings_date_type ON luggage_cash_closings(business_date, closing_type);
 CREATE INDEX IF NOT EXISTS idx_luggage_cash_closings_date ON luggage_cash_closings(business_date);
+CREATE INDEX IF NOT EXISTS idx_luggage_experience_visits_date ON luggage_experience_visits(scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_luggage_handover_edits_note ON luggage_handover_edits(note_id);
