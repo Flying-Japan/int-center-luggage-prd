@@ -116,13 +116,27 @@ export async function sendOrderConfirmation(
 
       <!-- Notices / Cautions -->
       <div style="margin:12px 0;padding:12px 14px;background:#f0f7ff;border:1px solid #bfdbfe;border-radius:8px">
-        <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#1e3a8a">${lang === "ja" ? "ご注意事項" : lang === "en" ? "Important Notices" : "주의사항"}</p>
+        <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#1e3a8a">${lang === "ja" ? "🧳 荷物預かりご注意事項" : lang === "en" ? "🧳 Luggage Storage Notice" : "🧳 짐 보관 유의사항"}</p>
         <ul style="margin:0;padding:0 0 0 16px;font-size:11px;color:#1e3a8a;line-height:1.6">
           <li>${lang === "ja" ? "料金は前払いです" : lang === "en" ? "Payment must be made in advance" : "요금은 선불 결제입니다"}</li>
-          <li>${lang === "ja" ? "営業時間(09:00〜21:00)内に受け取りください" : lang === "en" ? "Pickup available during hours: 09:00-21:00" : "영업시간(09:00~21:00) 내 수령 가능"}</li>
-          <li>${lang === "ja" ? "受取遅延の場合、追加料金が発生します" : lang === "en" ? "Late pickup incurs additional charges" : "수령 지연 시 추가 요금 발생"}</li>
-          <li>${lang === "ja" ? "保管期限が過ぎた物品は2週間保管後に処分されます" : lang === "en" ? "Items past storage period disposed after 2 weeks" : "보관기한이 지난 물품은 2주간 보관 후 폐기"}</li>
+          <li>${lang === "ja" ? "お預け荷物の保管前後の状態証明責任はお客様にあります" : lang === "en" ? "Customers are responsible for proving luggage condition before/after storage" : "맡기신 짐의 보관 전·후 상태 증명 책임은 고객님께 있습니다"}</li>
+          <li>${lang === "ja" ? "保管中の破損・汚損・紛失については責任を負いかねます" : lang === "en" ? "We are not liable for damage, contamination, or loss during storage" : "보관 중 발생한 파손, 오염, 내용물 분실 등에 대해서는 책임을 지지 않습니다"}</li>
+          <li>${lang === "ja" ? "ただし、事業者の故意または重大な過失がない限り責任を負いません" : lang === "en" ? "Unless due to our gross negligence" : "단, 사업자의 고의 또는 중대한 과실이 없는 한 파손이나 분실에 대한 책임을 지지 않습니다"}</li>
+          <li>${lang === "ja" ? "高価品・貴重品は必ず別途保管してください" : lang === "en" ? "Please keep valuables and expensive items with you" : "고가품 및 귀중품은 반드시 별도로 보관해 주시기 바랍니다"}</li>
+          <li>${lang === "ja" ? "営業時間(09:00〜21:00)内にお受け取りください" : lang === "en" ? "Pickup available during hours: 09:00-21:00" : "맡기신 짐은 영업시간(09:00~21:00) 내에서만 수령하실 수 있습니다"}</li>
+          <li>${lang === "ja" ? "21:00以降の受取には出張料8,000円が発生します（1日保管料別途）" : lang === "en" ? "After-hours pickup: ¥8,000 dispatch fee (+ 1 day storage)" : "21:00 이후 수령 시 출동 수수료 8,000엔 부과 (1일 보관료 별도)"}</li>
+          <li>${lang === "ja" ? "保管期間超過の場合、1日当たり追加料金が発生します" : lang === "en" ? "Late pickup incurs additional daily charges" : "짐 보관 기간을 초과할 경우, 1일당 추가 요금이 부과됩니다"}</li>
+          <li>${lang === "ja" ? "保管期限が過ぎた物品は2週間保管後に処分されます" : lang === "en" ? "Items past storage period disposed after 2 weeks" : "보관기한이 지난 물품 및 분실물은 2주간 보관 후 폐기됩니다"}</li>
+          <li>${lang === "ja" ? "紛失荷物の海外配送には1件50,000ウォンの手数料がかかります（送料別）" : lang === "en" ? "Overseas shipping for lost items: ₩50,000 per item (shipping extra)" : "짐 분실 시 해외 배송 1건당 50,000원 수수료 (배송비 별도)"}</li>
+          <li>${lang === "ja" ? "紛失荷物は所有者確認後、預けた時点から日額保管料が追加請求されます" : lang === "en" ? "Lost items incur daily storage fees from original deposit date" : "분실된 짐은 소유자 확인 시 맡기신 시점부터 일일 보관요금이 추가 청구됩니다"}</li>
           <li>${lang === "ja" ? "写真は本人確認用で、2週間後に自動削除されます" : lang === "en" ? "Photos for ID verification only, auto-deleted after 2 weeks" : "사진은 본인 확인용이며, 2주 후 자동 삭제"}</li>
+        </ul>
+        <p style="margin:10px 0 4px;font-size:12px;font-weight:700;color:#1e3a8a">${lang === "ja" ? "🚫 お預かりできないもの" : lang === "en" ? "🚫 Items Not Accepted" : "🚫 보관불가 항목"}</p>
+        <ul style="margin:0;padding:0 0 0 16px;font-size:11px;color:#1e3a8a;line-height:1.6">
+          <li>${lang === "ja" ? "一辺2m超・35kg超の物品（ゴルフバッグは可）" : lang === "en" ? "Items over 2m or 35kg (golf bags OK)" : "한 변 2m, 무게 35kg 초과 물품 (골프백은 가능)"}</li>
+          <li>${lang === "ja" ? "高価品・精密機器（PC・タブレット・カメラ等）" : lang === "en" ? "Valuables, electronics (laptops, tablets, cameras)" : "고가품, 정밀기기 (컴퓨터, 노트북, 태블릿PC, 카메라 등)"}</li>
+          <li>${lang === "ja" ? "壊れやすいもの、動物、危険物、冷蔵冷凍・腐りやすいもの" : lang === "en" ? "Fragile items, animals, hazardous materials, perishables" : "깨지기 쉬운 것, 동물, 위험물, 냉장·냉동 또는 부패하기 쉬운 물품"}</li>
+          <li>${lang === "ja" ? "液体容器（飲料・ペットボトル等）" : lang === "en" ? "Liquid containers (beverages, bottles)" : "액체가 든 용기 (음료수, 페트병 등)"}</li>
         </ul>
       </div>
     </div>
