@@ -157,16 +157,17 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
       `SELECT
         SUM(CASE WHEN status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
         SUM(CASE WHEN status = 'PAID' THEN 1 ELSE 0 END) as paid_count,
-        SUM(CASE WHEN status = 'PICKED_UP' THEN 1 ELSE 0 END) as picked_up_count,
+        SUM(CASE WHEN status = 'PICKED_UP' AND created_at >= datetime('now', '-2 days') THEN 1 ELSE 0 END) as picked_up_count,
+        SUM(CASE WHEN status = 'PICKED_UP' THEN 1 ELSE 0 END) as picked_up_all_count,
         SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) as cancelled_count,
         COUNT(*) as total_count
       FROM luggage_orders ${countsWhere}`
-    ).bind(...countsParams).first<{ pending_count: number; paid_count: number; picked_up_count: number; cancelled_count: number; total_count: number }>(),
+    ).bind(...countsParams).first<{ pending_count: number; paid_count: number; picked_up_count: number; picked_up_all_count: number; cancelled_count: number; total_count: number }>(),
     c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>(),
     c.env.DB.prepare("SELECT floor, count FROM luggage_referral_counts WHERE business_date = ?").bind(todayRef).all<{ floor: string; count: number }>(),
   ]);
 
-  const counts = countsResult || { pending_count: 0, paid_count: 0, picked_up_count: 0, cancelled_count: 0, total_count: 0 };
+  const counts = countsResult || { pending_count: 0, paid_count: 0, picked_up_count: 0, picked_up_all_count: 0, cancelled_count: 0, total_count: 0 };
   const totalFiltered = filteredCountResult?.total ?? 0;
   const totalPages = Math.ceil(totalFiltered / pageSize);
   const refCounts: Record<string, number> = { "4F": 0, "8F": 0 };
@@ -229,10 +230,10 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px">
               {[
                 { key: "UNPICKED", label: "미수령", count: (counts.pending_count ?? 0) + (counts.paid_count ?? 0) },
-                { key: "ALL", label: "전체", count: status === "ALL" ? totalFiltered : (counts.total_count - (counts.cancelled_count ?? 0)) },
+                { key: "ALL", label: "전체", count: status === "ALL" ? totalFiltered : ((counts.pending_count ?? 0) + (counts.paid_count ?? 0) + (counts.picked_up_count ?? 0)) },
                 { key: "PAYMENT_PENDING", label: "결제대기", count: counts.pending_count },
                 { key: "PAID", label: "결제완료", count: counts.paid_count },
-                { key: "PICKED_UP", label: "수령완료", count: counts.picked_up_count },
+                { key: "PICKED_UP", label: "수령완료", count: showAllPickedUp ? counts.picked_up_all_count : counts.picked_up_count },
                 { key: "CANCELLED", label: "취소", count: counts.cancelled_count },
               ].map((tab) => (
                 <a
