@@ -101,8 +101,10 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   if (status === "UNPICKED") {
     whereClause += " AND o.status IN ('PAYMENT_PENDING', 'PAID')";
   } else if (status === "ALL") {
-    // 전체 = show all except cancelled
-    whereClause += " AND o.status != 'CANCELLED'";
+    // 전체 = show all except cancelled (unless full history mode)
+    if (!showAllPickedUp) {
+      whereClause += " AND o.status != 'CANCELLED'";
+    }
   } else {
     whereClause += " AND o.status = ?";
     params.push(status);
@@ -269,7 +271,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   <button type="button" class="btn btn-sm" onclick="setDateRange('yesterday')" style="padding:4px 10px;font-size:11px">어제</button>
                   <button type="button" class="btn btn-sm" onclick="setDateRange('week')" style="padding:4px 10px;font-size:11px">이번주</button>
                   <button type="button" class="btn btn-sm" onclick="setDateRange('month')" style="padding:4px 10px;font-size:11px">이번달</button>
-                  <a href={buildDashboardUrl(status, { show_all_picked_up: "true" })} class="btn btn-sm" style="padding:4px 10px;font-size:11px;text-decoration:none;border:1.5px dashed #94a3b8;background:transparent;color:#64748b">전체</a>
+                  <a href={buildDashboardUrl("ALL", { show_all_picked_up: "true" })} class="btn btn-sm" style="padding:4px 10px;font-size:11px;text-decoration:none;border:1.5px dashed #94a3b8;background:transparent;color:#64748b">전체</a>
                 </div>
               </div>
 
