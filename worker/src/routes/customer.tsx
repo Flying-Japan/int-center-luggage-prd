@@ -663,7 +663,7 @@ form { margin-top: 16px; }
               </label>
 
               {/* Survey banner */}
-              <a href="https://docs.google.com/forms/d/e/1FAIpQLSefQH9oMIvToWtZCF0hua0uziw4Wfj67X_wR8DG9S3fK1HagA/viewform" target="_blank" rel="noopener" style="display:block;margin:8px 0 12px">
+              <a href="https://forms.gle/MRUw1NEayhvyxe2F8" target="_blank" rel="noopener" style="display:block;margin:8px 0 12px">
                 <picture>
                   <source media="(min-width:600px)" srcset="/static/survey-banner-tablet.png" />
                   <img src="/static/survey-banner-mobile.png" alt={lang === "ja" ? "アンケート 100円キャッシュバック" : lang === "en" ? "Survey — ¥100 cashback" : "설문 참여 100엔 캐시백"} style="width:100%;border-radius:10px" loading="lazy" />
