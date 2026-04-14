@@ -250,7 +250,7 @@ ops.get("/staff/cash-closing", async (c) => {
                   {DENOMS.map((d) => (
                     <label class="cash-denom-item">
                       <span>{formatDenominationLabel(d)}</span>
-                      <input class="control" type="number" name={`count_${d}`} defaultValue="0" min="0" />
+                      <input class="control" type="number" name={`count_${d}`} value="0" min="0" />
                     </label>
                   ))}
                 </div>
@@ -259,11 +259,11 @@ ops.get("/staff/cash-closing", async (c) => {
               <div class="grid2">
                 <label class="field">
                   <span class="field-label">PayPay 금액</span>
-                  <input class="control" type="number" name="paypay_amount" defaultValue="0" />
+                  <input class="control" type="number" name="paypay_amount" value="0" />
                 </label>
                 <label class="field">
                   <span class="field-label">QR결제 실수령액 (PayPay 포함)</span>
-                  <input class="control" type="number" name="actual_qr_amount" defaultValue="0" />
+                  <input class="control" type="number" name="actual_qr_amount" value="0" />
                   <small style="color:#666;font-size:11px;margin-top:2px">PayPay + 카카오페이 + 기타 QR결제 실수령 합계</small>
                 </label>
               </div>
@@ -271,22 +271,22 @@ ops.get("/staff/cash-closing", async (c) => {
               <div class="grid2">
                 <label class="field">
                   <span class="field-label">렌탈 현금</span>
-                  <input class="control" type="number" name="rental_cash" defaultValue="0" />
+                  <input class="control" type="number" name="rental_cash" value="0" />
                 </label>
                 <label class="field">
                   <span class="field-label">지팡이 환불</span>
-                  <input class="control" type="number" name="wand_refund" defaultValue="0" />
+                  <input class="control" type="number" name="wand_refund" value="0" />
                 </label>
               </div>
 
               <div class="grid2">
                 <label class="field">
                   <span class="field-label">4층 위탁 건수</span>
-                  <input class="control" type="number" name="floor_4f_count" defaultValue="0" min="0" />
+                  <input class="control" type="number" name="floor_4f_count" value="0" min="0" />
                 </label>
                 <label class="field">
                   <span class="field-label">8층 위탁 건수</span>
-                  <input class="control" type="number" name="floor_8f_count" defaultValue="0" min="0" />
+                  <input class="control" type="number" name="floor_8f_count" value="0" min="0" />
                 </label>
               </div>
 
@@ -729,7 +729,7 @@ ops.get("/staff/cash-closing/:id/edit", async (c) => {
                   {DENOMS.map((d) => (
                     <label class="cash-denom-item">
                       <span>{formatDenominationLabel(d)}</span>
-                      <input class="control" type="number" name={`count_${d}`} defaultValue={String(cl[`count_${d}`] ?? 0)} min="0" />
+                      <input class="control" type="number" name={`count_${d}`} value={String(cl[`count_${d}`] ?? 0)} min="0" />
                     </label>
                   ))}
                 </div>
@@ -738,11 +738,11 @@ ops.get("/staff/cash-closing/:id/edit", async (c) => {
               <div class="grid2">
                 <label class="field">
                   <span class="field-label">PayPay 금액</span>
-                  <input class="control" type="number" name="paypay_amount" defaultValue={String(cl.paypay_amount ?? 0)} />
+                  <input class="control" type="number" name="paypay_amount" value={String(cl.paypay_amount ?? 0)} />
                 </label>
                 <label class="field">
                   <span class="field-label">QR결제 실수령액 (PayPay 포함)</span>
-                  <input class="control" type="number" name="actual_qr_amount" defaultValue={String(cl.actual_qr_amount ?? 0)} />
+                  <input class="control" type="number" name="actual_qr_amount" value={String(cl.actual_qr_amount ?? 0)} />
                   <small style="color:#666;font-size:11px;margin-top:2px">PayPay + 카카오페이 + 기타 QR결제 실수령 합계</small>
                 </label>
               </div>
@@ -750,22 +750,22 @@ ops.get("/staff/cash-closing/:id/edit", async (c) => {
               <div class="grid2">
                 <label class="field">
                   <span class="field-label">렌탈 현금</span>
-                  <input class="control" type="number" name="rental_cash" defaultValue={String(cl.rental_cash ?? 0)} />
+                  <input class="control" type="number" name="rental_cash" value={String(cl.rental_cash ?? 0)} />
                 </label>
                 <label class="field">
                   <span class="field-label">지팡이 환불</span>
-                  <input class="control" type="number" name="wand_refund" defaultValue={String(cl.wand_refund ?? 0)} />
+                  <input class="control" type="number" name="wand_refund" value={String(cl.wand_refund ?? 0)} />
                 </label>
               </div>
 
               <div class="grid2">
                 <label class="field">
                   <span class="field-label">4층 위탁 건수</span>
-                  <input class="control" type="number" name="floor_4f_count" defaultValue={String(cl.floor_4f_count ?? 0)} min="0" />
+                  <input class="control" type="number" name="floor_4f_count" value={String(cl.floor_4f_count ?? 0)} min="0" />
                 </label>
                 <label class="field">
                   <span class="field-label">8층 위탁 건수</span>
-                  <input class="control" type="number" name="floor_8f_count" defaultValue={String(cl.floor_8f_count ?? 0)} min="0" />
+                  <input class="control" type="number" name="floor_8f_count" value={String(cl.floor_8f_count ?? 0)} min="0" />
                 </label>
               </div>
 

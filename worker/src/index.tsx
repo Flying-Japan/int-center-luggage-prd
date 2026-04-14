@@ -310,7 +310,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     <th data-col-key="pickup_time">짐 찾는 시각<span class="col-resize"></span></th>
                     <th data-col-key="pay_status">결제상태<span class="col-resize"></span></th>
                     <th data-col-key="pickup_status">수령상태<span class="col-resize"></span></th>
-                    <th data-col-key="actions">업무처리<span class="col-resize"></span></th>
+                    <th data-col-key="actions">관리<span class="col-resize"></span></th>
                     <th data-col-key="note">비고<span class="col-resize"></span></th>
                     <th data-col-key="detail">상세</th>
                   </tr>
@@ -348,35 +348,27 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       <td data-col-key="pay_status">{(() => {
                         const isPaid = o.status === "PAID" || o.status === "PICKED_UP";
                         const isCancelled = o.status === "CANCELLED";
+                        const isPending = o.status === "PAYMENT_PENDING";
                         const cls = isPaid ? "status-paid" : isCancelled ? "status-cancelled" : "status-payment_pending";
                         const label = isPaid ? "결제완료" : isCancelled ? "취소" : "결제대기";
+                        if (isPending) {
+                          return <span class={`status-pill ${cls} pill-clickable`} data-action="toggle-payment" data-order-id={o.order_id} style="cursor:pointer" title="클릭하여 결제완료 처리">{label}</span>;
+                        }
                         return <span class={`status-pill ${cls}`}>{label}</span>;
                       })()}</td>
                       <td data-col-key="pickup_status">{(() => {
                         const isPickedUp = o.status === "PICKED_UP";
                         const isCancelled = o.status === "CANCELLED";
+                        const isPaid = o.status === "PAID";
                         const cls = isPickedUp ? "status-picked_up" : isCancelled ? "status-cancelled" : "status-payment_pending";
                         const label = isPickedUp ? "수령완료" : isCancelled ? "취소" : "미수령";
+                        if (isPaid) {
+                          return <span class={`status-pill ${cls} pill-clickable`} data-action="pickup" data-order-id={o.order_id} style="cursor:pointer" title="클릭하여 수령완료 처리">{label}</span>;
+                        }
                         return <span class={`status-pill ${cls}`}>{label}</span>;
                       })()}</td>
                       <td data-col-key="actions">
                         <div class="inline-actions">
-                          {(() => {
-                            const isPaid = o.status === "PAID" || o.status === "PICKED_UP";
-                            return (
-                              <button
-                                class={`payment-state-btn ${isPaid ? "is-paid" : "is-pending"}`}
-                                data-action="toggle-payment"
-                                data-order-id={o.order_id}
-                                disabled={o.status === "PICKED_UP" || o.status === "CANCELLED"}
-                              >
-                                {isPaid ? "결제완료" : "결제대기"}
-                              </button>
-                            );
-                          })()}
-                          {o.status !== "PICKED_UP" && o.status !== "CANCELLED" && (
-                            <button class="pickup-complete-btn" data-action="pickup" data-order-id={o.order_id}>수령완료</button>
-                          )}
                           {o.status === "PICKED_UP" && (
                             <button class="pickup-undo-btn" data-action="undo-pickup" data-order-id={o.order_id}>수령취소</button>
                           )}
@@ -576,12 +568,14 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               apiPost('/staff/api/orders/'+oid+'/toggle-payment').then(function(r){return r.json();}).then(function(d){
                 if(!d.success){alert(d.error||'실패');return;}
                 var isPaid=d.status==='PAID';
-                btn.className='payment-state-btn '+(isPaid?'is-paid':'is-pending');
-                btn.textContent=isPaid?'결제완료':'결제대기';
                 var row=btn.closest('tr');
                 row.dataset.status=d.status;
                 var payPill=row.querySelector('[data-col-key="pay_status"] .status-pill');
-                if(payPill){payPill.className='status-pill '+(isPaid?'status-paid':'status-payment_pending');payPill.textContent=isPaid?'결제완료':'결제대기';}
+                if(payPill){
+                  payPill.className='status-pill '+(isPaid?'status-paid':'status-payment_pending');
+                  payPill.textContent=isPaid?'결제완료':'결제대기';
+                  if(isPaid){payPill.removeAttribute('data-action');payPill.style.cursor='';payPill.classList.remove('pill-clickable');}
+                }
               }).catch(function(){alert('네트워크 오류');});
             }
 
