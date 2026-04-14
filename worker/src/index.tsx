@@ -113,8 +113,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
     params.push(like, like, like, like);
   }
 
-  // Hide old PICKED_UP orders (>2 days) unless show_all_picked_up is set
-  if (!showAllPickedUp && (status === "ALL" || status === "PICKED_UP")) {
+  // Hide old PICKED_UP orders (>2 days) unless show_all_picked_up is set or date filter is active
+  if (!showAllPickedUp && !dateFrom && !dateTo && (status === "ALL" || status === "PICKED_UP")) {
     whereClause += " AND (o.status != 'PICKED_UP' OR o.created_at >= datetime('now', '-2 days'))";
   }
 
@@ -248,7 +248,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             {/* Show "수령완료 전체보기" toggle when on PICKED_UP or ALL tab */}
             {(status === "PICKED_UP" || status === "ALL") && (
               <div style="margin-bottom:12px">
-                <a href={buildDashboardUrl("PICKED_UP", showAllPickedUp ? {} : { show_all_picked_up: "true" })}
+                <a href={buildDashboardUrl(status, showAllPickedUp ? {} : { show_all_picked_up: "true" })}
                    class="btn btn-sm" style={`font-size:12px;text-decoration:none;${showAllPickedUp ? "background:#2563eb;color:white;border-color:#2563eb" : ""}`}>
                   {showAllPickedUp ? "최근만 보기" : "수령완료 전체보기"}
                 </a>
@@ -269,6 +269,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   <button type="button" class="btn btn-sm" onclick="setDateRange('yesterday')" style="padding:4px 10px;font-size:11px">어제</button>
                   <button type="button" class="btn btn-sm" onclick="setDateRange('week')" style="padding:4px 10px;font-size:11px">이번주</button>
                   <button type="button" class="btn btn-sm" onclick="setDateRange('month')" style="padding:4px 10px;font-size:11px">이번달</button>
+                  <a href={buildDashboardUrl(status, { show_all_picked_up: "true" })} class="btn btn-sm" style="padding:4px 10px;font-size:11px;text-decoration:none;border:1.5px dashed #94a3b8;background:transparent;color:#64748b">전체</a>
                 </div>
               </div>
 
@@ -288,17 +289,17 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             <div class="table-wrap">
               <table id="staff-orders-table">
                 <colgroup>
-                  <col data-col-key="checkbox" />
-                  <col data-col-key="name" />
-                  <col data-col-key="tag_no" />
-                  <col data-col-key="created_time" />
-                  <col data-col-key="price" />
-                  <col data-col-key="pickup_time" />
-                  <col data-col-key="pay_status" />
-                  <col data-col-key="pickup_status" />
-                  <col data-col-key="actions" />
+                  <col data-col-key="checkbox" style="width:36px" />
+                  <col data-col-key="name" style="width:80px" />
+                  <col data-col-key="tag_no" style="width:52px" />
+                  <col data-col-key="created_time" style="width:90px" />
+                  <col data-col-key="price" style="width:70px" />
+                  <col data-col-key="pickup_time" style="width:56px" />
+                  <col data-col-key="pay_status" style="width:72px" />
+                  <col data-col-key="pickup_status" style="width:72px" />
+                  <col data-col-key="actions" style="width:68px" />
                   <col data-col-key="note" />
-                  <col data-col-key="detail" />
+                  <col data-col-key="detail" style="width:42px" />
                 </colgroup>
                 <thead>
                   <tr>
