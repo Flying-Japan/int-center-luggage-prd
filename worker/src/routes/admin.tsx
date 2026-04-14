@@ -48,7 +48,7 @@ admin.get("/staff/admin/sales", async (c) => {
     c.env.DB.prepare(
       `SELECT
         date(created_at, '+9 hours') as sale_date,
-        COUNT(*) as order_count,
+        SUM(1 + companion_count) as order_count,
         SUM(suitcase_qty) as suitcase_total,
         SUM(backpack_qty) as backpack_total,
         SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash,
@@ -128,7 +128,11 @@ admin.get("/staff/admin/sales", async (c) => {
     const cash = actual ? actual.cash : (sheet?.cash || 0);
     const qr = actual ? actual.qr : (sheet?.qr || 0);
     const luggage = cash + qr;
-    const orders = actual ? actual.order_count : (sheet?.people || 0);
+    // Before ~3/30 migration, companion_count/backpack_qty were 0 in DB.
+    // Use sheet people count when it's higher (includes companions).
+    const dbPeople = actual?.order_count || 0;
+    const sheetPeople = sheet?.people || 0;
+    const orders = Math.max(dbPeople, sheetPeople);
     // Rental from our own system (luggage_rental_daily_sales)
     const rental = rentalByDate.get(date) || 0;
     return {
@@ -253,7 +257,7 @@ admin.get("/staff/admin/sales", async (c) => {
         <StaffTopbar staff={staff} active="/staff/admin/sales" />
         <main class="container">
         {successMsg && <p class="success-note" id="page-alert" role="alert">{successMsg}</p>}
-        <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div></section>
+        <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div><a href="/staff/admin/sales/heatmap" class="btn btn-sm" style="font-size:12px;margin-top:8px;align-self:flex-start">시간대별 히트맵 →</a></section>
 
         <section style="margin-bottom:16px;padding:16px;background:#fff;border:1px solid #e2e8f0;border-radius:12px">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
@@ -1355,6 +1359,458 @@ admin.get("/staff/admin/customers", async (c) => {
             )}
           </main>
         </div>
+        <NewOrderAlert />
+      </body>
+    </html>
+  );
+});
+
+// GET /staff/admin/sales/heatmap — Storage & Pickup time heatmap
+admin.get("/staff/admin/sales/heatmap", async (c) => {
+  const startDate = c.req.query("start_date") || "";
+  const endDate = c.req.query("end_date") || "";
+
+  let dateFilter = "";
+  const storageParams: string[] = [];
+  const pickupParams: string[] = [];
+  if (startDate && endDate) {
+    dateFilter = " AND date(created_at, '+9 hours') BETWEEN ? AND ?";
+    storageParams.push(startDate, endDate);
+    pickupParams.push(startDate, endDate);
+  }
+
+  // Data stats + heatmap queries in parallel
+  const [storageRows, pickupRows, dataStats, cycleRows] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT
+        CAST(strftime('%w', created_at, '+9 hours') AS INTEGER) as dow,
+        CAST(strftime('%H', created_at, '+9 hours') AS INTEGER) as hour,
+        COUNT(*) as cnt
+      FROM luggage_orders
+      WHERE status IN ('PAID', 'PICKED_UP', 'PAYMENT_PENDING')${dateFilter}
+      GROUP BY dow, hour`
+    ).bind(...storageParams).all<{ dow: number; hour: number; cnt: number }>(),
+    c.env.DB.prepare(
+      `SELECT
+        CAST(strftime('%w', actual_pickup_at, '+9 hours') AS INTEGER) as dow,
+        CAST(strftime('%H', actual_pickup_at, '+9 hours') AS INTEGER) as hour,
+        COUNT(*) as cnt
+      FROM luggage_orders
+      WHERE actual_pickup_at IS NOT NULL
+        AND status IN ('PAID', 'PICKED_UP')${dateFilter.replace(/created_at/g, "actual_pickup_at")}
+      GROUP BY dow, hour`
+    ).bind(...pickupParams).all<{ dow: number; hour: number; cnt: number }>(),
+    c.env.DB.prepare(
+      `SELECT
+        COUNT(*) as total_orders,
+        COUNT(CASE WHEN status IN ('PAID','PICKED_UP','PAYMENT_PENDING') THEN 1 END) as storage_source,
+        COUNT(CASE WHEN actual_pickup_at IS NOT NULL AND status IN ('PAID','PICKED_UP') THEN 1 END) as pickup_source,
+        COUNT(CASE WHEN status = 'CANCELLED' THEN 1 END) as cancelled,
+        COUNT(CASE WHEN status = 'PICKED_UP' THEN 1 END) as picked_up,
+        COUNT(CASE WHEN status = 'PAID' THEN 1 END) as paid_only,
+        COUNT(CASE WHEN status = 'PAYMENT_PENDING' THEN 1 END) as pending,
+        MIN(date(created_at, '+9 hours')) as earliest_date,
+        MAX(date(created_at, '+9 hours')) as latest_date
+      FROM luggage_orders WHERE 1=1${dateFilter}`
+    ).bind(...storageParams).first<{
+      total_orders: number; storage_source: number; pickup_source: number;
+      cancelled: number; picked_up: number; paid_only: number; pending: number;
+      earliest_date: string; latest_date: string;
+    }>(),
+    c.env.DB.prepare(
+      `SELECT
+        CAST(strftime('%H', created_at, '+9 hours') AS INTEGER) as storage_hour,
+        CAST(strftime('%H', actual_pickup_at, '+9 hours') AS INTEGER) as pickup_hour,
+        COUNT(*) as cnt
+      FROM luggage_orders
+      WHERE status = 'PICKED_UP'
+        AND actual_pickup_at IS NOT NULL${dateFilter}
+      GROUP BY storage_hour, pickup_hour`
+    ).bind(...storageParams).all<{ storage_hour: number; pickup_hour: number; cnt: number }>(),
+  ]);
+
+  // Build 7x24 grids (dow 0=Sun .. 6=Sat)
+  type HeatGrid = number[][];
+  function buildGrid(rows: { dow: number; hour: number; cnt: number }[]): HeatGrid {
+    const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+    for (const r of rows) {
+      grid[r.dow][r.hour] = r.cnt;
+    }
+    return grid;
+  }
+  const storageGrid = buildGrid(storageRows.results);
+  const pickupGrid = buildGrid(pickupRows.results);
+
+  // Reorder: Mon(1)..Sun(0) for display
+  const dowOrder = [1, 2, 3, 4, 5, 6, 0];
+  const dowLabels = ["월", "화", "수", "목", "금", "토", "일"];
+
+  // Business hours range for display (show 7-22 to capture edge cases)
+  const hourStart = 7;
+  const hourEnd = 22;
+
+  function gridMax(grid: HeatGrid): number {
+    let mx = 0;
+    for (const dow of dowOrder) {
+      for (let h = hourStart; h <= hourEnd; h++) {
+        if (grid[dow][h] > mx) mx = grid[dow][h];
+      }
+    }
+    return mx || 1;
+  }
+
+  const storageMax = gridMax(storageGrid);
+  const pickupMax = gridMax(pickupGrid);
+
+  // Color interpolation: white → blue for storage, white → orange for pickup
+  function cellColor(val: number, max: number, type: "storage" | "pickup"): string {
+    if (val === 0) return "#f8fafc";
+    const t = val / max;
+    if (type === "storage") {
+      // white → #dbeafe → #3b82f6 → #1e40af
+      if (t < 0.33) return `oklch(${95 - t * 30}% ${t * 0.15} 250)`;
+      if (t < 0.66) return `oklch(${85 - (t - 0.33) * 40}% ${0.05 + t * 0.15} 250)`;
+      return `oklch(${72 - (t - 0.66) * 50}% ${0.1 + t * 0.12} 250)`;
+    }
+    // pickup: white → #fef3c7 → #f59e0b → #b45309
+    if (t < 0.33) return `oklch(${95 - t * 20}% ${t * 0.12} 80)`;
+    if (t < 0.66) return `oklch(${88 - (t - 0.33) * 35}% ${0.05 + t * 0.12} 75)`;
+    return `oklch(${76 - (t - 0.66) * 45}% ${0.1 + t * 0.1} 70)`;
+  }
+
+  function textColor(val: number, max: number): string {
+    if (val === 0) return "#cbd5e1";
+    return val / max > 0.5 ? "#fff" : "#334155";
+  }
+
+  // Total counts for summary
+  const storageTotal = storageRows.results.reduce((s, r) => s + r.cnt, 0);
+  const pickupTotal = pickupRows.results.reduce((s, r) => s + r.cnt, 0);
+
+  // Peak hour helper
+  function findPeak(grid: HeatGrid): { dow: string; hour: number; cnt: number } | null {
+    let mx = 0, peakDow = 0, peakH = 0;
+    for (const dow of dowOrder) {
+      for (let h = hourStart; h <= hourEnd; h++) {
+        if (grid[dow][h] > mx) { mx = grid[dow][h]; peakDow = dow; peakH = h; }
+      }
+    }
+    if (mx === 0) return null;
+    const label = dowLabels[dowOrder.indexOf(peakDow)];
+    return { dow: label, hour: peakH, cnt: mx };
+  }
+  const storagePeak = findPeak(storageGrid);
+  const pickupPeak = findPeak(pickupGrid);
+
+  const staff = getStaff(c);
+
+  // Date presets (same as sales page)
+  const now = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const today = now.toISOString().slice(0, 10);
+  const monthStart2 = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  const presets = [
+    { label: "전체", sd: "", ed: "" },
+    { label: "이번 달", sd: monthStart2, ed: today },
+    { label: "최근 30일", sd: new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10), ed: today },
+    { label: "최근 90일", sd: new Date(now.getTime() - 90 * 86400000).toISOString().slice(0, 10), ed: today },
+  ];
+  function renderHeatmap(grid: HeatGrid, max: number, type: "storage" | "pickup") {
+    const hours = Array.from({ length: hourEnd - hourStart + 1 }, (_, i) => hourStart + i);
+    return (
+      <div style="overflow-x:auto">
+        <table style="border-collapse:collapse;width:100%;min-width:600px;table-layout:fixed">
+          <thead>
+            <tr>
+              <th style="width:40px;padding:4px;font-size:11px;font-weight:600;color:#64748b;text-align:left"></th>
+              {hours.map(h => (
+                <th style="padding:4px 2px;font-size:10px;font-weight:500;color:#94a3b8;text-align:center">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {dowOrder.map((dow, i) => (
+              <tr>
+                <td style={`padding:4px;font-size:12px;font-weight:600;color:${dow === 0 ? "#dc2626" : dow === 6 ? "#2563eb" : "#334155"}`}>{dowLabels[i]}</td>
+                {hours.map(h => {
+                  const val = grid[dow][h];
+                  return (
+                    <td
+                      style={`padding:0;text-align:center;height:36px;font-size:11px;font-weight:${val > 0 ? "600" : "400"};color:${textColor(val, max)};background:${cellColor(val, max, type)};border:1px solid #f1f5f9;border-radius:3px;transition:transform 0.1s`}
+                      title={`${dowLabels[i]} ${h}시 — ${val}건`}
+                    >
+                      {val > 0 ? val : ""}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  return c.html(
+    <html lang="ko">
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="stylesheet" href="/static/styles.css" />
+        <title>시간대별 히트맵</title>
+      </head>
+      <body class="staff-site">
+        <StaffTopbar staff={staff} active="/staff/admin/sales" />
+        <main class="container">
+          <section class="hero">
+            <div>
+              <p class="hero-kicker">Admin</p>
+              <h2 class="hero-title">시간대별 히트맵</h2>
+              <p style="font-size:13px;color:#64748b;margin:4px 0 0">고객 보관 접수 및 수령 시간 분포</p>
+            </div>
+          </section>
+
+          {/* Navigation */}
+          <div style="display:flex;gap:8px;margin-bottom:16px">
+            <a href="/staff/admin/sales" class="btn btn-sm" style="font-size:12px">← 매출 분석</a>
+          </div>
+
+          {/* Date filter */}
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px">
+            {presets.map(p => {
+              const active = p.sd === startDate && p.ed === endDate;
+              const href = p.sd ? `/staff/admin/sales/heatmap?start_date=${p.sd}&end_date=${p.ed}` : "/staff/admin/sales/heatmap";
+              return (
+                <a href={href} style={`display:inline-block;padding:6px 14px;font-size:12px;border-radius:20px;text-decoration:none;font-weight:${active ? "700" : "500"};color:${active ? "#fff" : "#475569"};background:${active ? "#2383e2" : "#f1f5f9"};border:1px solid ${active ? "#2383e2" : "#e2e8f0"};transition:all 0.15s`}>
+                  {p.label}
+                </a>
+              );
+            })}
+          </div>
+
+          {/* Summary cards */}
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:24px">
+            <div style="background:#eff6ff;border:1px solid #dbeafe;border-radius:12px;padding:16px">
+              <p style="font-size:11px;color:#64748b;margin:0">보관 접수 · 預かり</p>
+              <p style="font-size:24px;font-weight:800;color:#1e40af;margin:4px 0 0">{storageTotal.toLocaleString()}건</p>
+              {storagePeak && <p style="font-size:11px;color:#64748b;margin:6px 0 0">피크: {storagePeak.dow} {storagePeak.hour}시 ({storagePeak.cnt}건)</p>}
+            </div>
+            <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:16px">
+              <p style="font-size:11px;color:#64748b;margin:0">수령 · 受取り</p>
+              <p style="font-size:24px;font-weight:800;color:#b45309;margin:4px 0 0">{pickupTotal.toLocaleString()}건</p>
+              {pickupPeak && <p style="font-size:11px;color:#64748b;margin:6px 0 0">피크: {pickupPeak.dow} {pickupPeak.hour}시 ({pickupPeak.cnt}건)</p>}
+            </div>
+          </div>
+
+          {/* Data source info */}
+          {dataStats && (
+            <section style="margin-bottom:20px;padding:16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                <h4 style="font-size:13px;font-weight:700;color:#334155;margin:0">데이터 소스 정보</h4>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:12px">
+                <div style="padding:8px 12px;background:#fff;border-radius:6px;border:1px solid #e2e8f0">
+                  <p style="font-size:10px;color:#94a3b8;margin:0">데이터 기간</p>
+                  <p style="font-size:13px;font-weight:700;color:#1e293b;margin:2px 0 0">{dataStats.earliest_date} ~ {dataStats.latest_date}</p>
+                </div>
+                <div style="padding:8px 12px;background:#fff;border-radius:6px;border:1px solid #e2e8f0">
+                  <p style="font-size:10px;color:#94a3b8;margin:0">전체 주문</p>
+                  <p style="font-size:13px;font-weight:700;color:#1e293b;margin:2px 0 0">{dataStats.total_orders.toLocaleString()}건</p>
+                </div>
+                <div style="padding:8px 12px;background:#fff;border-radius:6px;border:1px solid #e2e8f0">
+                  <p style="font-size:10px;color:#94a3b8;margin:0">보관 히트맵 소스</p>
+                  <p style="font-size:13px;font-weight:700;color:#1e40af;margin:2px 0 0">{dataStats.storage_source.toLocaleString()}건</p>
+                </div>
+                <div style="padding:8px 12px;background:#fff;border-radius:6px;border:1px solid #e2e8f0">
+                  <p style="font-size:10px;color:#94a3b8;margin:0">수령 히트맵 소스</p>
+                  <p style="font-size:13px;font-weight:700;color:#b45309;margin:2px 0 0">{dataStats.pickup_source.toLocaleString()}건</p>
+                </div>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:#64748b;padding-top:8px;border-top:1px solid #e2e8f0">
+                <span>수령완료: <strong style="color:#334155">{dataStats.picked_up.toLocaleString()}</strong></span>
+                <span>결제완료(미수령): <strong style="color:#334155">{dataStats.paid_only}</strong></span>
+                <span>결제대기: <strong style="color:#334155">{dataStats.pending}</strong></span>
+                <span>취소(제외): <strong style="color:#dc2626">{dataStats.cancelled}</strong></span>
+              </div>
+              <div style="margin-top:10px;padding:8px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:11px;color:#92400e;line-height:1.6">
+                <strong>수집 방식:</strong> 보관 시간 = 고객 접수 시 서버 기록 (<code style="font-size:10px;background:#fef3c7;padding:1px 4px;border-radius:3px">created_at</code>),
+                수령 시간 = 스태프 수령완료 처리 시 서버 기록 (<code style="font-size:10px;background:#fef3c7;padding:1px 4px;border-radius:3px">actual_pickup_at</code>).
+                모든 시간은 JST(UTC+9) 기준.
+              </div>
+            </section>
+          )}
+
+          {/* Storage heatmap */}
+          <section style="margin-bottom:28px;padding:20px;background:#fff;border:1px solid #e2e8f0;border-radius:12px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+              <div style="width:12px;height:12px;border-radius:3px;background:#3b82f6"></div>
+              <h3 style="font-size:15px;font-weight:700;margin:0">보관 접수 시간 분포</h3>
+              <span style="font-size:11px;color:#94a3b8">預かり受付時間</span>
+            </div>
+            {renderHeatmap(storageGrid, storageMax, "storage")}
+            <div style="display:flex;align-items:center;gap:4px;margin-top:10px;justify-content:flex-end">
+              <span style="font-size:10px;color:#94a3b8">적음</span>
+              <div style="display:flex;gap:2px">
+                {[0, 0.2, 0.4, 0.6, 0.8, 1].map(t => (
+                  <div style={`width:16px;height:10px;border-radius:2px;background:${t === 0 ? "#f8fafc" : cellColor(t * storageMax, storageMax, "storage")}`}></div>
+                ))}
+              </div>
+              <span style="font-size:10px;color:#94a3b8">많음</span>
+            </div>
+          </section>
+
+          {/* Pickup heatmap */}
+          <section style="margin-bottom:28px;padding:20px;background:#fff;border:1px solid #e2e8f0;border-radius:12px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+              <div style="width:12px;height:12px;border-radius:3px;background:#f59e0b"></div>
+              <h3 style="font-size:15px;font-weight:700;margin:0">수령 시간 분포</h3>
+              <span style="font-size:11px;color:#94a3b8">受取り時間</span>
+            </div>
+            {renderHeatmap(pickupGrid, pickupMax, "pickup")}
+            <div style="display:flex;align-items:center;gap:4px;margin-top:10px;justify-content:flex-end">
+              <span style="font-size:10px;color:#94a3b8">적음</span>
+              <div style="display:flex;gap:2px">
+                {[0, 0.2, 0.4, 0.6, 0.8, 1].map(t => (
+                  <div style={`width:16px;height:10px;border-radius:2px;background:${t === 0 ? "#f8fafc" : cellColor(t * pickupMax, pickupMax, "pickup")}`}></div>
+                ))}
+              </div>
+              <span style="font-size:10px;color:#94a3b8">많음</span>
+            </div>
+          </section>
+
+          {/* Cycle heatmap: storage hour (Y) x pickup hour (X) */}
+          {(() => {
+            const hStart = 8;
+            const hEnd = 21;
+            const size = hEnd - hStart + 1;
+            // Build storage_hour x pickup_hour grid
+            const cycleGrid: number[][] = Array.from({ length: 24 }, () => Array(24).fill(0));
+            let cycleMax = 0;
+            let cycleTotal = 0;
+            for (const r of cycleRows.results) {
+              cycleGrid[r.storage_hour][r.pickup_hour] = r.cnt;
+              cycleTotal += r.cnt;
+              if (r.cnt > cycleMax) cycleMax = r.cnt;
+            }
+            cycleMax = cycleMax || 1;
+
+            // Find top 3 flows
+            const flows: { sh: number; ph: number; cnt: number }[] = [];
+            for (const r of cycleRows.results) flows.push({ sh: r.storage_hour, ph: r.pickup_hour, cnt: r.cnt });
+            flows.sort((a, b) => b.cnt - a.cnt);
+            const top3 = flows.slice(0, 3);
+
+            // Avg pickup hour per storage hour
+            const avgPickup: { hour: number; avg: number; cnt: number }[] = [];
+            for (let sh = hStart; sh <= hEnd; sh++) {
+              let sum = 0, total = 0;
+              for (let ph = hStart; ph <= hEnd; ph++) {
+                sum += cycleGrid[sh][ph] * ph;
+                total += cycleGrid[sh][ph];
+              }
+              if (total > 0) avgPickup.push({ hour: sh, avg: Math.round(sum / total * 10) / 10, cnt: total });
+            }
+
+            function cycleCellColor(val: number): string {
+              if (val === 0) return "#f8fafc";
+              const t = val / cycleMax;
+              if (t < 0.25) return `oklch(${95 - t * 20}% ${t * 0.12} 160)`;
+              if (t < 0.5) return `oklch(${90 - (t - 0.25) * 30}% ${0.03 + t * 0.12} 155)`;
+              if (t < 0.75) return `oklch(${82 - (t - 0.5) * 40}% ${0.06 + t * 0.1} 150)`;
+              return `oklch(${72 - (t - 0.75) * 45}% ${0.1 + t * 0.08} 145)`;
+            }
+
+            const hours = Array.from({ length: size }, (_, i) => hStart + i);
+            return (
+              <section style="margin-bottom:28px;padding:20px;background:#fff;border:1px solid #e2e8f0;border-radius:12px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                  <div style="width:12px;height:12px;border-radius:3px;background:#10b981"></div>
+                  <h3 style="font-size:15px;font-weight:700;margin:0">보관→수령 사이클 히트맵</h3>
+                  <span style="font-size:11px;color:#94a3b8">預かり→受取りサイクル</span>
+                </div>
+                <p style="font-size:11px;color:#64748b;margin:0 0 14px;line-height:1.5">
+                  한 주문의 보관 접수 시간(세로)과 수령 시간(가로)의 상관관계. 수령완료 <strong>{cycleTotal.toLocaleString()}</strong>건 대상.
+                </p>
+
+                <div style="overflow-x:auto">
+                  <table style="border-collapse:collapse;width:100%;min-width:500px;table-layout:fixed">
+                    <thead>
+                      <tr>
+                        <th style="width:60px;padding:4px;font-size:10px;font-weight:600;color:#64748b;text-align:left">보관＼수령</th>
+                        {hours.map(h => (
+                          <th style="padding:3px 1px;font-size:10px;font-weight:500;color:#94a3b8;text-align:center">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hours.map(sh => (
+                        <tr>
+                          <td style="padding:3px 4px;font-size:11px;font-weight:600;color:#334155">{sh}시</td>
+                          {hours.map(ph => {
+                            const val = cycleGrid[sh][ph];
+                            const isTop = top3.some(f => f.sh === sh && f.ph === ph);
+                            return (
+                              <td
+                                style={`padding:0;text-align:center;height:32px;font-size:${val > 0 ? "10" : "0"}px;font-weight:${isTop ? "800" : "600"};color:${val === 0 ? "transparent" : val / cycleMax > 0.4 ? "#fff" : "#334155"};background:${cycleCellColor(val)};border:${isTop ? "2px solid #064e3b" : "1px solid #f1f5f9"};border-radius:3px`}
+                                title={`보관 ${sh}시 → 수령 ${ph}시: ${val}건`}
+                              >
+                                {val > 0 ? val : ""}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Legend */}
+                <div style="display:flex;align-items:center;gap:4px;margin-top:10px;justify-content:flex-end">
+                  <span style="font-size:10px;color:#94a3b8">적음</span>
+                  <div style="display:flex;gap:2px">
+                    {[0, 0.2, 0.4, 0.6, 0.8, 1].map(t => (
+                      <div style={`width:16px;height:10px;border-radius:2px;background:${t === 0 ? "#f8fafc" : cycleCellColor(t * cycleMax)}`}></div>
+                    ))}
+                  </div>
+                  <span style="font-size:10px;color:#94a3b8">많음</span>
+                  <span style="font-size:10px;color:#94a3b8;margin-left:8px">■ = Top 3</span>
+                </div>
+
+                {/* Insights */}
+                {top3.length > 0 && (
+                  <div style="margin-top:14px;padding:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
+                    <p style="font-size:12px;font-weight:700;color:#166534;margin:0 0 6px">주요 패턴 TOP 3</p>
+                    {top3.map((f, i) => (
+                      <p style="font-size:12px;color:#334155;margin:2px 0">
+                        <strong style="color:#166534">{i + 1}.</strong> {f.sh}시 보관 → {f.ph}시 수령: <strong>{f.cnt.toLocaleString()}건</strong>
+                        <span style="color:#64748b;font-size:11px"> ({Math.round(f.cnt / cycleTotal * 100)}%)</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                {/* Avg pickup time per storage hour */}
+                {avgPickup.length > 0 && (
+                  <div style="margin-top:12px;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px">
+                    <p style="font-size:12px;font-weight:700;color:#334155;margin:0 0 6px">보관 시간별 평균 수령 시간</p>
+                    <div style="display:flex;flex-wrap:wrap;gap:6px">
+                      {avgPickup.map(a => (
+                        <span style="display:inline-block;padding:4px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;font-size:11px">
+                          <strong>{a.hour}시</strong> → <strong style="color:#166534">{a.avg}시</strong>
+                          <span style="color:#94a3b8;font-size:10px"> ({a.cnt}건)</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            );
+          })()}
+
+          <p style="font-size:11px;color:#94a3b8;text-align:center;margin-bottom:24px">
+            시간은 JST (일본시간) 기준 · PAID/PICKED_UP 주문만 포함
+          </p>
+        </main>
         <NewOrderAlert />
       </body>
     </html>

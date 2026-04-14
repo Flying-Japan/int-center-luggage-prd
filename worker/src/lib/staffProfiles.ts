@@ -15,8 +15,10 @@ export function getStaffDisplayName(profile: Pick<StaffProfileRow, "id" | "displ
   return profile.display_name || profile.username || profile.id;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function fetchStaffProfilesByIds(env: Env, ids: Array<string | null | undefined>): Promise<Map<string, StaffProfileRow>> {
-  const uniqueIds = [...new Set(ids.map((value) => `${value ?? ""}`.trim()).filter(Boolean))];
+  const uniqueIds = [...new Set(ids.map((value) => `${value ?? ""}`.trim()).filter((v) => v && UUID_RE.test(v)))];
   if (uniqueIds.length === 0) return new Map();
 
   const supabaseAdmin = createSupabaseAdmin(env);

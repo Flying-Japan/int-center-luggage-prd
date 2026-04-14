@@ -3,8 +3,17 @@
  *
  * Order ID: YYYYMMDD-NNN — always unique, always increments, never reused.
  * Tag number: physical luggage tag.
- *   - Same-day pickup: 1~91, recycled from CANCELLED/PICKED_UP when full.
- *   - Overnight pickup: 92~, always matches order_id seq.
+ *
+ * Same-day tags (1-90):
+ *   Phase 1: Sequential 1→2→3...→90 (first pass).
+ *   Phase 2: After reaching 90, recycle the lowest available tag
+ *            (i.e. not held by an active PAYMENT_PENDING or PAID order).
+ *   Returns null when all 90 tags are in use.
+ *
+ * Overnight tags (91+):
+ *   Sequential counter, no recycling. Starts at 91 for each business date.
+ *
+ * Extensions: Reuse parent's tag (same physical bag) — handled by caller.
  */
 
 import { todayBusinessDate } from "./storage";
@@ -39,54 +48,68 @@ export async function buildOrderId(db: D1Database, nowUtc?: Date, overnight?: bo
 }
 
 /**
- * Generate tag_no for an order.
+ * Assign a same-day tag number (1-90).
  *
- * Overnight: tag = order_id seq (92+), always matches.
- * Same-day:
- *   - If seq ≤ 91: tag = seq (matches order_id)
- *   - If seq > 91: recycle lowest tag 1~91 from CANCELLED/PICKED_UP orders today
+ * Phase 1: Increment sequential counter. If <= 90, use that directly.
+ * Phase 2: All 90 first-pass tags used — recycle the lowest tag not held
+ *          by an active order (PAYMENT_PENDING or PAID) for today.
+ *
+ * Uses luggage_tag_pool (static 1-90 rows) as the reference set instead
+ * of generate_series (not available in D1/SQLite).
+ *
+ * Returns null when all 90 tags are in use (caller should show error).
  */
-export async function buildTagNo(db: D1Database, orderId: string): Promise<string> {
-  const seq = parseInt(orderId.split("-")[1], 10);
-  const businessDate = orderId.split("-")[0]; // YYYYMMDD
+export async function buildSameDayTag(db: D1Database, businessDate?: string): Promise<string | null> {
+  const bizDate = businessDate ?? todayBusinessDate();
 
-  // Overnight (92+): always use seq as tag
-  if (seq >= 92) {
+  // Phase 1: Increment sequential counter
+  const row = await db.prepare(
+    `INSERT INTO luggage_daily_tag_counters (business_date, last_seq)
+     VALUES (?, 1)
+     ON CONFLICT(business_date) DO UPDATE SET last_seq = last_seq + 1
+     RETURNING last_seq`
+  ).bind(bizDate).first<{ last_seq: number }>();
+
+  const seq = row?.last_seq ?? 1;
+
+  // Phase 1: Sequential (first pass through 1-90)
+  if (seq <= 90) {
     return String(seq);
   }
 
-  // Same-day (1~91): use seq if not taken by active order
-  const conflict = await db
-    .prepare(
-      `SELECT 1 FROM luggage_orders
-       WHERE order_id LIKE ? AND tag_no = ? AND status IN ('PAYMENT_PENDING', 'PAID')
-       LIMIT 1`
-    )
-    .bind(`${businessDate}-%`, String(seq))
-    .first();
+  // Phase 2: Recycle — find lowest available tag from pool
+  // A tag is "in use" if an active order (PAYMENT_PENDING or PAID) holds it for today
+  const freeTag = await db.prepare(
+    `SELECT t.tag_no FROM luggage_tag_pool t
+     WHERE NOT EXISTS (
+       SELECT 1 FROM luggage_orders o
+       WHERE CAST(o.tag_no AS INTEGER) = t.tag_no
+         AND o.order_id LIKE ? || '-%'
+         AND o.status IN ('PAYMENT_PENDING', 'PAID')
+     )
+     ORDER BY t.tag_no ASC
+     LIMIT 1`
+  ).bind(bizDate).first<{ tag_no: number }>();
 
-  if (!conflict) {
-    return String(seq);
-  }
+  if (!freeTag) return null; // All 90 tags in use
+  return String(freeTag.tag_no);
+}
 
-  // Recycle: find lowest tag 1~91 not used by an active (PAYMENT_PENDING/PAID) order today
-  const activeTagsResult = await db
-    .prepare(
-      `SELECT CAST(tag_no AS INTEGER) as num FROM luggage_orders
-       WHERE order_id LIKE ? AND status IN ('PAYMENT_PENDING', 'PAID')
-       AND CAST(tag_no AS INTEGER) BETWEEN 1 AND 91
-       ORDER BY num ASC`
-    )
-    .bind(`${businessDate}-%`)
-    .all<{ num: number }>();
+/**
+ * Assign an overnight tag number (91+).
+ * Sequential counter per business date, no recycling.
+ */
+export async function buildOvernightTag(db: D1Database, businessDate?: string): Promise<string> {
+  const bizDate = businessDate ?? todayBusinessDate();
 
-  const activeTags = new Set(activeTagsResult.results.map((r) => r.num));
-  for (let i = 1; i <= 91; i++) {
-    if (!activeTags.has(i)) return String(i);
-  }
+  const row = await db.prepare(
+    `INSERT INTO luggage_daily_tag_counters (business_date, last_seq)
+     VALUES (?, 91)
+     ON CONFLICT(business_date) DO UPDATE SET last_seq = last_seq + 1
+     RETURNING last_seq`
+  ).bind(`${bizDate}-overnight`).first<{ last_seq: number }>();
 
-  // All 91 tags active (extremely unlikely) — use seq as fallback
-  return String(seq);
+  return String(row?.last_seq ?? 91);
 }
 
 /** Convert a UTC Date to JST business date string (YYYYMMDD). */

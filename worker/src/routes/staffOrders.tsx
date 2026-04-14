@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import type { AppType } from "../types";
 import { staffAuth, editorAuth, getStaff, insertAuditLog } from "../middleware/auth";
 import { downloadImage, logImageView } from "../lib/r2";
-import { buildOrderId, buildTagNo } from "../services/orderNumber";
+import { buildOrderId, buildSameDayTag, buildOvernightTag } from "../services/orderNumber";
 import { calculatePricePerDay, calculatePrepaidAmount, normalizeFlyingPassTier, flyingPassDiscountAmount, calculateExtraAmount } from "../services/pricing";
 import { calculateStorageDays, calculateExtraDays } from "../services/storage";
 import { createBugTask } from "../lib/asana";
@@ -457,22 +457,30 @@ staffOrders.post("/staff/orders/:id/create-extension", editorAuth, async (c) => 
   // Find root order (follow parent chain)
   const rootId = parent.parent_order_id || parentOrderId;
 
-  const newOrderId = await buildOrderId(c.env.DB);
+  const newOrderId = await buildOrderId(c.env.DB, undefined, false, "ext");
+  // Reuse parent's tag_no — extension is for the same physical luggage.
+  // Consistent with auto-extension behavior (extension.ts:51).
+  const tagNo = parent.tag_no ?? "";
   const { setQty, pricePerDay } = calculatePricePerDay(parent.suitcase_qty, parent.backpack_qty);
 
-  await c.env.DB.prepare(
-    `INSERT INTO luggage_orders (
-       order_id, name, phone, companion_count, suitcase_qty, backpack_qty, set_qty,
-       price_per_day, flying_pass_tier, status, manual_entry, staff_id, parent_order_id, note
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING', 1, ?, ?, ?)`
-  )
-    .bind(
-      newOrderId, parent.name, parent.phone, parent.companion_count,
-      parent.suitcase_qty, parent.backpack_qty, setQty, pricePerDay,
-      parent.flying_pass_tier, staff.id, rootId,
-      `연장 주문 (원본: ${parentOrderId})`
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO luggage_orders (
+         order_id, name, phone, companion_count, suitcase_qty, backpack_qty, set_qty,
+         price_per_day, flying_pass_tier, status, tag_no, manual_entry, staff_id, parent_order_id, note
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING', ?, 1, ?, ?, ?)`
     )
-    .run();
+      .bind(
+        newOrderId, parent.name, parent.phone, parent.companion_count,
+        parent.suitcase_qty, parent.backpack_qty, setQty, pricePerDay,
+        parent.flying_pass_tier, tagNo, staff.id, rootId,
+        `연장 주문 (원본: ${parentOrderId})`
+      )
+      .run();
+  } catch (e) {
+    console.error("Extension order insert failed:", e);
+    return c.redirect(`/staff/orders/${parentOrderId}?error=연장접수 실패`);
+  }
 
   await insertAuditLog(c.env.DB, newOrderId, staff.id, "CREATE_EXTENSION", `원본: ${parentOrderId}`);
   await insertAuditLog(c.env.DB, parentOrderId, staff.id, "CREATE_EXTENSION", `연장접수 생성: ${newOrderId}`);
@@ -492,7 +500,16 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
   const companionCount = parseInt(String(body.companion_count || "0"), 10);
   const flyingPassTier = normalizeFlyingPassTier(String(body.flying_pass_tier || ""));
   const expectedPickupAt = String(body.expected_pickup_at || "");
-  const note = String(body.note || "").trim();
+  const rawNote = String(body.note || "").trim();
+
+  // Free reason: 지인 접수, 블로거 방문, 쿠폰, 기타
+  const freeReason = String(body.free_reason || "").trim();
+  const freeReasonText = String(body.free_reason_text || "").trim();
+  const isFree = freeReason !== "";
+  const freeLabel = freeReason === "기타" ? (freeReasonText || "기타") : freeReason;
+  const note = isFree
+    ? `[무료: ${freeLabel}]${rawNote ? " " + rawNote : ""}`
+    : rawNote;
 
   if (!name || !phone || (suitcaseQty === 0 && backpackQty === 0)) {
     return c.redirect("/staff/dashboard?error=이름, 전화번호, 짐 수량이 필요합니다");
@@ -509,7 +526,13 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
       || pickupJST.getUTCFullYear() !== nowJST.getUTCFullYear();
   }
   const orderId = await buildOrderId(c.env.DB, undefined, isOvernight);
-  const tagNo = await buildTagNo(c.env.DB, orderId);
+  // Tag assignment: overnight → 91+ sequential, same-day → Phase 1/2 (1-90)
+  const tagNo = isOvernight
+    ? await buildOvernightTag(c.env.DB)
+    : await buildSameDayTag(c.env.DB);
+  if (tagNo === null) {
+    return c.redirect("/staff/dashboard?error=당일 태그(1-90) 모두 사용 중입니다");
+  }
   const { setQty, pricePerDay } = calculatePricePerDay(suitcaseQty, backpackQty);
 
   let expectedStorageDays = 1;
@@ -517,24 +540,31 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
     expectedStorageDays = calculateStorageDays(new Date().toISOString(), expectedPickupAt);
   }
 
-  const { discountRate, prepaidAmount } = calculatePrepaidAmount(pricePerDay, expectedStorageDays);
-  const passDiscount = flyingPassDiscountAmount(prepaidAmount, flyingPassTier);
+  const { discountRate, prepaidAmount: rawPrepaid } = calculatePrepaidAmount(pricePerDay, expectedStorageDays);
+  const prepaidAmount = isFree ? 0 : rawPrepaid;
+  const passDiscount = isFree ? 0 : flyingPassDiscountAmount(prepaidAmount, flyingPassTier);
+  const finalPricePerDay = isFree ? 0 : pricePerDay;
 
-  await c.env.DB.prepare(
-    `INSERT INTO luggage_orders (
-       order_id, name, phone, companion_count, suitcase_qty, backpack_qty, set_qty,
-       expected_pickup_at, expected_storage_days, price_per_day, discount_rate,
-       prepaid_amount, flying_pass_tier, flying_pass_discount_amount,
-       status, tag_no, note, manual_entry, staff_id, consent_checked
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING', ?, ?, 1, ?, 1)`
-  )
-    .bind(
-      orderId, name, phone, companionCount, suitcaseQty, backpackQty, setQty,
-      expectedPickupAt || null, expectedStorageDays, pricePerDay, discountRate,
-      prepaidAmount, flyingPassTier, passDiscount,
-      tagNo, note || null, staff.id
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO luggage_orders (
+         order_id, name, phone, companion_count, suitcase_qty, backpack_qty, set_qty,
+         expected_pickup_at, expected_storage_days, price_per_day, discount_rate,
+         prepaid_amount, flying_pass_tier, flying_pass_discount_amount,
+         status, tag_no, note, manual_entry, staff_id, consent_checked
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING', ?, ?, 1, ?, 1)`
     )
-    .run();
+      .bind(
+        orderId, name, phone, companionCount, suitcaseQty, backpackQty, setQty,
+        expectedPickupAt || null, expectedStorageDays, finalPricePerDay, discountRate,
+        prepaidAmount, flyingPassTier, passDiscount,
+        tagNo, note || null, staff.id
+      )
+      .run();
+  } catch (e) {
+    console.error("Manual order insert failed:", e);
+    return c.redirect("/staff/dashboard?error=수동등록 실패");
+  }
 
   await insertAuditLog(c.env.DB, orderId, staff.id, "MANUAL_CREATE");
 

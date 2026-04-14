@@ -13,7 +13,7 @@ import {
   flyingPassDiscountAmount,
 } from "../services/pricing";
 import { calculateStorageDays } from "../services/storage";
-import { buildOrderId, buildTagNo } from "../services/orderNumber";
+import { buildOrderId, buildSameDayTag, buildOvernightTag } from "../services/orderNumber";
 
 const customer = new Hono<AppType>();
 const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
@@ -660,6 +660,14 @@ form { margin-top: 16px; }
                 <input class="control" type="email" name="email" required maxlength={120} autocomplete="email" placeholder="example@email.com" />
                 <span class="field-hint" style="color:#dc2626;font-weight:600">{lang === "ja" ? "⚠️ 受付完了メールが届きます — 正確に入力してください" : lang === "en" ? "⚠️ Confirmation email will be sent — please double-check" : "⚠️ 접수 완료 이메일이 발송됩니다 — 정확하게 입력해주세요"}</span>
               </label>
+
+              {/* Survey banner */}
+              <a href="https://docs.google.com/forms/d/e/1FAIpQLSefQH9oMIvToWtZCF0hua0uziw4Wfj67X_wR8DG9S3fK1HagA/viewform" target="_blank" rel="noopener" style="display:block;margin:8px 0 12px">
+                <picture>
+                  <source media="(min-width:600px)" srcset="/static/survey-banner-tablet.png" />
+                  <img src="/static/survey-banner-mobile.png" alt={lang === "ja" ? "アンケート 100円キャッシュバック" : lang === "en" ? "Survey — ¥100 cashback" : "설문 참여 100엔 캐시백"} style="width:100%;border-radius:10px" loading="lazy" />
+                </picture>
+              </a>
 
               {/* images */}
               <div class="grid2">
@@ -1471,17 +1479,9 @@ customer.post("/customer/submit", async (c) => {
     return redirect(t("pickup_note", lang));
   }
 
-  // --- Generate order ID and tag number ---
-  // Check if pickup is next day or later (overnight) → order starts from 96
-  const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const pickupJST = new Date(pickupDate.getTime() + 9 * 60 * 60 * 1000);
-  const isOvernight = pickupJST.getUTCDate() !== nowJST.getUTCDate()
-    || pickupJST.getUTCMonth() !== nowJST.getUTCMonth()
-    || pickupJST.getUTCFullYear() !== nowJST.getUTCFullYear();
-  const orderId = await buildOrderId(c.env.DB, undefined, isOvernight);
-  const tagNo = await buildTagNo(c.env.DB, orderId);
-
-  // --- Upload images ---
+  // --- Upload images BEFORE counter allocation ---
+  // Prevents tag number gaps when image upload fails (race condition fix).
+  // Uses null orderId for key generation since orderId doesn't exist yet.
   let idImageUrl: string | null = null;
   let luggageImageUrl: string | null = null;
 
@@ -1491,7 +1491,7 @@ customer.post("/customer/submit", async (c) => {
       const validation = validateImageUpload(idImageFile.size, idImageFile.type);
       if (!validation.valid) return redirect(validation.error || t("upload_error", lang));
       const ext = extFromContentType(idImageFile.type);
-      const key = buildImageKey("id", orderId, ext);
+      const key = buildImageKey("id", null, ext);
       const buffer = await idImageFile.arrayBuffer();
       await uploadImage(c.env.IMAGES, key, buffer, idImageFile.type);
       idImageUrl = key;
@@ -1502,7 +1502,7 @@ customer.post("/customer/submit", async (c) => {
       const validation = validateImageUpload(luggageImageFile.size, luggageImageFile.type);
       if (!validation.valid) return redirect(validation.error || t("upload_error", lang));
       const ext = extFromContentType(luggageImageFile.type);
-      const key = buildImageKey("luggage", orderId, ext);
+      const key = buildImageKey("luggage", null, ext);
       const buffer = await luggageImageFile.arrayBuffer();
       await uploadImage(c.env.IMAGES, key, buffer, luggageImageFile.type);
       luggageImageUrl = key;
@@ -1510,6 +1510,24 @@ customer.post("/customer/submit", async (c) => {
   } catch (e) {
     console.error("Image upload failed:", e);
     return redirect(t("upload_error", lang));
+  }
+
+  // --- Generate order ID and tag number ---
+  // Counter allocation happens AFTER image upload succeeds, so failed uploads
+  // never consume a tag number. This fixes the "skipped number" bug.
+  const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const pickupJST = new Date(pickupDate.getTime() + 9 * 60 * 60 * 1000);
+  const isOvernight = pickupJST.getUTCDate() !== nowJST.getUTCDate()
+    || pickupJST.getUTCMonth() !== nowJST.getUTCMonth()
+    || pickupJST.getUTCFullYear() !== nowJST.getUTCFullYear();
+  const orderId = await buildOrderId(c.env.DB, undefined, isOvernight);
+  // Tag assignment: overnight → 91+ sequential, same-day → Phase 1/2 (1-90)
+  const tagNo = isOvernight
+    ? await buildOvernightTag(c.env.DB)
+    : await buildSameDayTag(c.env.DB);
+  if (tagNo === null) {
+    // All 90 same-day tags are in use
+    return redirect(t("capacity_full", lang));
   }
 
   // --- Pricing ---
@@ -1898,7 +1916,7 @@ a { color: inherit; text-decoration: none; }
             <div style="text-align:center;display:grid;gap:14px;padding-top:16px">
               <div class="completion-msg" dangerouslySetInnerHTML={{__html: (() => {
                 // Sanitize DB-sourced content first to prevent XSS, then apply safe formatting
-                const escaped = primaryMsg.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+                const escaped = primaryMsg.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
                 return escaped
                   .replace(/\n/g, "<br/>")
                   .replace(/(접수 된 순서대로 성함을 불러드리겠습니다|We will call your name in the order received|受付順にお名前をお呼びします)/g, '<strong style="font-size:15px;color:var(--text)">$1</strong>')

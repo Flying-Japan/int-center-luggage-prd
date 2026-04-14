@@ -23,9 +23,11 @@ export async function securityHeaders(c: Context, next: Next) {
   await next();
 
   const contentType = c.res.headers.get("Content-Type") || "";
+  const path = new URL(c.req.url).pathname;
+  const isStaffPage = path.startsWith("/staff/") || path === "/staff";
   if (contentType.includes("text/html")) {
     const html = await c.res.text();
-    const injectedHtml = injectGa4Snippet(html);
+    const injectedHtml = isStaffPage ? html : injectGa4Snippet(html);
     c.res = new Response(injectedHtml, {
       status: c.res.status,
       statusText: c.res.statusText,
@@ -102,7 +104,12 @@ export function createRateLimiter(maxRequests: number, windowMs: number) {
     }
 
     if (entry.count >= maxRequests) {
-      return c.json({ error: "Too many requests" }, 429);
+      const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+      return c.html(
+        `<html><head><meta charset="UTF-8"><title>429</title></head><body style="font-family:sans-serif;text-align:center;padding:80px 16px;background:#f8fafc"><h1 style="font-size:48px;color:#1e293b;margin:0">429</h1><p style="color:#64748b;margin:12px 0 24px">요청이 너무 많습니다. <strong>${retryAfter}초</strong> 후 다시 시도해주세요.</p><a href="/staff/login" style="display:inline-block;padding:10px 24px;background:#2383e2;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">로그인으로 돌아가기</a></body></html>`,
+        429,
+        { "Retry-After": String(retryAfter) }
+      );
     }
 
     entry.count += 1;

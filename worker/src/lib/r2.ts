@@ -49,10 +49,12 @@ export async function deleteImage(bucket: R2Bucket, key: string): Promise<void> 
 /**
  * Generate a unique R2 key for an image.
  * Format: {folder}/{orderId}-{uuid}.{ext}
+ * If orderId is omitted, uses UUID only (for pre-counter uploads).
  */
-export function buildImageKey(folder: "id" | "luggage", orderId: string, ext: string): string {
+export function buildImageKey(folder: "id" | "luggage", orderId: string | null, ext: string): string {
   const uuid = crypto.randomUUID();
-  return `${folder}/${orderId}-${uuid}.${ext}`;
+  const prefix = orderId ? `${orderId}-` : "";
+  return `${folder}/${prefix}${uuid}.${ext}`;
 }
 
 /**

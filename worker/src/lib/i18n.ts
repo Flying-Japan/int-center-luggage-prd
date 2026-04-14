@@ -42,6 +42,7 @@ type TranslationKeys = {
   order_id_label: string;
   pickup_note: string;
   upload_error: string;
+  capacity_full: string;
   pickup_late_warning: string;
 
   // Page titles
@@ -92,6 +93,7 @@ const TRANSLATIONS: Record<Lang, TranslationKeys> = {
     order_id_label: "접수 번호",
     pickup_note: "영업시간: 09:00~21:00 (JST)",
     upload_error: "업로드 실패",
+    capacity_full: "당일 보관 태그가 모두 사용 중입니다. 잠시 후 다시 시도해주세요.",
     pickup_late_warning: "수령 지연 시 추가 요금이 발생합니다",
     page_title: "짐보관 접수",
     success_title: "접수가 완료되었습니다",
@@ -132,6 +134,7 @@ const TRANSLATIONS: Record<Lang, TranslationKeys> = {
     order_id_label: "Order Number",
     pickup_note: "Business hours: 09:00-21:00 (JST)",
     upload_error: "Upload failed",
+    capacity_full: "All same-day storage tags are currently in use. Please try again later.",
     pickup_late_warning: "Late pickup will incur additional charges",
     page_title: "Luggage Storage",
     success_title: "Check-in Complete",
@@ -172,6 +175,7 @@ const TRANSLATIONS: Record<Lang, TranslationKeys> = {
     order_id_label: "受付番号",
     pickup_note: "営業時間: 09:00〜21:00 (JST)",
     upload_error: "アップロード失敗",
+    capacity_full: "当日保管タグがすべて使用中です。しばらくしてから再度お試しください。",
     pickup_late_warning: "受取遅延の場合、追加料金が発生します",
     page_title: "荷物預かり",
     success_title: "受付が完了しました",

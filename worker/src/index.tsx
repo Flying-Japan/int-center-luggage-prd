@@ -10,6 +10,7 @@ import staticRoutes from "./routes/static";
 import { securityHeaders, errorHandler, notFoundHandler, createRateLimiter } from "./middleware/security";
 import { staffAuth, getStaff } from "./middleware/auth";
 import { runRetentionCleanup } from "./services/retention";
+import { runMidnightRollover } from "./services/midnightRollover";
 import { syncDailySales } from "./services/dailySalesSync";
 import { syncRentalRevenue } from "./services/rentalRevenueSync";
 import { tagColorClass, TAG_COLOR_RANGES } from "./lib/tagColors";
@@ -28,8 +29,8 @@ app.onError(errorHandler);
 app.notFound(notFoundHandler);
 
 // Rate limiting on sensitive endpoints
-app.use("/staff/login", createRateLimiter(10, 60_000));
-app.use("/customer/submit", createRateLimiter(20, 60_000));
+app.post("/staff/login", createRateLimiter(10, 60_000));
+app.post("/customer/submit", createRateLimiter(20, 60_000));
 
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", service: "luggage-storage" }));
@@ -228,7 +229,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px">
               {[
                 { key: "UNPICKED", label: "미수령", count: (counts.pending_count ?? 0) + (counts.paid_count ?? 0) },
-                { key: "ALL", label: "전체", count: counts.total_count },
+                { key: "ALL", label: "전체", count: status === "ALL" ? totalFiltered : (counts.total_count - (counts.cancelled_count ?? 0)) },
                 { key: "PAYMENT_PENDING", label: "결제대기", count: counts.pending_count },
                 { key: "PAID", label: "결제완료", count: counts.paid_count },
                 { key: "PICKED_UP", label: "수령완료", count: counts.picked_up_count },
@@ -243,8 +244,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               ))}
             </div>
 
-            {/* Show "수령완료 전체보기" toggle when on PICKED_UP tab */}
-            {status === "PICKED_UP" && (
+            {/* Show "수령완료 전체보기" toggle when on PICKED_UP or ALL tab */}
+            {(status === "PICKED_UP" || status === "ALL") && (
               <div style="margin-bottom:12px">
                 <a href={buildDashboardUrl("PICKED_UP", showAllPickedUp ? {} : { show_all_picked_up: "true" })}
                    class="btn btn-sm" style={`font-size:12px;text-decoration:none;${showAllPickedUp ? "background:#2563eb;color:white;border-color:#2563eb" : ""}`}>
@@ -273,6 +274,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               {/* Search + reset */}
               <div style="display:flex;align-items:center;gap:8px">
                 <input id="search-q" class="control" type="text" name="q" value={q} placeholder="이름, 접수번호, 전화, 짐번호" autocomplete="off" style="flex:1;padding:8px 12px;font-size:13px" />
+                <button type="submit" class="btn btn-primary" style="padding:8px 14px;font-size:12px;white-space:nowrap">검색</button>
                 <a class="btn btn-secondary" href="/staff/dashboard" style="padding:8px 14px;font-size:12px;text-decoration:none;white-space:nowrap">초기화</a>
               </div>
             </form>
@@ -431,7 +433,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
           {/* Manual order form */}
           <details class="card" style="margin-top:16px">
             <summary class="card-title" style="cursor:pointer">수기 접수</summary>
-            <form action="/staff/orders/manual" method="post" class="grid2" style="margin-top:12px">
+            <form id="manual-form" action="/staff/orders/manual" method="post" class="grid2" style="margin-top:12px">
               <label class="field">
                 <span class="field-label">이름 *</span>
                 <input class="control" type="text" name="name" required />
@@ -452,6 +454,28 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 <span class="field-label">예정 픽업 일시</span>
                 <input class="control" type="datetime-local" name="expected_pickup_at" />
               </label>
+              <div class="field" style="grid-column:1/-1">
+                <span class="field-label">무료 사유 (선택 시 자동 0원)</span>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+                  {[
+                    { value: "", label: "일반 (유료)" },
+                    { value: "지인 접수", label: "지인 접수" },
+                    { value: "블로거 방문", label: "블로거 방문" },
+                    { value: "쿠폰", label: "쿠폰" },
+                    { value: "기타", label: "기타" },
+                  ].map((opt, i) => (
+                    <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer">
+                      <input type="radio" name="free_reason" value={opt.value} checked={i === 0} style="width:16px;height:16px" />
+                      <span>{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <input class="control" type="text" name="free_reason_text" placeholder="기타 사유 입력..." style="display:none;margin-top:6px" id="free-reason-text" />
+              </div>
+              <label class="field" style="grid-column:1/-1">
+                <span class="field-label">비고</span>
+                <input class="control" type="text" name="note" placeholder="비고 (선택)" />
+              </label>
               <label class="button-wrap">
                 <span class="field-label sr-only">접수</span>
                 <button class="btn btn-primary" type="submit">수기 접수</button>
@@ -461,6 +485,10 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
         </main>
         <script dangerouslySetInnerHTML={{ __html: `
           (function(){
+            // Free reason toggle for manual form
+            var mf=document.getElementById('manual-form');
+            if(mf){var frt=document.getElementById('free-reason-text');mf.querySelectorAll('input[name=free_reason]').forEach(function(r){r.addEventListener('change',function(){frt.style.display=r.value==='기타'?'block':'none';if(r.value==='기타')frt.focus()})})}
+
             var FIELD_LABELS={name:'이름',tag_no:'짐번호',expected_pickup_at:'짐 찾는 시각',note:'비고'};
             var TAG_COLORS=${JSON.stringify(TAG_COLOR_RANGES)};
 
@@ -901,6 +929,16 @@ export default {
     ctx.waitUntil(
       (async () => {
         console.log(`Scheduled tasks triggered: ${event.cron}`);
+
+        // Midnight JST rollover (0 15 * * * = 00:00 JST)
+        // Transition uncollected same-day orders to overnight with new 91+ tags
+        if (event.cron === "0 15 * * *") {
+          const rolloverResult = await runMidnightRollover(env.DB);
+          console.log(`Midnight rollover complete: ${JSON.stringify(rolloverResult)}`);
+          return;
+        }
+
+        // Daily maintenance (0 18 * * * = 03:00 JST)
         const result = await runRetentionCleanup(env.DB, env.IMAGES);
         console.log(`Retention cleanup complete: ${JSON.stringify(result)}`);
         if (env.GOOGLE_SHEETS_CREDENTIALS) {

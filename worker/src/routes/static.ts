@@ -78,6 +78,14 @@ staticRoutes.get("/static/logo-horizontal.png", async (c) => {
   return serveR2Image(c, "static/logo-horizontal.png", "image/png");
 });
 
+staticRoutes.get("/static/survey-banner-mobile.png", async (c) => {
+  return serveR2Image(c, "static/survey-banner-mobile.png", "image/png");
+});
+
+staticRoutes.get("/static/survey-banner-tablet.png", async (c) => {
+  return serveR2Image(c, "static/survey-banner-tablet.png", "image/png");
+});
+
 staticRoutes.get("/static/rental-banner-usj-large.jpg", async (c) => {
   return serveR2Image(c, "static/rental-banner-usj-large.jpg", "image/jpeg");
 });

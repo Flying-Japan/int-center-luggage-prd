@@ -7,7 +7,8 @@ import type { AppType } from "../types";
 import { staffAuth, getStaff } from "../middleware/auth";
 import { formatDateJST } from "../services/storage";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
-import { fetchStaffNamesByIds } from "../lib/staffProfiles";
+import { fetchStaffNamesByIds, fetchStaffProfilesByIds } from "../lib/staffProfiles";
+import { createSupabaseAdmin } from "../lib/supabase";
 
 const ops = new Hono<AppType>();
 ops.use("/*", staffAuth);
@@ -873,48 +874,87 @@ const NOTE_CATEGORY_LABELS: Record<string, string> = {
 ops.get("/staff/handover", async (c) => {
   const staff = getStaff(c);
   const handoverQ = c.req.query("handover_q") || "";
+  const filterCat = c.req.query("cat") || "";  // category filter
+  const filterStatus = c.req.query("status") || "";  // "unread", "pinned"
+  const filterAuthor = c.req.query("author") || "";  // staff_id filter
+  const VALID_SORTS = ["newest", "oldest", "pinned"] as const;
+  const rawSort = c.req.query("sort") || "newest";
+  const sortBy = VALID_SORTS.includes(rawSort as typeof VALID_SORTS[number]) ? rawSort : "newest";
 
-  // Build notes query with optional search filter
+  // Build notes query with optional search + category + author filter
   let notesSql = `SELECT * FROM luggage_handover_notes`;
   const notesParams: string[] = [];
+  const whereClauses: string[] = [];
   if (handoverQ) {
-    notesSql += ` WHERE (title LIKE ? OR content LIKE ?)`;
-    const like = `%${handoverQ}%`;
+    whereClauses.push("(title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')");
+    const escaped = handoverQ.replace(/[%_\\]/g, "\\$&");
+    const like = `%${escaped}%`;
     notesParams.push(like, like);
   }
-  notesSql += ` ORDER BY is_pinned DESC, created_at DESC LIMIT 50`;
+  if (filterCat) {
+    whereClauses.push("category = ?");
+    notesParams.push(filterCat);
+  }
+  if (filterStatus === "pinned") {
+    whereClauses.push("is_pinned = 1");
+  }
+  if (filterAuthor) {
+    whereClauses.push("staff_id = ?");
+    notesParams.push(filterAuthor);
+  }
+  if (whereClauses.length > 0) {
+    notesSql += ` WHERE ${whereClauses.join(" AND ")}`;
+  }
+  // Sort options: newest (default), oldest, pinned (pinned first with 14-day decay)
+  if (sortBy === "oldest") {
+    notesSql += ` ORDER BY created_at ASC LIMIT 50`;
+  } else if (sortBy === "pinned") {
+    notesSql += ` ORDER BY CASE WHEN is_pinned = 1 AND created_at > datetime('now', '-14 days') THEN 1 ELSE 0 END DESC, created_at DESC LIMIT 50`;
+  } else {
+    // "newest" — default: pure chronological, newest first
+    notesSql += ` ORDER BY created_at DESC LIMIT 50`;
+  }
 
-  // Fetch notes with author names, read status, comments, and edits in parallel
-  const [notes, reads, comments] = await Promise.all([
+  // Fetch notes with author names, read status, comments, edits, and mentions in parallel
+  const [notes, reads, comments, myMentions] = await Promise.all([
     c.env.DB.prepare(notesSql).bind(...notesParams).all<Record<string, unknown>>(),
     c.env.DB.prepare(
-      `SELECT note_id, staff_id
+      `SELECT note_id, staff_id, read_at
        FROM luggage_handover_reads`
-    ).all<{ note_id: number; staff_id: string }>(),
+    ).all<{ note_id: number; staff_id: string; read_at: string }>(),
     c.env.DB.prepare(
       `SELECT *
        FROM luggage_handover_comments
        ORDER BY created_at ASC`
     ).all<Record<string, unknown>>(),
+    c.env.DB.prepare(
+      `SELECT note_id FROM luggage_handover_mentions WHERE staff_id = ?`
+    ).bind(staff.id).all<{ note_id: number }>(),
   ]);
   const edits = await c.env.DB.prepare(
     `SELECT note_id, staff_id, created_at
      FROM luggage_handover_edits
      ORDER BY created_at DESC`
   ).all<{ note_id: number; staff_id: string; created_at: string }>();
-  const handoverStaffNameMap = await fetchStaffNamesByIds(
-    c.env,
-    uniqueStaffIds([
-      ...notes.results.map((note) => note.staff_id as string | null | undefined),
-      ...reads.results.map((read) => read.staff_id),
-      ...comments.results.map((comment) => comment.staff_id as string | null | undefined),
-      ...edits.results.map((edit) => edit.staff_id),
-    ]),
-  );
+  const [handoverStaffNameMap, allStaffNameMap] = await Promise.all([
+    fetchStaffNamesByIds(
+      c.env,
+      uniqueStaffIds([
+        ...notes.results.map((note) => note.staff_id as string | null | undefined),
+        ...reads.results.map((read) => read.staff_id),
+        ...comments.results.map((comment) => comment.staff_id as string | null | undefined),
+        ...edits.results.map((edit) => edit.staff_id),
+      ]),
+    ),
+    fetchAllStaffNameMap(c.env),
+  ]);
+  // Add known non-UUID staff labels
+  handoverStaffNameMap.set("SYSTEM", "시스템");
+
   const noteRows = notes.results.map((note) => ({
     ...note,
     author_name: (note.staff_id as string | null)
-      ? handoverStaffNameMap.get(note.staff_id as string) || null
+      ? handoverStaffNameMap.get(note.staff_id as string) || (note.staff_id as string).slice(0, 8)
       : null,
   }));
   const commentRows = comments.results.map((comment) => ({
@@ -927,12 +967,20 @@ ops.get("/staff/handover", async (c) => {
     ...edit,
     editor_name: handoverStaffNameMap.get(edit.staff_id) || edit.staff_id,
   }));
+  // Fetch reader names separately to ensure all reader IDs are resolved
+  const readerStaffIds = [...new Set(reads.results.map((r) => r.staff_id).filter(Boolean))];
+  const readerNameMap = readerStaffIds.length > 0
+    ? await fetchStaffNamesByIds(c.env, readerStaffIds)
+    : new Map<string, string>();
+  // Merge into main map
+  for (const [id, name] of readerNameMap) handoverStaffNameMap.set(id, name);
+
   const readNoteIds = new Set(reads.results.filter((r) => r.staff_id === staff.id).map((r) => r.note_id));
-  const readersByNote = new Map<number, string[]>();
+  const readersByNote = new Map<number, { name: string; readAt: string }[]>();
   for (const r of reads.results) {
     if (!readersByNote.has(r.note_id)) readersByNote.set(r.note_id, []);
-    const readerName = handoverStaffNameMap.get(r.staff_id) || r.staff_id;
-    readersByNote.get(r.note_id)!.push(readerName);
+    const readerName = readerNameMap.get(r.staff_id) || handoverStaffNameMap.get(r.staff_id) || r.staff_id.slice(0, 6);
+    readersByNote.get(r.note_id)!.push({ name: readerName, readAt: r.read_at });
   }
   const commentsByNote = new Map<number, Record<string, unknown>[]>();
   for (const cm of commentRows as Record<string, unknown>[]) {
@@ -946,142 +994,375 @@ ops.get("/staff/handover", async (c) => {
     editsByNote.get(ed.note_id)!.push({ editor_name: ed.editor_name, created_at: ed.created_at });
   }
 
+  const unreadCount = noteRows.filter((n: Record<string, unknown>) => {
+    const nid = n.note_id as number;
+    return !readNoteIds.has(nid) && (n.staff_id as string) !== staff.id;
+  }).length;
+
+  // Build mention sets for current staff
+  const myMentionNoteIds = new Set(myMentions.results.map((m) => m.note_id));
+  const mentionCount = [...myMentionNoteIds].filter((nid) => !readNoteIds.has(nid)).length;
+  const allStaffNames = new Set(allStaffNameMap.values());
+
+  // Post-query filter: "unread"/"mentions" can only be applied after read status is computed
+  const filteredNoteRows = filterStatus === "unread"
+    ? noteRows.filter((n: Record<string, unknown>) => {
+        const nid = n.note_id as number;
+        return !readNoteIds.has(nid) && (n.staff_id as string) !== staff.id;
+      })
+    : filterStatus === "mentions"
+      ? noteRows.filter((n: Record<string, unknown>) => myMentionNoteIds.has(n.note_id as number))
+      : noteRows;
+
+  const hwStyles = `
+.hw-board{display:flex;flex-direction:column;gap:8px}
+.hw-note{position:relative;background:#fff;border:1px solid #e2e8f0;border-left:4px solid #94a3b8;border-radius:10px;overflow:hidden}
+.hw-note--unread{background:#f8fbff}
+.hw-note--unread .hw-summary{background:linear-gradient(to right,#eef4ff 0%,transparent 200px)}
+.hw-note--urgent{border-left-color:#ef4444}
+.hw-note--notice{border-left-color:#3b82f6}
+.hw-note--handover{border-left-color:#22c55e}
+.hw-note--experience{border-left-color:#a855f7}
+.hw-note--other{border-left-color:#94a3b8}
+.hw-summary{display:flex;align-items:center;gap:8px;padding:10px 14px;cursor:pointer;list-style:none;min-height:44px;transition:background .15s;flex-wrap:wrap}
+.hw-summary::-webkit-details-marker{display:none}
+.hw-summary::marker{display:none;content:''}
+.hw-summary:hover{background:#f8fbff}
+.hw-chevron{flex-shrink:0;color:#94a3b8;transition:transform .2s;display:inline-flex}
+.hw-chevron svg{width:14px;height:14px}
+details[open]>.hw-summary .hw-chevron{transform:rotate(90deg);color:#475569}
+.hw-cat{display:inline-flex;align-items:center;font-size:10px;font-weight:700;letter-spacing:.03em;padding:3px 8px;border-radius:6px;flex-shrink:0}
+.hw-cat--urgent{background:#fef2f2;color:#dc2626}
+.hw-cat--notice{background:#eff6ff;color:#2563eb}
+.hw-cat--handover{background:#f0fdf4;color:#16a34a}
+.hw-cat--experience{background:#faf5ff;color:#9333ea}
+.hw-cat--other{background:#f1f5f9;color:#64748b}
+.hw-title{font-size:13px;font-weight:700;color:#0f172a;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hw-new-badge{font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:#ef4444;color:#fff;flex-shrink:0;letter-spacing:.04em}
+.hw-pin{flex-shrink:0;color:#f59e0b;display:inline-flex}
+.hw-pin svg{width:14px;height:14px}
+.hw-author{font-size:11px;font-weight:600;color:#334155;flex-shrink:0;white-space:nowrap}
+.hw-time{font-size:11px;color:#94a3b8;flex-shrink:0;white-space:nowrap}
+.hw-comment-count{font-size:10px;font-weight:600;padding:1px 6px;border-radius:99px;background:#eff6ff;color:#2563eb;flex-shrink:0}
+.hw-comment-count::before{content:'\\1F4AC '}
+.hw-read-count{font-size:10px;font-weight:600;padding:1px 6px;border-radius:99px;background:#f0fdf4;color:#16a34a;flex-shrink:0}
+.hw-read-count::before{content:'\\2713 '}
+.hw-detail{padding:0 14px 12px}
+.hw-content{font-size:13px;line-height:1.65;color:#374151;margin:0 0 8px}
+.hw-footer{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.hw-readers{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.hw-readers-label{font-size:10px;color:#94a3b8;flex-shrink:0}
+.hw-reader-chip{display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:2px 8px;border-radius:99px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+.hw-reader-time{color:#94a3b8;font-size:9px}
+.hw-read-btn{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:6px 14px;min-height:36px;border-radius:8px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-family:inherit;transition:all .15s;box-shadow:none}
+.hw-read-btn:hover{background:#dbeafe}
+.hw-edits{font-size:10px;color:#cbd5e1}
+.hw-actions{display:flex;align-items:center;gap:10px;margin-left:auto}
+.hw-action-link{font-size:11px;color:var(--primary);font-weight:600;cursor:pointer;padding:6px 4px;min-height:36px;display:inline-flex;align-items:center;text-decoration:none}
+.hw-action-link:hover{text-decoration:underline}
+.hw-action-del{font-size:11px;color:#94a3b8;background:none;border:none;cursor:pointer;padding:6px 4px;min-height:36px;box-shadow:none;font-family:inherit;font-weight:500;display:inline-flex;align-items:center}
+.hw-action-del:hover{color:#ef4444}
+.hw-comments{margin-top:10px;padding:10px 12px;background:#f8fafc;border-radius:10px;border:1px solid #eef2f7}
+.hw-comment{display:flex;gap:6px;align-items:baseline;font-size:12px;padding:4px 0}
+.hw-comment+.hw-comment{border-top:1px solid #f1f5f9}
+.hw-comment-author{font-weight:700;color:#374151;flex-shrink:0}
+.hw-comment-time{font-size:10px;color:#94a3b8;flex-shrink:0}
+.hw-comment-text{color:#4b5563;flex:1}
+.hw-comment-form{display:flex;gap:6px;margin-top:8px}
+.hw-comment-input{flex:1;font-size:12px;padding:6px 12px;min-height:36px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;font-family:inherit;color:var(--text);transition:border-color .15s}
+.hw-comment-input:focus{outline:none;border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.08)}
+.hw-comment-submit{font-size:12px;font-weight:600;padding:6px 14px;min-height:36px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;color:#475569;cursor:pointer;font-family:inherit;transition:all .15s;box-shadow:none;flex-shrink:0}
+.hw-comment-submit:hover{border-color:#93c5fd;color:#1d4ed8}
+.hw-compose{background:#fff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;margin-bottom:12px}
+.hw-compose-trigger{display:flex;align-items:center;gap:8px;padding:14px 18px;cursor:pointer;user-select:none;font-size:13px;font-weight:600;color:#64748b;border-bottom:1px solid transparent;transition:all .2s;min-height:48px}
+.hw-compose-trigger:hover{color:var(--primary);background:#f8fbff}
+.hw-compose-trigger svg{width:16px;height:16px;flex-shrink:0}
+.hw-compose-trigger-arrow{margin-left:auto;color:#94a3b8;transition:transform .2s;display:inline-flex}
+.hw-compose-trigger-arrow svg{width:12px;height:12px}
+.hw-compose-trigger.is-open .hw-compose-trigger-arrow{transform:rotate(180deg)}
+.hw-compose-trigger.is-open{border-bottom-color:#e2e8f0;color:#0f172a}
+.hw-compose-body{padding:16px 18px;display:none}
+.hw-compose-body.is-open{display:block}
+.hw-compose-row{display:flex;gap:8px;margin-bottom:10px}
+.hw-compose-select{flex:0 0 auto;width:112px;font-size:12px;padding:8px 28px 8px 12px;min-height:40px;border:1px solid #e2e8f0;border-radius:10px;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M6 8L1 3h10z'/%3E%3C/svg%3E") no-repeat right 10px center;font-family:inherit;color:var(--text);-webkit-appearance:none;appearance:none;cursor:pointer}
+.hw-compose-select:focus{outline:none;border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.08)}
+.hw-compose-title{flex:1;font-size:13px;padding:8px 14px;min-height:40px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;font-family:inherit;color:var(--text);transition:border-color .15s}
+.hw-compose-title:focus{outline:none;border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.08)}
+.hw-compose-textarea{width:100%;font-size:13px;padding:10px 14px;min-height:80px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;font-family:inherit;color:var(--text);resize:vertical;transition:border-color .15s;line-height:1.6}
+.hw-compose-textarea:focus{outline:none;border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.08)}
+.hw-compose-actions{display:flex;align-items:center;gap:12px;margin-top:12px}
+.hw-compose-pin{display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b;cursor:pointer;min-height:40px}
+.hw-compose-pin svg{width:14px;height:14px;color:#f59e0b}
+.hw-compose-submit{margin-left:auto;font-size:13px;font-weight:700;padding:8px 24px;min-height:40px;border-radius:10px;border:none;background:var(--primary);color:#fff;cursor:pointer;font-family:inherit;transition:all .15s}
+.hw-compose-submit:hover{opacity:.9}
+.hw-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.hw-search-form{display:flex;gap:6px;flex:1;min-width:0}
+.hw-search-input{flex:1;font-size:13px;padding:8px 14px;min-height:40px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;font-family:inherit;color:var(--text);transition:border-color .15s}
+.hw-search-input:focus{outline:none;border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.08)}
+.hw-search-btn{font-size:12px;font-weight:600;padding:8px 16px;min-height:40px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;color:#374151;cursor:pointer;font-family:inherit;box-shadow:none;transition:all .15s}
+.hw-search-btn:hover{border-color:#93c5fd;color:var(--primary)}
+.hw-unread-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:6px 12px;border-radius:99px;background:#fef2f2;color:#dc2626;border:1px solid #fecaca;flex-shrink:0;min-height:36px}
+.hw-mention{background:#dbeafe;color:#1d4ed8;padding:0 4px;border-radius:4px;font-weight:600}
+.hw-mention-badge{font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:#2563eb;color:#fff;flex-shrink:0;letter-spacing:.04em}
+.hw-notes-wrap{background:#fff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden}
+.hw-empty{padding:40px;text-align:center;color:#94a3b8;font-size:13px}
+`;
+
   return c.html(
     <html lang="ko">
-      <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>인수인계</title></head>
+      <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="stylesheet" href="/static/styles.css" />
+        <style>{hwStyles}</style>
+        <title>인수인계</title>
+      </head>
       <body class="staff-site">
         <StaffTopbar staff={staff} active="/staff/handover" />
         <main class="container">
 
-          {/* Search */}
-          <section class="card" style="margin-bottom:12px">
-            <form method="get" action="/staff/handover" style="display:flex;gap:8px;align-items:center">
-              <input class="control" type="text" name="handover_q" placeholder="노트 검색..." value={handoverQ} style="flex:1" />
-              <button class="btn btn-primary" type="submit">검색</button>
-              {handoverQ && <a href="/staff/handover" class="btn btn-secondary">초기화</a>}
+          {/* Toolbar: search + sort */}
+          <div class="hw-toolbar">
+            <form class="hw-search-form" method="get" action="/staff/handover">
+              {filterCat && <input type="hidden" name="cat" value={filterCat} />}
+              {filterStatus && <input type="hidden" name="status" value={filterStatus} />}
+              {filterAuthor && <input type="hidden" name="author" value={filterAuthor} />}
+              {sortBy !== "newest" && <input type="hidden" name="sort" value={sortBy} />}
+              <input class="hw-search-input" type="text" name="handover_q" placeholder="노트 검색..." value={handoverQ} />
+              <button class="hw-search-btn" type="submit">검색</button>
+              {handoverQ && <a href="/staff/handover" class="hw-search-btn" style="text-decoration:none;display:inline-flex;align-items:center">초기화</a>}
             </form>
-          </section>
+          </div>
+          {/* Sort controls */}
+          {(() => {
+            const baseParams = new URLSearchParams();
+            if (handoverQ) baseParams.set("handover_q", handoverQ);
+            if (filterCat) baseParams.set("cat", filterCat);
+            if (filterStatus) baseParams.set("status", filterStatus);
+            if (filterAuthor) baseParams.set("author", filterAuthor);
+            const sortOptions = [
+              { key: "newest", label: "최신순" },
+              { key: "oldest", label: "오래된순" },
+              { key: "pinned", label: "고정 우선" },
+            ];
+            return (
+              <div style="display:flex;gap:4px;margin-bottom:8px;align-items:center">
+                <span style="font-size:11px;color:#94a3b8;margin-right:2px">정렬:</span>
+                {sortOptions.map((opt) => {
+                  const isActive = sortBy === opt.key;
+                  const params = new URLSearchParams(baseParams);
+                  if (opt.key !== "newest") params.set("sort", opt.key);
+                  const qs = params.toString();
+                  const href = `/staff/handover${qs ? "?" + qs : ""}`;
+                  return (
+                    <a href={href} style={`display:inline-flex;align-items:center;padding:4px 10px;font-size:11px;font-weight:${isActive ? "700" : "500"};border-radius:6px;text-decoration:none;border:1px solid ${isActive ? "#3b82f6" : "#e2e8f0"};background:${isActive ? "#eff6ff" : "#fff"};color:${isActive ? "#2563eb" : "#64748b"};transition:all .15s`}>
+                      {opt.label}
+                    </a>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
-              <section class="card">
-                <h3 class="card-title">노트 작성</h3>
-                <form method="post" action="/staff/handover">
-                  <div class="grid2">
-                    <label class="field">
-                      <span class="field-label">분류</span>
-                      <select class="control" name="category">
-                        <option value="HANDOVER">인수인계</option>
-                        <option value="NOTICE">안내사항</option>
-                        <option value="URGENT">긴급</option>
-                        <option value="EXPERIENCE">체험단</option>
-                        <option value="OTHER">기타</option>
-                      </select>
-                    </label>
-                    <label class="field">
-                      <span class="field-label">제목</span>
-                      <input class="control" type="text" name="title" placeholder="제목" required />
-                    </label>
-                  </div>
-                  <label class="field">
-                    <span class="field-label">내용</span>
-                    <textarea class="control" name="content" placeholder="내용" required rows={4}></textarea>
-                  </label>
-                  <label class="check-row">
-                    <input type="checkbox" name="is_pinned" value="1" />
-                    <span>고정</span>
-                  </label>
-                  <button class="btn btn-primary" type="submit">작성</button>
-                </form>
-              </section>
+          {/* Filter tabs */}
+          {(() => {
+            const qParam = (handoverQ ? `&handover_q=${encodeURIComponent(handoverQ)}` : "") + (sortBy !== "newest" ? `&sort=${sortBy}` : "");
+            const filters = [
+              { key: "", label: "전체", count: noteRows.length },
+              { key: "unread", label: "미읽음", count: unreadCount, isStatus: true },
+              { key: "mentions", label: "내 멘션", count: mentionCount, isStatus: true },
+              { key: "pinned", label: "고정", count: noteRows.filter((n: Record<string, unknown>) => !!(n.is_pinned as number)).length, isStatus: true },
+              { key: "URGENT", label: "긴급", count: noteRows.filter((n: Record<string, unknown>) => (n.category as string) === "URGENT").length },
+              { key: "NOTICE", label: "안내", count: noteRows.filter((n: Record<string, unknown>) => (n.category as string) === "NOTICE").length },
+              { key: "HANDOVER", label: "인수인계", count: noteRows.filter((n: Record<string, unknown>) => (n.category as string) === "HANDOVER").length },
+              { key: "EXPERIENCE", label: "체험단", count: noteRows.filter((n: Record<string, unknown>) => (n.category as string) === "EXPERIENCE").length },
+            ];
+            const activeKey = filterStatus || filterCat || "";
 
-              <div class="ops-board">
-                {noteRows.map((note: Record<string, unknown>) => {
+            // Collect unique authors for author filter
+            const authorMap = new Map<string, { name: string; count: number }>();
+            for (const n of noteRows as Array<Record<string, unknown>>) {
+              const sid = n.staff_id as string;
+              if (!sid) continue;
+              const existing = authorMap.get(sid);
+              if (existing) { existing.count++; }
+              else { authorMap.set(sid, { name: (n.author_name as string) || sid.slice(0, 8), count: 1 }); }
+            }
+            const authors = [...authorMap.entries()].sort((a, b) => b[1].count - a[1].count);
+
+            return (
+              <>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+                {filters.map((f) => {
+                  const isActive = !filterAuthor && f.key === activeKey;
+                  const href = f.key === ""
+                    ? `/staff/handover${handoverQ ? "?handover_q=" + encodeURIComponent(handoverQ) : ""}`
+                    : `/staff/handover?${(f as { isStatus?: boolean }).isStatus ? "status" : "cat"}=${f.key}${qParam}`;
+                  return (
+                    <a href={href} style={`display:inline-flex;align-items:center;gap:4px;padding:6px 14px;font-size:12px;font-weight:${isActive ? "700" : "500"};border-radius:20px;text-decoration:none;min-height:34px;transition:all .15s;border:1px solid ${isActive ? "var(--primary)" : "#e2e8f0"};background:${isActive ? "var(--primary)" : "#fff"};color:${isActive ? "#fff" : "#475569"}`}>
+                      {f.label}
+                      {f.count > 0 && <span style={`font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;background:${isActive ? "rgba(255,255,255,.25)" : "#f1f5f9"};color:${isActive ? "#fff" : "#64748b"}`}>{f.count}</span>}
+                    </a>
+                  );
+                })}
+              </div>
+              {/* Author filter */}
+              <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+                <span style="font-size:11px;color:#94a3b8;margin-right:2px">작성자:</span>
+                {authors.map(([sid, info]) => {
+                  const isActive = filterAuthor === sid;
+                  const href = isActive
+                    ? `/staff/handover${handoverQ ? "?handover_q=" + encodeURIComponent(handoverQ) : ""}`
+                    : `/staff/handover?author=${sid}${qParam}`;
+                  return (
+                    <a href={href} style={`display:inline-flex;align-items:center;gap:3px;padding:4px 10px;font-size:11px;font-weight:${isActive ? "700" : "500"};border-radius:16px;text-decoration:none;min-height:28px;transition:all .15s;border:1px solid ${isActive ? "#475569" : "#e2e8f0"};background:${isActive ? "#334155" : "#fff"};color:${isActive ? "#fff" : "#475569"}`}>
+                      {info.name}
+                      <span style={`font-size:9px;font-weight:700;padding:0 4px;border-radius:99px;background:${isActive ? "rgba(255,255,255,.2)" : "#f1f5f9"};color:${isActive ? "#fff" : "#94a3b8"}`}>{info.count}</span>
+                    </a>
+                  );
+                })}
+              </div>
+              </>
+            );
+          })()}
+
+          {/* Collapsible compose */}
+          <div class="hw-compose">
+            <div id="compose-trigger" class="hw-compose-trigger">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              <span>새 노트 작성</span>
+              <span class="hw-compose-trigger-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
+            </div>
+            <div id="compose-body" class="hw-compose-body">
+              <datalist id="hw-staff-list">
+                {[...allStaffNameMap.values()].map((name) => <option value={`@${name}`} />)}
+              </datalist>
+              <form method="post" action="/staff/handover" style="margin:0">
+                <div class="hw-compose-row">
+                  <select class="hw-compose-select" name="category">
+                    <option value="HANDOVER">인수인계</option>
+                    <option value="NOTICE">안내사항</option>
+                    <option value="URGENT">긴급</option>
+                    <option value="EXPERIENCE">체험단</option>
+                    <option value="OTHER">기타</option>
+                  </select>
+                  <input class="hw-compose-title" type="text" name="title" placeholder="제목을 입력하세요" required />
+                </div>
+                <textarea class="hw-compose-textarea" name="content" placeholder="내용을 입력하세요... (@이름 으로 멘션)" required rows={3}></textarea>
+                <div class="hw-compose-actions">
+                  <label class="hw-compose-pin">
+                    <input type="checkbox" name="is_pinned" value="1" style="accent-color:var(--primary)" />
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 3a3 3 0 0 0-2.1.88L9.12 8.66a1 1 0 0 1-.56.35l-3.35.67a1 1 0 0 0-.58 1.66l4.03 4.03-4.24 4.24a1 1 0 1 0 1.42 1.42l4.24-4.24 4.03 4.03a1 1 0 0 0 1.66-.58l.67-3.35a1 1 0 0 1 .35-.56l4.78-4.78A3 3 0 0 0 16 3z"/></svg> 고정
+                  </label>
+                  <button class="hw-compose-submit" type="submit">노트 작성</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          {/* Expand/Collapse all */}
+          {filteredNoteRows.length > 0 && (
+            <div style="display:flex;gap:6px;justify-content:flex-end;margin-bottom:8px">
+              <button type="button" id="hw-expand-all" class="hw-search-btn" style="font-size:11px;padding:4px 12px;min-height:32px">전체 열기</button>
+              <button type="button" id="hw-collapse-all" class="hw-search-btn" style="font-size:11px;padding:4px 12px;min-height:32px">전체 닫기</button>
+            </div>
+          )}
+
+          {/* Notes board */}
+          {filteredNoteRows.length === 0 ? (
+            <div class="hw-notes-wrap">
+              <div class="hw-empty">{filterStatus === "unread" ? "미읽음 노트가 없습니다" : filterCat ? `${NOTE_CATEGORY_LABELS[filterCat] || filterCat} 노트가 없습니다` : "노트가 없습니다"}</div>
+            </div>
+          ) : (
+            <div class="hw-notes-wrap">
+              <div class="hw-board">
+                {filteredNoteRows.map((note: Record<string, unknown>) => {
                   const noteId = note.note_id as number;
                   const isRead = readNoteIds.has(noteId);
                   const isMine = (note.staff_id as string) === staff.id;
                   const noteComments = commentsByNote.get(noteId) || [];
                   const cat = note.category as string;
                   const catLabel = NOTE_CATEGORY_LABELS[cat] || cat;
-                  const catColors: Record<string, string> = { URGENT: "background:#fef2f2;color:#dc2626;border:1px solid #fca5a5", NOTICE: "background:#eff6ff;color:#2563eb;border:1px solid #93c5fd", HANDOVER: "background:#f0fdf4;color:#166534;border:1px solid #86efac", EXPERIENCE: "background:#fdf4ff;color:#9333ea;border:1px solid #d8b4fe" };
-                  const catStyle = catColors[cat] || "background:#f1f5f9;color:#475569;border:1px solid #cbd5e1";
                   const isPinned = !!(note.is_pinned as number);
-                  const unreadStyle = !isRead && !isMine ? "border-left:4px solid var(--primary);background:linear-gradient(90deg,rgba(47,128,248,0.04) 0%,transparent 30%)" : isPinned ? "border-left:4px solid #f59e0b" : "";
-                  const contentStr = note.content as string;
+                  const isUnread = !isRead && !isMine;
+                  const readers = readersByNote.get(noteId) || [];
+                  const noteEdits = editsByNote.get(noteId) || [];
+                  const timeStr = note.created_at ? new Date(note.created_at as string + "Z").toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "";
+                  const catKey = (cat || "other").toLowerCase();
+                  const authorName = (note.author_name as string) || "?";
                   return (
-                    <div class="ops-item" style={unreadStyle}>
-                      <div class="ops-item-head" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-                        {isPinned && <span style="font-size:11px;color:#f59e0b;font-weight:700">📌</span>}
-                        <strong style="flex:1;min-width:0">{note.title as string}</strong>
-                        <span style={`font-size:9px;padding:2px 6px;border-radius:4px;font-weight:600;white-space:nowrap;${catStyle}`}>{catLabel}</span>
-                        {!isRead && !isMine && <span style="font-size:9px;padding:2px 6px;border-radius:4px;font-weight:700;background:#dc2626;color:#fff">NEW</span>}
-                      </div>
-                      <p class="ops-item-content" style="white-space:pre-line;margin:8px 0;font-size:13px;line-height:1.6;color:#37352f">{contentStr}</p>
-                      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
-                        <small style="color:#94a3b8;font-size:11px">
-                          {(note.author_name as string) || "알수없음"} · {note.created_at ? new Date(note.created_at as string + "Z").toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}
-                        </small>
-                        {(() => {
-                          const readers = readersByNote.get(noteId) || [];
-                          return readers.length > 0 ? (
-                            <small style="color:#94a3b8;font-size:10px">👁 {readers.join(", ")}</small>
-                          ) : null;
-                        })()}
-                        {!isRead && !isMine && (
-                          <form method="post" action={`/staff/handover/${noteId}/read`} style="display:inline">
-                            <button class="btn btn-sm" type="submit" style="font-size:10px;min-height:24px;padding:2px 8px">읽음 표시</button>
-                          </form>
-                        )}
-                      </div>
-
-                      {/* Comments */}
-                      {noteComments.length > 0 && (
-                        <div style="margin-top:10px;padding:8px 0 0;border-top:1px solid #f0f0ee">
-                          {noteComments.map((cm) => (
-                            <div style="margin-bottom:6px;font-size:12px;padding-left:10px;border-left:2px solid #e2e8f0">
-                              <strong style="color:#37352f;font-size:11px">{(cm.author_name as string) || "알수없음"}</strong>
-                              <span style="color:#94a3b8;margin-left:6px;font-size:10px">{cm.created_at ? new Date(cm.created_at as string + "Z").toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}</span>
-                              <p style="margin:2px 0 0;color:#555;font-size:12px">{cm.content as string}</p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Comment form + actions */}
-                      <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
-                        <form method="post" action={`/staff/handover/${noteId}/comments`} style="display:flex;gap:4px;flex:1">
-                          <input class="control" type="text" name="content" placeholder="댓글..." required style="flex:1;font-size:11px;padding:4px 8px;min-height:28px" />
-                          <button class="btn btn-sm btn-secondary" type="submit" style="font-size:10px;min-height:28px;padding:2px 8px">댓글</button>
-                        </form>
-                        {(isMine || staff.role === "admin") && (
-                          <>
-                            <a href={`/staff/handover/${noteId}/edit`} style="font-size:10px;color:var(--primary);white-space:nowrap">수정</a>
-                            <form method="post" action={`/staff/handover/${noteId}/delete`} style="display:inline" onsubmit="return confirm('삭제하시겠습니까?')">
-                              <button type="submit" style="font-size:10px;color:#94a3b8;background:none;border:none;cursor:pointer;padding:0;min-height:auto;box-shadow:none">삭제</button>
-                            </form>
-                          </>
-                        )}
-                      </div>
-                      {/* Edit history */}
-                      {(() => {
-                        const noteEdits = editsByNote.get(noteId) || [];
-                        if (noteEdits.length === 0) return null;
-                        return (
-                          <details style="margin-top:6px;font-size:11px;color:#94a3b8">
-                            <summary style="cursor:pointer">수정됨 ({noteEdits.length}회)</summary>
-                            <ul style="margin:4px 0 0 16px;padding:0;list-style:disc">
-                              {noteEdits.map((ed) => (
-                                <li>{ed.editor_name} · {ed.created_at ? new Date(ed.created_at as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}</li>
+                    <details class={`hw-note hw-note--${catKey}${isUnread ? " hw-note--unread" : ""}`} open={isUnread || isPinned || undefined}>
+                      <summary class="hw-summary">
+                        <span class="hw-chevron"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span>
+                        <span class={`hw-cat hw-cat--${catKey}`}>{catLabel}</span>
+                        {isPinned && <span class="hw-pin"><svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M16 3a3 3 0 0 0-2.1.88L9.12 8.66a1 1 0 0 1-.56.35l-3.35.67a1 1 0 0 0-.58 1.66l4.03 4.03-4.24 4.24a1 1 0 1 0 1.42 1.42l4.24-4.24 4.03 4.03a1 1 0 0 0 1.66-.58l.67-3.35a1 1 0 0 1 .35-.56l4.78-4.78A3 3 0 0 0 16 3z"/></svg></span>}
+                        {isUnread && <span class="hw-new-badge">NEW</span>}
+                        {!isRead && myMentionNoteIds.has(noteId) && <span class="hw-mention-badge">멘션</span>}
+                        <span class="hw-title">{note.title as string}</span>
+                        <span class="hw-author">{authorName}</span>
+                        <span class="hw-time">{timeStr}</span>
+                        {noteComments.length > 0 && <span class="hw-comment-count">{noteComments.length}</span>}
+                        {readers.length > 0 && <span class="hw-read-count">{readers.length}</span>}
+                      </summary>
+                      <div class="hw-detail">
+                        <p class="hw-content">{renderWithMentions(note.content as string, allStaffNames)}</p>
+                        {/* Readers */}
+                        <div class="hw-footer">
+                          {readers.length > 0 && (
+                            <div class="hw-readers">
+                              <span class="hw-readers-label">읽음</span>
+                              {readers.map((r) => (
+                                <span class="hw-reader-chip">
+                                  {r.name}
+                                  {r.readAt && <span class="hw-reader-time">{new Date(r.readAt + "Z").toLocaleString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" })}</span>}
+                                </span>
                               ))}
-                            </ul>
-                          </details>
-                        );
-                      })()}
-                    </div>
+                            </div>
+                          )}
+                          {noteEdits.length > 0 && <span class="hw-edits">수정 {noteEdits.length}회</span>}
+                          <div class="hw-actions">
+                            {isUnread && (
+                              <form method="post" action={`/staff/handover/${noteId}/read`} style="display:inline;margin:0">
+                                <button class="hw-read-btn" type="submit"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> 읽음</button>
+                              </form>
+                            )}
+                            {(isMine || staff.role === "admin") && (
+                              <>
+                                <a href={`/staff/handover/${noteId}/edit`} class="hw-action-link">수정</a>
+                                <form method="post" action={`/staff/handover/${noteId}/delete`} style="display:inline;margin:0" onsubmit="return confirm('삭제하시겠습니까?')">
+                                  <button type="submit" class="hw-action-del">삭제</button>
+                                </form>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        {/* Comments */}
+                        {noteComments.length > 0 && (
+                          <div class="hw-comments">
+                            {noteComments.map((cm) => (
+                              <div class="hw-comment">
+                                <span class="hw-comment-author">{(cm.author_name as string) || "?"}</span>
+                                <span class="hw-comment-time">{cm.created_at ? new Date(cm.created_at as string + "Z").toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : ""}</span>
+                                <span class="hw-comment-text">{renderWithMentions(cm.content as string, allStaffNames)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <form method="post" action={`/staff/handover/${noteId}/comments`} class="hw-comment-form" style="margin:0">
+                          <input class="hw-comment-input" type="text" name="content" placeholder="댓글 추가... (@이름 멘션)" list="hw-staff-list" required />
+                          <button class="hw-comment-submit" type="submit">전송</button>
+                        </form>
+                      </div>
+                    </details>
                   );
                 })}
               </div>
+            </div>
+          )}
 
         </main>
         <NewOrderAlert />
+        <script dangerouslySetInnerHTML={{__html: `(function(){var t=document.getElementById('compose-trigger');var b=document.getElementById('compose-body');if(t&&b){t.addEventListener('click',function(){var o=b.classList.toggle('is-open');t.classList.toggle('is-open',o)})}var ea=document.getElementById('hw-expand-all');var ca=document.getElementById('hw-collapse-all');var notes=function(){return document.querySelectorAll('.hw-note')};if(ea)ea.addEventListener('click',function(){notes().forEach(function(n){n.open=true})});if(ca)ca.addEventListener('click',function(){notes().forEach(function(n){n.open=false})})})()`}} />
       </body>
     </html>
   );
@@ -1250,24 +1531,108 @@ ops.get("/staff/experience", async (c) => {
   );
 });
 
+// Fetch all active staff as a Map<id, display_name> via Supabase admin
+async function fetchAllStaffNameMap(env: Parameters<typeof fetchStaffProfilesByIds>[0]): Promise<Map<string, string>> {
+  const supabaseAdmin = createSupabaseAdmin(env);
+  const { data } = await supabaseAdmin
+    .from("user_profiles")
+    .select("id, display_name, username")
+    .eq("is_active", true);
+  const map = new Map<string, string>();
+  if (!data) return map;
+  for (const row of data) {
+    const name = (row.display_name || row.username || "").trim();
+    if (row.id && name) map.set(row.id, name);
+  }
+  return map;
+}
+
+// Helper: resolve redirect URL preserving filter state
+function handoverRedirectUrl(c: { req: { header: (name: string) => string | undefined } }, fallback = "/staff/handover"): string {
+  const referer = c.req.header("Referer") || "";
+  if (referer.includes("/staff/handover")) return referer;
+  return fallback;
+}
+
+// Helper: extract @mention staff_ids from content given a name→id map
+function extractMentionedStaffIds(content: string, nameToIdMap: Map<string, string>): string[] {
+  const ids: string[] = [];
+  const matches = content.matchAll(/@([^\s,，。！!?？\n]+)/g);
+  for (const m of matches) {
+    const name = m[1];
+    const id = nameToIdMap.get(name);
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+// Helper: build name→id map from a Map<id, name>
+function buildNameToIdMap(idToNameMap: Map<string, string>): Map<string, string> {
+  const result = new Map<string, string>();
+  for (const [id, name] of idToNameMap) result.set(name, id);
+  return result;
+}
+
+// Helper: render text with @mentions highlighted as JSX spans
+function renderWithMentions(text: string, knownNames: Set<string>): unknown[] {
+  const parts: unknown[] = [];
+  // Split by lines first, then handle mentions within each line
+  const lines = text.split("\n");
+  lines.forEach((line, lineIdx) => {
+    if (lineIdx > 0) parts.push(<br />);
+    const segments = line.split(/(@[^\s,，。！!?？\n]+)/g);
+    for (const seg of segments) {
+      if (seg.startsWith("@")) {
+        const name = seg.slice(1);
+        if (knownNames.has(name)) {
+          parts.push(<span class="hw-mention">{seg}</span>);
+        } else {
+          parts.push(<>{seg}</>);
+        }
+      } else {
+        parts.push(<>{seg}</>);
+      }
+    }
+  });
+  return parts;
+}
+
 // POST /staff/handover — Create note
 ops.post("/staff/handover", async (c) => {
   const body = await c.req.parseBody();
   const staff = getStaff(c);
+  const content = String(body.content || "");
 
-  await c.env.DB.prepare(
+  const result = await c.env.DB.prepare(
     "INSERT INTO luggage_handover_notes (category, title, content, is_pinned, staff_id) VALUES (?, ?, ?, ?, ?)"
   )
     .bind(
       String(body.category || "HANDOVER"),
       String(body.title || ""),
-      String(body.content || ""),
+      content,
       body.is_pinned ? 1 : 0,
       staff.id
     )
     .run();
 
-  return c.redirect("/staff/handover");
+  // Process @mentions
+  const noteId = result.meta.last_row_id;
+  if (noteId && content.includes("@")) {
+    const allStaffMap = await fetchAllStaffNameMap(c.env);
+    const nameToId = buildNameToIdMap(allStaffMap);
+    const mentionedIds = extractMentionedStaffIds(content, nameToId);
+    if (mentionedIds.length > 0) {
+      await Promise.all(
+        mentionedIds.map((sid) =>
+          c.env.DB.prepare(
+            "INSERT INTO luggage_handover_mentions (note_id, staff_id) VALUES (?, ?)"
+          ).bind(noteId, sid).run()
+        )
+      );
+    }
+  }
+
+  return c.redirect(handoverRedirectUrl(c));
 });
 
 // POST /staff/handover/:id/read — Mark note as read
@@ -1285,7 +1650,7 @@ ops.post("/staff/handover/:id/read", async (c) => {
     .bind(noteId, staff.id, noteId, staff.id)
     .run();
 
-  return c.redirect("/staff/handover");
+  return c.redirect(handoverRedirectUrl(c));
 });
 
 // POST /staff/handover/:id/comments — Add comment
@@ -1295,15 +1660,32 @@ ops.post("/staff/handover/:id/comments", async (c) => {
   const staff = getStaff(c);
   const content = String(body.content || "").trim();
 
-  if (!content) return c.redirect("/staff/handover");
+  if (!content) return c.redirect(handoverRedirectUrl(c));
 
-  await c.env.DB.prepare(
+  const result = await c.env.DB.prepare(
     "INSERT INTO luggage_handover_comments (note_id, staff_id, content) VALUES (?, ?, ?)"
   )
     .bind(noteId, staff.id, content)
     .run();
 
-  return c.redirect("/staff/handover");
+  // Process @mentions in comment
+  const commentId = result.meta.last_row_id;
+  if (commentId && content.includes("@")) {
+    const allStaffMap = await fetchAllStaffNameMap(c.env);
+    const nameToId = buildNameToIdMap(allStaffMap);
+    const mentionedIds = extractMentionedStaffIds(content, nameToId);
+    if (mentionedIds.length > 0) {
+      await Promise.all(
+        mentionedIds.map((sid) =>
+          c.env.DB.prepare(
+            "INSERT INTO luggage_handover_mentions (note_id, comment_id, staff_id) VALUES (?, ?, ?)"
+          ).bind(noteId, commentId, sid).run()
+        )
+      );
+    }
+  }
+
+  return c.redirect(handoverRedirectUrl(c));
 });
 
 // GET /staff/handover/:id/edit — Edit form
@@ -1426,14 +1808,15 @@ ops.post("/staff/handover/:id/delete", async (c) => {
 
   // Only the author can delete their own note
   const note = await c.env.DB.prepare("SELECT staff_id FROM luggage_handover_notes WHERE note_id = ?").bind(noteId).first<{ staff_id: string }>();
-  if (!note || note.staff_id !== staff.id) return c.redirect("/staff/handover");
+  if (!note || note.staff_id !== staff.id) return c.redirect(handoverRedirectUrl(c));
 
   await c.env.DB.batch([
     c.env.DB.prepare("DELETE FROM luggage_handover_notes WHERE note_id = ?").bind(noteId),
     c.env.DB.prepare("DELETE FROM luggage_handover_reads WHERE note_id = ?").bind(noteId),
     c.env.DB.prepare("DELETE FROM luggage_handover_comments WHERE note_id = ?").bind(noteId),
+    c.env.DB.prepare("DELETE FROM luggage_handover_mentions WHERE note_id = ?").bind(noteId),
   ]);
-  return c.redirect("/staff/handover");
+  return c.redirect(handoverRedirectUrl(c));
 });
 
 // POST /staff/handover/comments/:id/delete — Delete comment (author only)
@@ -1442,10 +1825,10 @@ ops.post("/staff/handover/comments/:id/delete", async (c) => {
   const staff = getStaff(c);
 
   const comment = await c.env.DB.prepare("SELECT staff_id FROM luggage_handover_comments WHERE comment_id = ?").bind(commentId).first<{ staff_id: string }>();
-  if (!comment || comment.staff_id !== staff.id) return c.redirect("/staff/handover");
+  if (!comment || comment.staff_id !== staff.id) return c.redirect(handoverRedirectUrl(c));
 
   await c.env.DB.prepare("DELETE FROM luggage_handover_comments WHERE comment_id = ?").bind(commentId).run();
-  return c.redirect("/staff/handover");
+  return c.redirect(handoverRedirectUrl(c));
 });
 
 // ============================================================

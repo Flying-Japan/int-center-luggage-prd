@@ -106,6 +106,18 @@ CREATE TABLE IF NOT EXISTS luggage_handover_comments (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Operations: Handover edit history
+CREATE TABLE IF NOT EXISTS luggage_handover_edits (
+  edit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  note_id INTEGER NOT NULL,
+  staff_id TEXT NOT NULL,
+  old_title TEXT,
+  old_content TEXT,
+  new_title TEXT,
+  new_content TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Operations: Cash closing
 CREATE TABLE IF NOT EXISTS luggage_cash_closings (
   closing_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -203,6 +215,33 @@ CREATE TABLE IF NOT EXISTS luggage_daily_sales (
   rental_total INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Operations: Handover mentions
+CREATE TABLE IF NOT EXISTS luggage_handover_mentions (
+  mention_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  note_id INTEGER NOT NULL,
+  comment_id INTEGER,
+  staff_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_handover_mentions_staff ON luggage_handover_mentions(staff_id);
+CREATE INDEX IF NOT EXISTS idx_handover_mentions_note ON luggage_handover_mentions(note_id);
+
+-- Tag pool: static reference table for same-day tags 1-90 (read-only after seed)
+CREATE TABLE IF NOT EXISTS luggage_tag_pool (
+  tag_no INTEGER PRIMARY KEY  -- 1 to 90
+);
+-- Seed tag pool (INSERT OR IGNORE so re-running is safe)
+INSERT OR IGNORE INTO luggage_tag_pool (tag_no) VALUES
+  (1),(2),(3),(4),(5),(6),(7),(8),(9),(10),
+  (11),(12),(13),(14),(15),(16),(17),(18),(19),(20),
+  (21),(22),(23),(24),(25),(26),(27),(28),(29),(30),
+  (31),(32),(33),(34),(35),(36),(37),(38),(39),(40),
+  (41),(42),(43),(44),(45),(46),(47),(48),(49),(50),
+  (51),(52),(53),(54),(55),(56),(57),(58),(59),(60),
+  (61),(62),(63),(64),(65),(66),(67),(68),(69),(70),
+  (71),(72),(73),(74),(75),(76),(77),(78),(79),(80),
+  (81),(82),(83),(84),(85),(86),(87),(88),(89),(90);
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_luggage_orders_status ON luggage_orders(status);
