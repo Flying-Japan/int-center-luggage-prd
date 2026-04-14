@@ -14,6 +14,7 @@ import {
 } from "../services/pricing";
 import { calculateStorageDays } from "../services/storage";
 import { buildOrderId, buildSameDayTag, buildOvernightTag } from "../services/orderNumber";
+import { escapeHtml } from "../lib/escapeHtml";
 
 const customer = new Hono<AppType>();
 const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
@@ -1916,7 +1917,7 @@ a { color: inherit; text-decoration: none; }
             <div style="text-align:center;display:grid;gap:14px;padding-top:16px">
               <div class="completion-msg" dangerouslySetInnerHTML={{__html: (() => {
                 // Sanitize DB-sourced content first to prevent XSS, then apply safe formatting
-                const escaped = primaryMsg.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
+                const escaped = escapeHtml(primaryMsg);
                 return escaped
                   .replace(/\n/g, "<br/>")
                   .replace(/(접수 된 순서대로 성함을 불러드리겠습니다|We will call your name in the order received|受付順にお名前をお呼びします)/g, '<strong style="font-size:15px;color:var(--text)">$1</strong>')

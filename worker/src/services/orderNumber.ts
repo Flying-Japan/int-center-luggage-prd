@@ -62,22 +62,25 @@ export async function buildOrderId(db: D1Database, nowUtc?: Date, overnight?: bo
 export async function buildSameDayTag(db: D1Database, businessDate?: string): Promise<string | null> {
   const bizDate = businessDate ?? todayBusinessDate();
 
-  // Phase 1: Increment sequential counter
-  const row = await db.prepare(
-    `INSERT INTO luggage_daily_tag_counters (business_date, last_seq)
-     VALUES (?, 1)
-     ON CONFLICT(business_date) DO UPDATE SET last_seq = last_seq + 1
-     RETURNING last_seq`
+  // Check current counter without incrementing first
+  const current = await db.prepare(
+    `SELECT last_seq FROM luggage_daily_tag_counters WHERE business_date = ?`
   ).bind(bizDate).first<{ last_seq: number }>();
 
-  const seq = row?.last_seq ?? 1;
+  const currentSeq = current?.last_seq ?? 0;
 
-  // Phase 1: Sequential (first pass through 1-90)
-  if (seq <= 90) {
-    return String(seq);
+  // Phase 1: Still in first pass (1-90) — increment and use
+  if (currentSeq < 90) {
+    const row = await db.prepare(
+      `INSERT INTO luggage_daily_tag_counters (business_date, last_seq)
+       VALUES (?, 1)
+       ON CONFLICT(business_date) DO UPDATE SET last_seq = last_seq + 1
+       RETURNING last_seq`
+    ).bind(bizDate).first<{ last_seq: number }>();
+    return String(row?.last_seq ?? 1);
   }
 
-  // Phase 2: Recycle — find lowest available tag from pool
+  // Phase 2: Recycle — find lowest available tag from pool (no counter increment)
   // A tag is "in use" if an active order (PAYMENT_PENDING or PAID) holds it for today
   const freeTag = await db.prepare(
     `SELECT t.tag_no FROM luggage_tag_pool t

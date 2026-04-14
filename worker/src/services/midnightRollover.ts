@@ -6,7 +6,7 @@
  * freeing the old same-day tag for recycling.
  */
 
-import { buildOvernightTag } from "./orderNumber";
+// Overnight tags allocated in bulk via direct counter manipulation (no per-order buildOvernightTag call)
 
 interface RolloverResult {
   transitioned: number;
@@ -39,30 +39,49 @@ export async function runMidnightRollover(db: D1Database): Promise<RolloverResul
        AND parent_order_id IS NULL`
   ).bind(businessDate).all<{ order_id: string; tag_no: string }>();
 
-  let transitioned = 0;
-  let errors = 0;
-
-  for (const order of orders.results) {
-    try {
-      const newTag = await buildOvernightTag(db, businessDate);
-      await db.prepare(
-        `UPDATE luggage_orders SET tag_no = ?, updated_at = datetime('now')
-         WHERE order_id = ?`
-      ).bind(newTag, order.order_id).run();
-
-      // Also update any extension orders that share the parent's tag
-      await db.prepare(
-        `UPDATE luggage_orders SET tag_no = ?, updated_at = datetime('now')
-         WHERE parent_order_id = ?
-           AND status IN ('PAYMENT_PENDING', 'PAID')`
-      ).bind(newTag, order.order_id).run();
-
-      transitioned++;
-    } catch (e) {
-      console.error(`Rollover failed for ${order.order_id}:`, e);
-      errors++;
-    }
+  if (orders.results.length === 0) {
+    return { transitioned: 0, errors: 0 };
   }
 
-  return { transitioned, errors };
+  // Bulk-allocate overnight tags: bump counter once by N instead of N separate calls
+  const count = orders.results.length;
+  await db.prepare(
+    `INSERT INTO luggage_daily_tag_counters (business_date, last_seq)
+     VALUES (?, ?)
+     ON CONFLICT(business_date) DO UPDATE SET last_seq = last_seq + ?`
+  ).bind(`${businessDate}-overnight`, 90 + count, count).run();
+
+  const counterRow = await db.prepare(
+    `SELECT last_seq FROM luggage_daily_tag_counters WHERE business_date = ?`
+  ).bind(`${businessDate}-overnight`).first<{ last_seq: number }>();
+
+  const endSeq = counterRow?.last_seq ?? (90 + count);
+  const startSeq = endSeq - count + 1;
+
+  // Batch all updates in a single transaction
+  const stmts: D1PreparedStatement[] = [];
+  for (let i = 0; i < count; i++) {
+    const newTag = String(startSeq + i);
+    const orderId = orders.results[i].order_id;
+    stmts.push(
+      db.prepare(
+        `UPDATE luggage_orders SET tag_no = ?, updated_at = datetime('now') WHERE order_id = ?`
+      ).bind(newTag, orderId)
+    );
+    stmts.push(
+      db.prepare(
+        `UPDATE luggage_orders SET tag_no = ?, updated_at = datetime('now')
+         WHERE parent_order_id = ? AND status IN ('PAYMENT_PENDING', 'PAID')`
+      ).bind(newTag, orderId)
+    );
+  }
+
+  try {
+    await db.batch(stmts);
+  } catch (e) {
+    console.error("Midnight rollover batch failed:", e);
+    return { transitioned: 0, errors: count };
+  }
+
+  return { transitioned: count, errors: 0 };
 }
