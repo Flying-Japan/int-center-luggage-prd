@@ -232,7 +232,6 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             <div style="display:flex;gap:0;border-bottom:2px solid #e2e8f0;margin-bottom:16px">
               {[
                 { key: "UNPICKED", label: "미수령", count: (counts.pending_count ?? 0) + (counts.paid_count ?? 0) },
-                { key: "ALL", label: "전체", count: status === "ALL" ? totalFiltered : ((counts.pending_count ?? 0) + (counts.paid_count ?? 0) + (counts.picked_up_count ?? 0)) },
                 { key: "PAYMENT_PENDING", label: "결제대기", count: counts.pending_count },
                 { key: "PAID", label: "결제완료", count: counts.paid_count },
                 { key: "PICKED_UP", label: "수령완료", count: showAllPickedUp ? counts.picked_up_all_count : counts.picked_up_count },

@@ -600,7 +600,7 @@ tbody tr:hover { background: #eef5ff; }
 }
 
 /* ── Staff orders table ── */
-#staff-orders-table { table-layout: fixed; min-width: 100%; }
+#staff-orders-table { table-layout: fixed; min-width: 900px; }
 #staff-orders-table col[data-col-key="name"] { width: 12%; }
 #staff-orders-table col[data-col-key="tag_no"] { width: 6%; }
 #staff-orders-table col[data-col-key="created_time"] { width: 8%; }
@@ -1583,7 +1583,8 @@ body.staff-site .table-wrap {
   box-shadow: var(--shadow-sm);
   margin-top: 8px;
   min-height: 420px;
-  overflow: visible;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 body.staff-site table { background: transparent; }
