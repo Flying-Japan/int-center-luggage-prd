@@ -1586,7 +1586,6 @@ body.staff-site .table-wrap {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
-body.staff-site .table-wrap.full-history { max-width: calc(100vw - 32px); }
 
 body.staff-site table { background: transparent; }
 
