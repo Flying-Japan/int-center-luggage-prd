@@ -299,7 +299,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   <col data-col-key="pay_status" style="width:72px" />
                   <col data-col-key="pickup_status" style="width:72px" />
                   <col data-col-key="actions" style="width:68px" />
-                  <col data-col-key="note" />
+                  <col data-col-key="note" style="width:200px" />
                   <col data-col-key="detail" style="width:42px" />
                 </colgroup>
                 <thead>

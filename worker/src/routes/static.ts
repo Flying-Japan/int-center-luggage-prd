@@ -600,17 +600,15 @@ tbody tr:hover { background: #eef5ff; }
 }
 
 /* ── Staff orders table ── */
-#staff-orders-table { table-layout: fixed; min-width: 900px; }
-#staff-orders-table col[data-col-key="name"] { width: 12%; }
-#staff-orders-table col[data-col-key="tag_no"] { width: 6%; }
-#staff-orders-table col[data-col-key="created_time"] { width: 8%; }
-#staff-orders-table col[data-col-key="price"] { width: 7%; }
-#staff-orders-table col[data-col-key="pickup_time"] { width: 7%; }
-#staff-orders-table col[data-col-key="pay_status"] { width: 6%; }
-#staff-orders-table col[data-col-key="pickup_status"] { width: 6%; }
-#staff-orders-table col[data-col-key="actions"] { width: 16%; }
-#staff-orders-table col[data-col-key="note"] { width: 29%; }
-#staff-orders-table col[data-col-key="detail"] { width: 3%; }
+/*
+ * Column widths use explicit px values on <col> elements (see colgroup in index.tsx).
+ * Do NOT add percentage-based col widths here — they override the inline px widths
+ * and cause columns to collapse when body overflow-x:hidden constrains the layout
+ * reference width during large dataset rendering (13,000+ rows).
+ * Sum of fixed cols: 36+80+52+90+70+56+72+72+68+200+42 = 838px → min-width: 900px
+ */
+#staff-orders-table { table-layout: fixed; min-width: 900px; width: 100%; }
+#staff-orders-table col[data-col-key="note"] { width: 200px; }
 
 #staff-orders-table th, #staff-orders-table td {
   padding: 6px 8px;
