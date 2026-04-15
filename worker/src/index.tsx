@@ -196,7 +196,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>짐보관 신청</title>
-        <link rel="stylesheet" href="/static/styles.css" />
+        <link rel="stylesheet" href="/static/styles.css?v=20260415" />
       </head>
       <body class="staff-site">
         <StaffTopbar staff={staff} active="/staff/dashboard" />
@@ -717,14 +717,21 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
             var table=document.getElementById('staff-orders-table');
             if(table){
-              // Restore saved widths
+              // Restore saved widths — only if total fits within the table container
               var saved=loadColWidths();
               if(Object.keys(saved).length>0){
-                table.style.tableLayout='fixed';
-                Object.keys(saved).forEach(function(key){
-                  var col=table.querySelector('col[data-col-key="'+key+'"]');
-                  if(col)col.style.width=saved[key]+'px';
-                });
+                var totalSaved=Object.values(saved).reduce(function(s,w){return s+w;},0);
+                var availableW=table.parentElement?table.parentElement.clientWidth:0;
+                if(availableW>0&&totalSaved>availableW*1.5){
+                  // Saved widths would blow out the layout — discard them
+                  saveColWidths({});
+                } else {
+                  table.style.tableLayout='fixed';
+                  Object.keys(saved).forEach(function(key){
+                    var col=table.querySelector('col[data-col-key="'+key+'"]');
+                    if(col)col.style.width=saved[key]+'px';
+                  });
+                }
               }
 
               var cols=table.querySelectorAll('colgroup col');

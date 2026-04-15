@@ -1353,7 +1353,9 @@ code {
 body.staff-site {
   /* Keep customer palette, just refine for admin */
   font-size: 13px;
+  overflow-x: auto;
 }
+body.staff-site .container { max-width: 1280px; }
 
 /* Subtle bg orbs for staff (lower opacity than customer) */
 body.staff-site .bg-orb { opacity: 0.28; }
@@ -1581,6 +1583,7 @@ body.staff-site .table-wrap {
   box-shadow: var(--shadow-sm);
   margin-top: 8px;
   min-height: 420px;
+  max-width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
