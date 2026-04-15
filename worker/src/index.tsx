@@ -234,7 +234,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 { key: "UNPICKED", label: "미수령", count: (counts.pending_count ?? 0) + (counts.paid_count ?? 0) },
                 { key: "PAYMENT_PENDING", label: "결제대기", count: counts.pending_count },
                 { key: "PAID", label: "결제완료", count: counts.paid_count },
-                { key: "PICKED_UP", label: "수령완료", count: showAllPickedUp ? counts.picked_up_all_count : counts.picked_up_count },
+                { key: "PICKED_UP", label: "수령완료", count: (showAllPickedUp || dateFrom || dateTo) ? counts.picked_up_all_count : counts.picked_up_count },
                 { key: "CANCELLED", label: "취소", count: counts.cancelled_count },
               ].map((tab) => (
                 <a
@@ -395,7 +395,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     );
                   })}
                   {orderRows.length === 0 && (
-                    <tr><td colspan={10}>데이터가 없습니다.</td></tr>
+                    <tr><td colspan={11}>데이터가 없습니다.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -410,12 +410,28 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     {page > 1 && (
                       <a class="btn btn-sm btn-secondary" href={buildDashboardUrl(status, { ...(showAllPickedUp ? { show_all_picked_up: "true" } : {}), page: String(page - 1) })}>이전</a>
                     )}
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                      <a
-                        class={`btn btn-sm ${p === page ? "btn-primary" : "btn-secondary"}`}
-                        href={buildDashboardUrl(status, { ...(showAllPickedUp ? { show_all_picked_up: "true" } : {}), page: String(p) })}
-                      >{p}</a>
-                    ))}
+                    {(() => {
+                      const pages: (number | "...")[] = [];
+                      if (totalPages <= 9) {
+                        for (let i = 1; i <= totalPages; i++) pages.push(i);
+                      } else {
+                        pages.push(1);
+                        if (page > 4) pages.push("...");
+                        for (let i = Math.max(2, page - 2); i <= Math.min(totalPages - 1, page + 2); i++) pages.push(i);
+                        if (page < totalPages - 3) pages.push("...");
+                        pages.push(totalPages);
+                      }
+                      return pages.map((p) =>
+                        p === "..." ? (
+                          <span style="padding:4px 2px;color:#94a3b8">...</span>
+                        ) : (
+                          <a
+                            class={`btn btn-sm ${p === page ? "btn-primary" : "btn-secondary"}`}
+                            href={buildDashboardUrl(status, { ...(showAllPickedUp ? { show_all_picked_up: "true" } : {}), page: String(p) })}
+                          >{p}</a>
+                        )
+                      );
+                    })()}
                     {page < totalPages && (
                       <a class="btn btn-sm btn-secondary" href={buildDashboardUrl(status, { ...(showAllPickedUp ? { show_all_picked_up: "true" } : {}), page: String(page + 1) })}>다음</a>
                     )}
@@ -734,6 +750,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               } else if(range==='month'){
                 fromEl.value=y+'-'+m+'-01';
               }
+              var form=document.getElementById('staff-search-form');
+              if(form) form.submit();
             };
 
             /* ── Detail row toggle ── */

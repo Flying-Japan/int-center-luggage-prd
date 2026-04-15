@@ -265,7 +265,7 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
       : "";
 
   const placeholders = body.order_ids.map(() => "?").join(",");
-  await c.env.DB.prepare(
+  const result = await c.env.DB.prepare(
     `UPDATE luggage_orders SET status = ?, updated_at = datetime('now') WHERE order_id IN (${placeholders})${statusGuard}`
   )
     .bind(newStatus, ...body.order_ids)
@@ -281,7 +281,7 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
     await c.env.DB.batch(stmts);
   }
 
-  return c.json({ success: true, updated: body.order_ids.length });
+  return c.json({ success: true, updated: result.meta.changes });
 });
 
 // POST /staff/api/orders/:id/pickup — Mark as picked up (inline)
