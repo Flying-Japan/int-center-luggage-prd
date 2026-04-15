@@ -287,8 +287,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               <button class="btn btn-sm btn-primary" id="bulk-paid">일괄 결제완료</button>
               <button class="btn btn-sm" id="bulk-cancel" style="background:#dc2626;color:#fff;border-color:#dc2626">일괄 취소</button>
             </div>
-            <div class="table-wrap">
-              <table id="staff-orders-table">
+            <div class="table-wrap" style="max-width:100%;overflow-x:auto">
+              <table id="staff-orders-table" style="table-layout:fixed;width:100%;max-width:100%">
                 <colgroup>
                   <col data-col-key="checkbox" style="width:36px" />
                   <col data-col-key="name" style="width:80px" />

@@ -607,7 +607,7 @@ tbody tr:hover { background: #eef5ff; }
  * reference width during large dataset rendering (13,000+ rows).
  * Sum of fixed cols: 36+80+52+90+70+56+72+72+68+200+42 = 838px → min-width: 900px
  */
-#staff-orders-table { table-layout: fixed; min-width: 900px; width: 100%; }
+#staff-orders-table { table-layout: fixed; width: 100%; max-width: 100%; }
 #staff-orders-table col[data-col-key="note"] { width: 200px; }
 
 #staff-orders-table th, #staff-orders-table td {
