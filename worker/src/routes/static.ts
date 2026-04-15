@@ -1413,7 +1413,7 @@ body.staff-site .pill-user {
 /* ── Staff Layout ── */
 body.staff-site .container {
   width: 100%;
-  max-width: 1200px;
+  max-width: 100%;
   gap: 14px;
   margin: 16px auto 32px;
   padding: 0 28px;
