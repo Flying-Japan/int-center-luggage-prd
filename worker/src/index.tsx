@@ -180,11 +180,11 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
     note_author: order.note_staff_id ? noteAuthorMap.get(order.note_staff_id) || order.note_staff_id : null,
   }));
 
-  const buildDashboardUrl = (s: string, extra?: Record<string, string>) => {
+  const buildDashboardUrl = (s: string, extra?: Record<string, string>, clearDates = false) => {
     const u = new URLSearchParams();
     u.set("status", s);
-    if (dateFrom) u.set("date_from", dateFrom);
-    if (dateTo) u.set("date_to", dateTo);
+    if (!clearDates && dateFrom) u.set("date_from", dateFrom);
+    if (!clearDates && dateTo) u.set("date_to", dateTo);
     if (q) u.set("q", q);
     if (extra) for (const [k, v] of Object.entries(extra)) u.set(k, v);
     return `/staff/dashboard?${u.toString()}`;
@@ -270,7 +270,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   <button type="button" class="btn btn-sm" onclick="setDateRange('yesterday')" style="padding:4px 10px;font-size:11px">어제</button>
                   <button type="button" class="btn btn-sm" onclick="setDateRange('week')" style="padding:4px 10px;font-size:11px">이번주</button>
                   <button type="button" class="btn btn-sm" onclick="setDateRange('month')" style="padding:4px 10px;font-size:11px">이번달</button>
-                  <a href={buildDashboardUrl("ALL", { show_all_picked_up: "true" })} class="btn btn-sm" style="padding:4px 10px;font-size:11px;text-decoration:none;border:1.5px dashed #94a3b8;background:transparent;color:#64748b">전체기간</a>
+                  <a href={buildDashboardUrl("ALL", { show_all_picked_up: "true" }, true)} class="btn btn-sm" style="padding:4px 10px;font-size:11px;text-decoration:none;border:1.5px dashed #94a3b8;background:transparent;color:#64748b">전체기간</a>
                 </div>
               </div>
 
