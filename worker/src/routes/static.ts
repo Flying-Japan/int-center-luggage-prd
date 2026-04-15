@@ -1354,7 +1354,6 @@ body.staff-site {
   /* Keep customer palette, just refine for admin */
   font-size: 13px;
 }
-body.staff-site .container { max-width: 100%; padding: 0 24px; }
 
 /* Subtle bg orbs for staff (lower opacity than customer) */
 body.staff-site .bg-orb { opacity: 0.28; }
@@ -1413,10 +1412,10 @@ body.staff-site .pill-user {
 /* ── Staff Layout ── */
 body.staff-site .container {
   width: 100%;
-  max-width: 100%;
+  max-width: calc(100% - 64px);
   gap: 14px;
   margin: 16px auto 32px;
-  padding: 0 28px;
+  padding: 0 32px;
 }
 
 /* ── Staff Hero ── */

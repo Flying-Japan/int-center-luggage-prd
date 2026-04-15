@@ -238,7 +238,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 { key: "CANCELLED", label: "취소", count: counts.cancelled_count },
               ].map((tab) => (
                 <a
-                  href={buildDashboardUrl(tab.key)}
+                  href={buildDashboardUrl(tab.key, showAllPickedUp ? { show_all_picked_up: "true" } : {})}
                   style={`display:inline-block;padding:10px 20px;font-size:14px;font-weight:600;text-decoration:none;border-bottom:3px solid ${status === tab.key ? "#2563eb" : "transparent"};color:${status === tab.key ? "#2563eb" : "#64748b"};margin-bottom:-2px;white-space:nowrap;transition:color 0.15s`}
                 >
                   {tab.label} ({tab.count})
