@@ -1354,6 +1354,7 @@ body.staff-site {
   /* Keep customer palette, just refine for admin */
   font-size: 13px;
 }
+body.staff-site .container { max-width: 100%; padding: 0 24px; }
 
 /* Subtle bg orbs for staff (lower opacity than customer) */
 body.staff-site .bg-orb { opacity: 0.28; }
