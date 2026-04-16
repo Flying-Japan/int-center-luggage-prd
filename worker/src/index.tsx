@@ -580,7 +580,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       }
                       el.textContent=display;
                       if(el.dataset.field==='tag_no') updateTagColor(el,newVal);
-                      if(el.dataset.field==='note') refreshDashboardSyncToken();
+                      refreshDashboardSyncToken();
                     } else { restore(orig); alert('저장 실패'); }
                   }).catch(function(){ restore(orig); alert('저장 실패'); });
                 }
@@ -683,6 +683,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   btn.classList.remove('is-active');btn.textContent='창고';
                   row.classList.remove('is-in-warehouse');
                 }
+                refreshDashboardSyncToken();
               });
             }
 
@@ -727,6 +728,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     cell.dataset.method=d.payment_method;
                     closePopover();
                     var pd=cell.querySelector('.price-display');if(pd)pd.textContent='¥'+Number(d.prepaid_amount).toLocaleString();
+                    refreshDashboardSyncToken();
                   });
                 });
               });

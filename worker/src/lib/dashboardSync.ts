@@ -76,7 +76,7 @@ export async function getDashboardSyncToken(
     params.dateTo
   );
 
-  const [counts, filtered, logs] = await Promise.all([
+  const [counts, filtered, latestVisibleUpdate] = await Promise.all([
     db.prepare(
       `SELECT
         SUM(CASE WHEN o.status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
@@ -101,15 +101,10 @@ export async function getDashboardSyncToken(
        WHERE 1=1${statusFilter.clause}${context.clause}`
     ).bind(...statusFilter.params, ...context.params).first<{ total: number }>(),
     db.prepare(
-      `SELECT COALESCE(MAX(a.log_id), 0) as max_log_id
-       FROM luggage_audit_logs a
-       JOIN luggage_orders o ON o.order_id = a.order_id
-       WHERE (
-         a.action IN ('TOGGLE_PAYMENT', 'PICKUP', 'UNDO_PICKUP', 'CANCEL', 'BULK_MARK_PAID', 'BULK_CANCEL')
-         OR (a.action = 'INLINE_UPDATE' AND a.details LIKE '%비고%')
-       )
-       ${context.clause}`
-    ).bind(...context.params).first<{ max_log_id: number }>(),
+      `SELECT COALESCE(MAX(o.updated_at), '') as max_updated_at
+       FROM luggage_orders o
+       WHERE 1=1${statusFilter.clause}${context.clause}`
+    ).bind(...statusFilter.params, ...context.params).first<{ max_updated_at: string }>(),
   ]);
 
   const safeCounts = counts || {
@@ -129,6 +124,6 @@ export async function getDashboardSyncToken(
     safeCounts.cancelled_count ?? 0,
     safeCounts.total_count ?? 0,
     filtered?.total ?? 0,
-    logs?.max_log_id ?? 0,
+    latestVisibleUpdate?.max_updated_at ?? "",
   ].join(":");
 }
