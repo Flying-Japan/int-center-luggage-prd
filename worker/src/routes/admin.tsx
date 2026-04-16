@@ -1298,8 +1298,7 @@ admin.get("/staff/admin/customers", async (c) => {
       </head>
       <body class="staff-site">
         <StaffTopbar staff={staff} active="/staff/admin/customers" />
-        <div class="staff-body">
-          <main class="staff-main" style="padding:16px 20px">
+        <main class="container">
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
               <h2 style="font-size:18px;font-weight:700;margin:0">고객목록</h2>
               <span style="font-size:13px;color:var(--muted)">총 {total.toLocaleString()}명</span>
@@ -1357,8 +1356,7 @@ admin.get("/staff/admin/customers", async (c) => {
                 {page < totalPages && <a href={`/staff/admin/customers?page=${page + 1}${qParam}`} class="btn btn-sm">다음 →</a>}
               </div>
             )}
-          </main>
-        </div>
+        </main>
         <NewOrderAlert />
       </body>
     </html>
