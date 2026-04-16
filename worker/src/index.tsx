@@ -14,6 +14,7 @@ import { runMidnightRollover } from "./services/midnightRollover";
 import { syncDailySales } from "./services/dailySalesSync";
 import { syncRentalRevenue } from "./services/rentalRevenueSync";
 import { tagColorClass, TAG_COLOR_RANGES } from "./lib/tagColors";
+import { getDashboardSyncToken } from "./lib/dashboardSync";
 import { StaffTopbar, NewOrderAlert } from "./lib/components";
 import { fetchStaffNamesByIds } from "./lib/staffProfiles";
 
@@ -151,7 +152,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   const todayRef = nowJSTRef.toISOString().slice(0, 10);
 
   // Run order list, counts, filtered count, and referral counts in parallel
-  const [orders, countsResult, filteredCountResult, refRows] = await Promise.all([
+  const [orders, countsResult, filteredCountResult, refRows, dashboardSyncToken] = await Promise.all([
     c.env.DB.prepare(sql)
       .bind(...params, pageSize, (page - 1) * pageSize)
       .all<{ order_id: string; name: string | null; tag_no: string | null; status: string; prepaid_amount: number; created_at: string; expected_pickup_at: string | null; note: string | null; payment_method: string | null; in_warehouse: number; parent_order_id: string | null; flying_pass_tier: string | null; note_staff_id: string | null; note_updated_at: string | null }>(),
@@ -167,6 +168,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
     ).bind(...countsParams).first<{ pending_count: number; paid_count: number; picked_up_count: number; picked_up_all_count: number; cancelled_count: number; total_count: number }>(),
     c.env.DB.prepare(countSql).bind(...params).first<{ total: number }>(),
     c.env.DB.prepare("SELECT floor, count FROM luggage_referral_counts WHERE business_date = ?").bind(todayRef).all<{ floor: string; count: number }>(),
+    getDashboardSyncToken(c.env.DB, { q, status, showAllPickedUp, dateFrom, dateTo }),
   ]);
 
   const counts = countsResult || { pending_count: 0, paid_count: 0, picked_up_count: 0, picked_up_all_count: 0, cancelled_count: 0, total_count: 0 };
@@ -500,8 +502,49 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             var mf=document.getElementById('manual-form');
             if(mf){var frt=document.getElementById('free-reason-text');mf.querySelectorAll('input[name=free_reason]').forEach(function(r){r.addEventListener('change',function(){frt.style.display=r.value==='기타'?'block':'none';if(r.value==='기타')frt.focus()})})}
 
+            var dashboardSyncToken=${JSON.stringify(dashboardSyncToken)};
+            var dashboardSyncBusy=false;
+
             var FIELD_LABELS={name:'이름',tag_no:'짐번호',expected_pickup_at:'짐 찾는 시각',note:'비고'};
             var TAG_COLORS=${JSON.stringify(TAG_COLOR_RANGES)};
+
+            function hasTransientUiOpen(){
+              if(document.hidden) return true;
+              if(document.querySelector('.edit-input')) return true;
+              if(document.querySelector('.price-popover')) return true;
+              var ae=document.activeElement;
+              if(!ae) return false;
+              if((ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT')&&(ae.closest('#manual-form')||ae.closest('#staff-search-form'))) return true;
+              return false;
+            }
+
+            function pollDashboardSync(){
+              if(dashboardSyncBusy||document.hidden) return;
+              dashboardSyncBusy=true;
+              fetch('/staff/api/orders/dashboard-sync'+location.search,{headers:{'Accept':'application/json'}})
+                .then(function(r){return r.ok?r.json():null;})
+                .then(function(d){
+                  if(!d||!d.token||d.token===dashboardSyncToken) return;
+                  if(hasTransientUiOpen()) return;
+                  window.location.reload();
+                })
+                .catch(function(){})
+                .finally(function(){dashboardSyncBusy=false;});
+            }
+
+            function refreshDashboardSyncToken(){
+              fetch('/staff/api/orders/dashboard-sync'+location.search,{headers:{'Accept':'application/json'}})
+                .then(function(r){return r.ok?r.json():null;})
+                .then(function(d){
+                  if(d&&d.token) dashboardSyncToken=d.token;
+                })
+                .catch(function(){});
+            }
+
+            setInterval(pollDashboardSync,5000);
+            document.addEventListener('visibilitychange',function(){
+              if(!document.hidden) pollDashboardSync();
+            });
 
             /* ── Inline edit (click-to-edit for name, tag, pickup, note) ── */
             document.querySelectorAll('.editable').forEach(function(el){
@@ -537,6 +580,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       }
                       el.textContent=display;
                       if(el.dataset.field==='tag_no') updateTagColor(el,newVal);
+                      if(el.dataset.field==='note') refreshDashboardSyncToken();
                     } else { restore(orig); alert('저장 실패'); }
                   }).catch(function(){ restore(orig); alert('저장 실패'); });
                 }
@@ -594,6 +638,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   payPill.textContent=isPaid?'결제완료':'결제대기';
                   if(isPaid){payPill.removeAttribute('data-action');payPill.style.cursor='';payPill.classList.remove('pill-clickable');}
                 }
+                refreshDashboardSyncToken();
               }).catch(function(){alert('네트워크 오류');});
             }
 
@@ -623,6 +668,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 if(pill){pill.className='status-pill status-cancelled';pill.textContent='취소';}
                 var actions=row.querySelector('.inline-actions');
                 if(actions) actions.innerHTML='<span style="color:#991b1b;font-size:11px;font-weight:700">취소됨</span>';
+                refreshDashboardSyncToken();
               });
             }
 

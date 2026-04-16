@@ -8,6 +8,7 @@ import { staffAuth, getStaff, insertAuditLog } from "../middleware/auth";
 import { calculateStorageDays, calculateExtraDays } from "../services/storage";
 import { calculateExtraAmount, recalculateOrderPrepaid, normalizeFlyingPassTier } from "../services/pricing";
 import type { FlyingPassTier } from "../services/pricing";
+import { getDashboardSyncToken } from "../lib/dashboardSync";
 
 const staffApi = new Hono<AppType>();
 
@@ -132,6 +133,19 @@ staffApi.get("/staff/api/orders", async (c) => {
     limit,
     offset,
   });
+});
+
+// GET /staff/api/orders/dashboard-sync — Polling token for dashboard auto-refresh
+staffApi.get("/staff/api/orders/dashboard-sync", async (c) => {
+  const token = await getDashboardSyncToken(c.env.DB, {
+    q: c.req.query("q") || "",
+    status: c.req.query("status") || "UNPICKED",
+    showAllPickedUp: c.req.query("show_all_picked_up") === "true",
+    dateFrom: c.req.query("date_from") || "",
+    dateTo: c.req.query("date_to") || "",
+  });
+
+  return c.json({ token });
 });
 
 // POST /staff/api/orders/:id/inline-update — Inline field editing
