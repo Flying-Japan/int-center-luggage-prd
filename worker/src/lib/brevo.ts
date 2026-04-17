@@ -101,34 +101,46 @@ export async function sendOrderConfirmation(
       </div>
     </div>
 
+    <!-- Flying Pass Banner -->
+    <div style="padding:0 24px 20px">
+      <img src="https://luggage.flyingjp.com/static/flying-pass-banner.jpg?v=2" alt="Flying Pass" width="340" style="width:100%;max-width:340px;border-radius:15px;display:block;margin:0 auto" />
+    </div>
+
     <!-- Rental suggestions -->
     <div style="padding:0 24px 24px">
-      <p style="text-align:center;font-size:14px;font-weight:700;margin:0 0 12px">${lang === "ja" ? "センターでレンタルもできます ✈️" : lang === "en" ? "Rentals available at our center ✈️" : "센터에서 대여도 가능해요 ✈️"}</p>
-      <table style="width:100%;border-collapse:collapse">
+      <p style="text-align:center;font-size:15px;font-weight:800;color:#191f28;margin:0 0 4px">${lang === "ja" ? "センターでレンタルもできます" : lang === "en" ? "Rentals at our center" : "센터에서 대여도 가능해요"}</p>
+      <p style="text-align:center;font-size:11px;color:#2f80f8;font-weight:500;margin:0 0 12px">✨ ${lang === "ja" ? "すぐレンタルできるサービス" : lang === "en" ? "Available right at our center" : "바로 대여 가능한 렌탈 서비스"} ✨</p>
+      <table style="width:100%;max-width:320px;margin:0 auto;border-collapse:collapse">
         <tr>
-          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.usj.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🎮 ${lang === "ja" ? "マリオバンド" : lang === "en" ? "Mario Band" : "마리오밴드"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.usj.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🪄 ${lang === "ja" ? "HP杖" : lang === "en" ? "HP Wand" : "해리포터 지팡이"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.dyson.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">💇 ${lang === "ja" ? "エアラップ" : lang === "en" ? "Airwrap" : "다이슨 에어랩"}</a></td>
+          <td style="padding:3px;width:33%"><a href="${RENTAL_PROMO_LINKS.usj.email}" style="display:block;text-decoration:none"><img src="https://luggage.flyingjp.com/static/rental-card-13.png?v=2" alt="" width="102" style="width:100%;max-width:102px;border-radius:10px;display:block" /></a></td>
+          <td style="padding:3px;width:33%"><a href="${RENTAL_PROMO_LINKS.usj.email}" style="display:block;text-decoration:none"><img src="https://luggage.flyingjp.com/static/rental-card-14.png?v=2" alt="" width="102" style="width:100%;max-width:102px;border-radius:10px;display:block" /></a></td>
+          <td style="padding:3px;width:33%"><a href="${RENTAL_PROMO_LINKS.stroller.email}" style="display:block;text-decoration:none"><img src="https://luggage.flyingjp.com/static/rental-card-15.png?v=2" alt="" width="102" style="width:100%;max-width:102px;border-radius:10px;display:block" /></a></td>
         </tr>
         <tr>
-          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.dyson.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">✨ ${lang === "ja" ? "ストレートナー" : lang === "en" ? "Straightener" : "다이슨 고데기"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.stroller.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">👶 ${lang === "ja" ? "ベビーカー" : lang === "en" ? "Stroller" : "유모차"}</a></td>
-          <td style="padding:4px;text-align:center;width:33%"><a href="${RENTAL_PROMO_LINKS.usj.email}" style="display:block;padding:10px 4px;background:#f5f9ff;border-radius:8px;text-decoration:none;font-size:11px;color:#191f28;font-weight:600">🎫 ${lang === "ja" ? "フードパス" : lang === "en" ? "Food Pass" : "먹방패스"}</a></td>
+          <td style="padding:3px;width:33%"><a href="${RENTAL_PROMO_LINKS.dyson.email}" style="display:block;text-decoration:none"><img src="https://luggage.flyingjp.com/static/rental-card-16.png?v=2" alt="" width="102" style="width:100%;max-width:102px;border-radius:10px;display:block" /></a></td>
+          <td style="padding:3px;width:33%"><a href="${RENTAL_PROMO_LINKS.dyson.email}" style="display:block;text-decoration:none"><img src="https://luggage.flyingjp.com/static/rental-card-17.png?v=2" alt="" width="102" style="width:100%;max-width:102px;border-radius:10px;display:block" /></a></td>
+          <td style="padding:3px;width:33%"><a href="${RENTAL_PROMO_LINKS.stroller.email}" style="display:block;text-decoration:none"><img src="https://luggage.flyingjp.com/static/rental-card-18.png?v=2" alt="" width="102" style="width:100%;max-width:102px;border-radius:10px;display:block" /></a></td>
+        </tr>
+        <tr>
+          <td style="padding:3px;width:33%"><a href="${RENTAL_PROMO_LINKS.stroller.email}" style="display:block;text-decoration:none"><img src="https://luggage.flyingjp.com/static/rental-card-19.png?v=2" alt="" width="102" style="width:100%;max-width:102px;border-radius:10px;display:block" /></a></td>
+          <td style="padding:3px;width:33%"></td>
+          <td style="padding:3px;width:33%"></td>
         </tr>
       </table>
     </div>
 
     <!-- KakaoTalk -->
-    <div style="padding:16px 24px;background:#f7f7f5;text-align:center;border-top:1px solid #f0f0ee">
-      <p style="margin:0;font-size:12px;color:#787774">${lang === "ja" ? "お問い合わせ" : lang === "en" ? "Questions?" : "문의사항이 있으시면"}</p>
-      <a href="https://pf.kakao.com/_Nrxbcj" style="display:inline-block;margin-top:8px;padding:8px 20px;background:#FEE500;color:#3C1E1E;border-radius:8px;font-size:13px;font-weight:700;text-decoration:none">💬 KakaoTalk</a>
+    <div style="padding:20px 24px;background:linear-gradient(180deg,#f8f9fb 0%,#f0f2f5 100%);text-align:center;border-top:1px solid #e8eaed">
+      <p style="margin:0;font-size:13px;color:#4a5668;font-weight:500">${lang === "ja" ? "お問い合わせ" : lang === "en" ? "Need help?" : "문의사항이 있으시면"}</p>
+      <a href="https://pf.kakao.com/_Nrxbcj" style="display:inline-block;margin-top:10px;padding:10px 24px;background:#FEE500;color:#3C1E1E;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none">💬 KakaoTalk</a>
     </div>
 
     <!-- Footer -->
-    <div style="padding:16px 24px;text-align:center;font-size:11px;color:#a5a5a3">
-      <p style="margin:0">Flying Inc. · 大阪府大阪市中央区難波3-2-18 1F</p>
-      <p style="margin:4px 0 0">JP: +81 090-2254-1865 | KR: +82 070-8287-1455</p>
-      <p style="margin:4px 0 0">© 2026 Flying Inc.</p>
+    <div style="padding:20px 24px;text-align:center;font-size:11px;color:#a5a5a3;line-height:1.6">
+      <p style="margin:0;font-weight:500;color:#787774">Flying Inc.</p>
+      <p style="margin:4px 0 0">大阪府大阪市中央区難波3-2-18 1F</p>
+      <p style="margin:2px 0 0">JP: +81 090-2254-1865 | KR: +82 070-8287-1455</p>
+      <p style="margin:6px 0 0;color:#c0c0be">© 2026 Flying Inc.</p>
     </div>
   </div>
 </body>

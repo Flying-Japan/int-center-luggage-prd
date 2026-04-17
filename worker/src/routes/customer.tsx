@@ -221,7 +221,7 @@ customer.get("/customer", (c) => {
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="naver-site-verification" content="281f09e72fa3900dfffbd57ee5fd208a7872f818" />
-        <meta name="google-site-verification" content="_IzvQgZRjJtht2Gfv7iEaIOJXGvq574QDs-SXYQONYU" />
+        <meta name="google-site-verification" content="Ygtk-8CTLbfbcMnmVBQ8soPDyG0SoZnqYZCILaPuhmA" />
         <script async src={`https://www.googletagmanager.com/gtag/js?id=${LUGGAGE_GA4_MEASUREMENT_ID}`} />
         <script dangerouslySetInnerHTML={{__html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${LUGGAGE_GA4_MEASUREMENT_ID}');`}} />
         <title>{customerTitle[lang] || customerTitle.ko} — {t("brand_name", lang)}</title>
@@ -794,11 +794,12 @@ form { margin-top: 16px; }
                   </label>
 
                   <label class="field field-compact">
-                    <span class="field-label">{t("companion_count", lang)}</span>
+                    <span class="field-label">{t("companion_count", lang)} <span style="color:#dc2626">*</span></span>
                     <div class="companion-picker">
                       <select id="companion_count_select" class="control control-compact" required>
+                        <option value="" disabled selected>{lang === "en" ? "Select" : lang === "ja" ? "選択" : "선택"}</option>
                         {companionOptions.map((n) => (
-                          <option value={String(n)} selected={n === 1}>{n}</option>
+                          <option value={String(n)}>{n}</option>
                         ))}
                         <option value="custom">{companionCustomOption[lang] || companionCustomOption.ko}</option>
                       </select>
@@ -811,7 +812,7 @@ form { margin-top: 16px; }
                         placeholder={companionCustomPlaceholder[lang] || companionCustomPlaceholder.ko}
                         inputmode="numeric"
                       />
-                      <input id="companion_count" type="hidden" name="companion_count" value="1" />
+                      <input id="companion_count" type="hidden" name="companion_count" value="" />
                     </div>
                     <span class="field-hint">{companionHint[lang] || companionHint.ko}</span>
                   </label>
@@ -1129,6 +1130,7 @@ form { margin-top: 16px; }
   /* companion picker */
   function syncCompanionCount() {
     if (!companionSelectEl || !companionCustomEl || !companionHiddenEl) return true;
+    if (!companionSelectEl.value) { companionHiddenEl.value = ""; return false; }
     if (companionSelectEl.value === "custom") {
       companionCustomEl.classList.remove("is-hidden"); companionCustomEl.required = true;
       var min = Number(companionCustomEl.min||11), max = Number(companionCustomEl.max||99), v = Number(companionCustomEl.value||0);
@@ -1291,6 +1293,7 @@ form { margin-top: 16px; }
     if(!pickupHiddenEl||!pickupHiddenEl.value)m.push({el:pickupDateEl,msg:'${lang === "ja" ? "受取予定日時" : lang === "en" ? "Pickup date & time" : "수령 예정 일시"}'});
     if(iEl&&!iEl.files.length)m.push({el:iEl,msg:'${lang === "ja" ? "身分証写真" : lang === "en" ? "ID Photo" : "신분증 사진"}'});
     if(lEl&&!lEl.files.length)m.push({el:lEl,msg:'${lang === "ja" ? "荷物写真" : lang === "en" ? "Luggage Photo" : "짐 사진"}'});
+    if(!companionHiddenEl||!companionHiddenEl.value||companionHiddenEl.value==="0")m.push({el:companionSelectEl,msg:'${lang === "ja" ? "同行人数" : lang === "en" ? "Number of people" : "동행 인원"}'});
     if(cEl&&!cEl.checked)m.push({el:cEl,msg:'${lang === "ja" ? "同意" : lang === "en" ? "Consent" : "유의사항 동의"}'});
     return m;
   }
@@ -1360,7 +1363,7 @@ form { margin-top: 16px; }
       return;
     }
     var compValid = syncCompanionCount();
-    if (!compValid && companionCustomEl) { companionCustomEl.focus(); return; }
+    if (!compValid) { (companionSelectEl.value==="custom"?companionCustomEl:companionSelectEl).focus(); return; }
     maybeWarnLatePickup(false);
     isSubmitting = true;
     setSubmitBusy(true);
@@ -1416,7 +1419,8 @@ customer.post("/customer/submit", async (c) => {
   const email = String(body.email || "").trim();
   const rawPayment = String(body.payment_method || "").trim().toUpperCase();
   const paymentMethod = ["CASH", "PAY_QR"].includes(rawPayment) ? rawPayment : "CASH";
-  const companionCount = parseInt(String(body.companion_count || "0"), 10) || 0;
+  const companionCount = parseInt(String(body.companion_count || "0"), 10);
+  if (!companionCount || companionCount < 1) return redirect(t("required", lang) + ": " + t("companion_count", lang));
   const suitcaseQty = Math.min(99, parseInt(String(body.suitcase_qty || "0"), 10) || 0);
   const backpackQty = Math.min(99, parseInt(String(body.backpack_qty || "0"), 10) || 0);
   const expectedPickupAt = String(body.expected_pickup_at || "").trim();
@@ -1901,14 +1905,8 @@ a { color: inherit; text-decoration: none; }
             const title = lines[0] || "";
             const body = lines.slice(1).join("\n");
             return (
-              <div class="card" style="text-align:center;padding:16px 20px;display:grid;gap:8px">
-                <p style="font-size:20px;font-weight:800;color:var(--text);margin:0;letter-spacing:-0.02em" dangerouslySetInnerHTML={{__html: title }} />
-                <p class="secondary-msg" style="margin:0;font-size:13px;line-height:1.6" dangerouslySetInnerHTML={{__html: body
-                  .replace(/\n/g, "<br/>")
-                  .replace(/(최대 17% 할인!|up to 17% off|最大17%割引)/g, '<strong style="color:var(--primary)">$1</strong>')
-                  .replace(/(플라잉 화이트패스|Flying White Pass|フライングホワイトパス)/g, '<strong>$1</strong>')
-                }} />
-                <img src="/static/flying-pass-white.jpg" alt="Flying Pass White + EDION Coupon" style="width:100%;max-width:260px;margin:2px auto 0;display:block" />
+              <div class="card" style="text-align:center;padding:0;overflow:hidden;border-radius:15px">
+                <img src="/static/flying-pass-banner.jpg?v=2" alt="Flying Pass" style="width:100%;display:block" />
               </div>
             );
           })()}
@@ -1926,22 +1924,22 @@ a { color: inherit; text-decoration: none; }
               ja: "センターですぐレンタルできるサービス",
             };
             const rentalItems = [
-              { emoji: "🎮", ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: RENTAL_PROMO_LINKS.usj.finish },
-              { emoji: "🪄", ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: RENTAL_PROMO_LINKS.usj.finish },
-              { emoji: "💇", ko: "다이슨 에어랩", en: "Dyson Airwrap", ja: "ダイソン エアラップ", url: RENTAL_PROMO_LINKS.dyson.finish },
-              { emoji: "✨", ko: "다이슨 고데기", en: "Dyson Airstraight", ja: "ダイソン ストレートナー", url: RENTAL_PROMO_LINKS.dyson.finish },
-              { emoji: "👶", ko: "유모차 대여", en: "Stroller Rental", ja: "ベビーカーレンタル", url: RENTAL_PROMO_LINKS.stroller.finish },
-              { emoji: "🎫", ko: "플라잉패스 먹방패스", en: "Flying Food Pass", ja: "フライングフードパス", url: RENTAL_PROMO_LINKS.usj.finish },
+              { img: "/static/rental-card-13.png?v=2", url: RENTAL_PROMO_LINKS.usj.finish },
+              { img: "/static/rental-card-14.png?v=2", url: RENTAL_PROMO_LINKS.usj.finish },
+              { img: "/static/rental-card-15.png?v=2", url: RENTAL_PROMO_LINKS.stroller.finish },
+              { img: "/static/rental-card-16.png?v=2", url: RENTAL_PROMO_LINKS.dyson.finish },
+              { img: "/static/rental-card-17.png?v=2", url: RENTAL_PROMO_LINKS.dyson.finish },
+              { img: "/static/rental-card-18.png?v=2", url: RENTAL_PROMO_LINKS.stroller.finish },
+              { img: "/static/rental-card-19.png?v=2", url: RENTAL_PROMO_LINKS.stroller.finish },
             ];
             return (
               <div class="card" style="padding:20px;background:linear-gradient(135deg,rgba(234,242,255,0.9) 0%,rgba(255,255,255,0.95) 50%,rgba(234,242,255,0.9) 100%);border:1px solid rgba(47,128,248,0.15)">
                 <h3 style="text-align:center;font-size:17px;font-weight:800;margin:0 0 4px;color:var(--text)">{rentalTitle[lang] || rentalTitle.ko}</h3>
                 <p style="text-align:center;font-size:12px;color:var(--primary);margin:0 0 16px;font-weight:500">✨ {rentalSub[lang] || rentalSub.ko} ✨</p>
-                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
                   {rentalItems.map(item => (
-                    <a href={item.url} target="_blank" rel="noopener" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:var(--radius-md);border:1px solid var(--line);text-decoration:none;color:var(--text);transition:border-color .2s,box-shadow .2s;background:var(--surface)">
-                      <span style="font-size:28px">{item.emoji}</span>
-                      <span style="font-size:12px;font-weight:600;text-align:center;line-height:1.3">{lang === "en" ? item.en : lang === "ja" ? item.ja : item.ko}</span>
+                    <a href={item.url} target="_blank" rel="noopener" style="display:block;border-radius:16px;overflow:hidden;transition:transform .2s">
+                      <img src={item.img} alt="" style="width:100%;height:auto;display:block" loading="lazy" />
                     </a>
                   ))}
                 </div>

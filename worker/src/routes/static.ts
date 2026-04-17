@@ -102,6 +102,19 @@ staticRoutes.get("/static/rental-banner-stroller-small.jpg", async (c) => {
   return serveR2Image(c, "static/rental-banner-stroller-small.jpg", "image/jpeg");
 });
 
+// Rental product card images (Figma exports)
+for (const id of [11, 13, 14, 15, 16, 17, 18, 19, 20]) {
+  staticRoutes.get(`/static/rental-card-${id}.png`, async (c) => {
+    return serveR2Image(c, `static/rental-card-${id}.png`, "image/png");
+  });
+}
+staticRoutes.get("/static/rental-grid.png", async (c) => {
+  return serveR2Image(c, "static/rental-grid.png", "image/png");
+});
+staticRoutes.get("/static/flying-pass-banner.jpg", async (c) => {
+  return serveR2Image(c, "static/flying-pass-banner.jpg", "image/jpeg");
+});
+
 // Embedded CSS — ported from original FastAPI app.css
 const CSS_CONTENT = `
 /* ============================================================

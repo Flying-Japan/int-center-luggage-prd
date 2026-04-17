@@ -15,26 +15,7 @@ import { todayBusinessDate } from "./storage";
 export async function buildOrderId(db: D1Database, nowUtc?: Date): Promise<string> {
   const businessDate = nowUtc ? formatBusinessDate(nowUtc) : todayBusinessDate();
 
-  // Check for a cancelled order to reuse its number
-  const cancelled = await db
-    .prepare(
-      `SELECT order_id FROM luggage_orders
-       WHERE order_id LIKE ? AND status = 'CANCELLED'
-       ORDER BY order_id ASC LIMIT 1`
-    )
-    .bind(`${businessDate}-%`)
-    .first<{ order_id: string }>();
-
-  if (cancelled) {
-    // Delete cancelled order and reuse its ID
-    await db.prepare("DELETE FROM luggage_orders WHERE order_id = ? AND status = 'CANCELLED'")
-      .bind(cancelled.order_id).run();
-    await db.prepare("DELETE FROM luggage_audit_logs WHERE order_id = ?")
-      .bind(cancelled.order_id).run();
-    return cancelled.order_id;
-  }
-
-  // No cancelled orders to reuse — increment counter
+  // Always increment — never reuse cancelled order IDs
   const row = await db
     .prepare(
       `INSERT INTO luggage_daily_counters (business_date, last_seq)
@@ -50,26 +31,23 @@ export async function buildOrderId(db: D1Database, nowUtc?: Date): Promise<strin
 }
 
 /**
- * Generate next tag_no for today using D1 luggage_daily_tag_counters.
+ * Generate next tag_no for today.
+ * Always based on the actual max tag_no in orders (not a blind counter).
+ * This way, if staff manually edits a tag number, the next one follows correctly.
  */
 export async function buildTagNo(db: D1Database, nowUtc?: Date): Promise<string> {
   const businessDate = nowUtc ? formatBusinessDate(nowUtc) : todayBusinessDate();
 
-  // Find lowest unused tag number (fills gaps from cancelled orders)
-  const used = await db
+  // Find the actual max tag_no currently in orders for today
+  const maxTag = await db
     .prepare(
-      `SELECT CAST(tag_no AS INTEGER) as num FROM luggage_orders
-       WHERE order_id LIKE ? AND status != 'CANCELLED' AND tag_no IS NOT NULL
-       ORDER BY num ASC`
+      `SELECT MAX(CAST(tag_no AS INTEGER)) as max_tag FROM luggage_orders
+       WHERE order_id LIKE ? AND tag_no IS NOT NULL`
     )
     .bind(`${businessDate}-%`)
-    .all<{ num: number }>();
+    .first<{ max_tag: number | null }>();
 
-  const usedSet = new Set(used.results.map((r) => r.num));
-  let next = 1;
-  while (usedSet.has(next)) next++;
-
-  return String(next);
+  return String((maxTag?.max_tag ?? 0) + 1);
 }
 
 /** Convert a UTC Date to JST business date string (YYYYMMDD). */
