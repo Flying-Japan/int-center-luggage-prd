@@ -3,7 +3,7 @@
 import { RENTAL_PROMO_LINKS } from "./rentalLinks";
 
 const BREVO_API = "https://api.brevo.com/v3/smtp/email";
-const STATIC_ASSET_VERSION = "20260401-2";
+const STATIC_ASSET_VERSION = "20260417-1";
 
 interface OrderConfirmationData {
   orderId: string;
@@ -54,7 +54,6 @@ export async function sendOrderConfirmation(
           <td style="padding:${index < 3 ? "4px 6px 10px 0" : "10px 6px 0 0"};text-align:center;width:33.33%;vertical-align:top">
             <a href="${item.url}" style="display:block;border:1px solid #dbe4f2;border-radius:10px;overflow:hidden;background:#f8fbff;text-decoration:none">
               <img src="${item.img}" alt="${label}" width="100%" style="display:block;width:100%;height:auto;border:0" />
-              <span style="display:block;padding:7px 6px 8px;font-size:10px;line-height:1.3;color:#191f28;font-weight:700">${label}</span>
             </a>
           </td>
           ${isRowEnd ? `${"<td style=\"width:33.33%\"></td>".repeat(missingCells)}</tr>` : ""}`;
@@ -144,7 +143,7 @@ export async function sendOrderConfirmation(
     <!-- Flying Pass White benefit -->
     <div style="padding:0 24px 24px">
       <img
-        src="https://luggage.flyingjp.com/static/flying-pass-white.jpg?v=20260401-2"
+        src="https://luggage.flyingjp.com/static/flying-pass-white.jpg?v=${STATIC_ASSET_VERSION}"
         alt="Flying Pass White + EDION Coupon"
         style="display:block;width:100%;max-width:472px;height:auto;margin:0 auto;border:1px solid #e5edf9;border-radius:16px;background:#fff"
       />

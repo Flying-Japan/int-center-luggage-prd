@@ -1929,12 +1929,35 @@ a { color: inherit; text-decoration: none; }
                 <p style="margin:4px 0 0;font-size:11px;font-weight:600;color:#166534;line-height:1.6">{lang === "ja" ? "✅ 現金 / PayPay / 楽天Pay" : lang === "en" ? "✅ Cash / KakaoPay / NaverPay" : "✅ 현금 / 카카오페이 / 네이버페이"}<br/>{lang === "ja" ? "d払い / auPay / メルペイ" : lang === "en" ? "TossPay / PayPay" : "토스페이 / PayPay"}</p>
               </div>
               {order.payment_method === "PAY_QR" && (
-                <div style="margin-top:8px;text-align:center">
-                  <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:var(--text)">{lang === "ja" ? "📱 QR決済方法" : lang === "en" ? "📱 QR Payment Guide" : "📱 QR결제 방법 안내"}</p>
-                  <p style="margin:0 0 6px;font-size:11px;color:var(--muted)">{lang === "ja" ? "タップして拡大表示" : lang === "en" ? "Tap to enlarge" : "클릭해서 확대해서 보세요"}</p>
-                  <img src="/static/qr-payment-guide.jpg" alt="QR Payment Guide" style="width:100%;max-width:480px;border-radius:8px;display:block;margin:0 auto;cursor:pointer" onclick="document.getElementById('qr-overlay').style.display='flex'" />
-                  <div id="qr-overlay" onclick="this.style.display='none'" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;cursor:pointer">
-                    <img src="/static/qr-payment-guide.jpg" alt="QR Payment Guide" style="max-width:95vw;max-height:95vh;border-radius:8px" />
+                <div style="margin-top:8px">
+                  <p style="margin:0 0 10px;font-size:13px;font-weight:700;color:var(--text);text-align:center">
+                    {lang === "ja" ? "📱 ご利用可能なQR決済" : lang === "en" ? "📱 Accepted QR Payments" : "📱 QR결제 수단 안내"}
+                  </p>
+                  <p style="margin:0 0 6px;font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em">
+                    {lang === "ja" ? "韓国系" : lang === "en" ? "Korean" : "한국 간편결제"}
+                  </p>
+                  <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">
+                    {[
+                      { label: "카카오페이", bg: "#FEE500", color: "#3C1E1E" },
+                      { label: "네이버페이", bg: "#03C75A", color: "#fff" },
+                      { label: "토스페이",   bg: "#0064FF", color: "#fff" },
+                    ].map(({ label, bg, color }) => (
+                      <span style={`display:inline-flex;align-items:center;padding:6px 12px;border-radius:20px;background:${bg};color:${color};font-size:12px;font-weight:700;letter-spacing:-0.01em;white-space:nowrap`}>{label}</span>
+                    ))}
+                  </div>
+                  <p style="margin:0 0 6px;font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em">
+                    {lang === "ja" ? "日本系" : lang === "en" ? "Japanese" : "일본 간편결제"}
+                  </p>
+                  <div style="display:flex;gap:7px;flex-wrap:wrap">
+                    {[
+                      { label: "PayPay",   bg: "#FF0033", color: "#fff" },
+                      { label: "楽天Pay",  bg: "#BF0000", color: "#fff" },
+                      { label: "d払い",    bg: "#B40068", color: "#fff" },
+                      { label: "auPay",    bg: "#EA5504", color: "#fff" },
+                      { label: "メルペイ", bg: "#1DAEEC", color: "#fff" },
+                    ].map(({ label, bg, color }) => (
+                      <span style={`display:inline-flex;align-items:center;padding:6px 12px;border-radius:20px;background:${bg};color:${color};font-size:12px;font-weight:700;letter-spacing:-0.01em;white-space:nowrap`}>{label}</span>
+                    ))}
                   </div>
                 </div>
               )}
