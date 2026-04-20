@@ -111,6 +111,10 @@ admin.get("/staff/admin/sales", async (c) => {
   for (const r of dailyRows.results) {
     sheetByDate.set(r.sale_date, r);
   }
+  const missingSheetDates = actualLuggageRows.results
+    .map((row) => row.sale_date)
+    .filter((saleDate) => !sheetByDate.has(saleDate))
+    .sort((a, b) => b.localeCompare(a));
 
   interface MergedRow { date: string; dateJP: string; orders: number; suitcases: number; backpacks: number; cash: number; qr: number; luggage: number; rental: number; combined: number; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
   // Build rows from all data sources
@@ -375,6 +379,19 @@ admin.get("/staff/admin/sales", async (c) => {
         </div>
           );
         })()}
+
+        {missingSheetDates.length > 0 && (
+          <section class="card" style="border-left:4px solid #f59e0b">
+            <h3 class="card-title" style="color:#92400e">Daily 시트 매출 백필 필요</h3>
+            <p style="margin-bottom:8px;font-size:13px;color:#78350f">
+              주문 데이터는 존재하지만 <code>luggage_daily_sales</code>가 비어 있는 날짜가 {missingSheetDates.length}일 있습니다.
+              현재 화면은 주문 테이블로 대체 집계 중이지만, 시트 기준 데이터가 필요하면 백필을 실행하세요.
+            </p>
+            <p style="font-size:12px;color:#92400e">
+              누락 날짜: {missingSheetDates.slice(0, 10).join(", ")}{missingSheetDates.length > 10 ? " ..." : ""}
+            </p>
+          </section>
+        )}
 
         <section class="card" style="padding:16px">
           <h3 class="card-title">일별 매출 추이</h3>

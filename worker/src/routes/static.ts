@@ -9,7 +9,10 @@ async function serveR2Image(c: Context<AppType>, key: string, contentType: strin
   return new Response(obj.body, {
     headers: {
       "Content-Type": contentType,
-      "Cache-Control": "public, max-age=86400",
+      // no-transform keeps Cloudflare Mirage / Polish from downscaling
+      // the image for "slow" connections. Without it, hi-DPI banners
+      // arrive at ~340px wide and look blurry on retina displays.
+      "Cache-Control": "public, max-age=86400, no-transform",
     },
   });
 }

@@ -7,12 +7,14 @@ import staffOrders from "./routes/staffOrders";
 import opsRoutes from "./routes/operations";
 import adminRoutes from "./routes/admin";
 import staticRoutes from "./routes/static";
+import internalApi from "./routes/internalApi";
 import { securityHeaders, errorHandler, notFoundHandler, createRateLimiter } from "./middleware/security";
 import { staffAuth, getStaff } from "./middleware/auth";
 import { runRetentionCleanup } from "./services/retention";
 import { runMidnightRollover } from "./services/midnightRollover";
 import { syncDailySales } from "./services/dailySalesSync";
 import { syncRentalRevenue } from "./services/rentalRevenueSync";
+import { runSyncJobs } from "./services/syncJobs";
 import { tagColorClass, TAG_COLOR_RANGES } from "./lib/tagColors";
 import { getDashboardSyncToken } from "./lib/dashboardSync";
 import { StaffTopbar, NewOrderAlert } from "./lib/components";
@@ -41,6 +43,9 @@ app.get("/", (c) => c.redirect("/customer"));
 
 // /admin shortcut → staff dashboard
 app.get("/admin", (c) => c.redirect("/staff/dashboard"));
+
+// Internal reviewer <-> luggage integration routes
+app.route("/", internalApi);
 
 // Static asset routes (favicon, etc.)
 app.route("/", staticRoutes);
@@ -936,6 +941,19 @@ export default {
         if (event.cron === "0 15 * * *") {
           const rolloverResult = await runMidnightRollover(env.DB);
           console.log(`Midnight rollover complete: ${JSON.stringify(rolloverResult)}`);
+          return;
+        }
+
+        if (event.cron === "*/5 * * * *") {
+          // Feature-flagged until the reviewer-side enqueuer ships. Without
+          // this gate the consumer runs on an empty queue every 5 minutes and
+          // any missing INTERNAL_API_SECRET wiring surfaces as noisy 503s.
+          if (env.SYNC_JOBS_ENABLED !== "true") {
+            console.log("Sync job consumer skipped: SYNC_JOBS_ENABLED is not 'true'");
+            return;
+          }
+          const syncJobResult = await runSyncJobs(env);
+          console.log(`Sync job consumer complete: ${JSON.stringify(syncJobResult)}`);
           return;
         }
 

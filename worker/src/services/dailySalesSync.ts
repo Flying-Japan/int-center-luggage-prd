@@ -20,6 +20,14 @@ function parseYen(raw: string): number {
   return isNaN(n) ? 0 : n;
 }
 
+function getCurrentMonthCutoffDate(now = new Date()): { cutoffDate: string; month: number; year: number } {
+  const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const year = jstNow.getUTCFullYear();
+  const month = jstNow.getUTCMonth();
+  const cutoffDate = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  return { cutoffDate, month, year };
+}
+
 /** Sync a single month's sheet data into D1. Returns number of rows synced. */
 async function syncMonth(
   db: D1Database,
@@ -96,16 +104,15 @@ async function syncMonth(
   return stmts.length;
 }
 
-/** Incremental sync — last 3 days of current month (for cron) */
+/** Incremental sync — resync the full current month daily so missing rows self-heal. */
 export async function syncDailySales(
   db: D1Database,
   credentials: string
 ): Promise<{ synced: number }> {
   if (!credentials) return { synced: 0 };
 
-  const now = new Date(Date.now() + 9 * 60 * 60 * 1000); // JST
-  const cutoff = new Date(now.getTime() - 3 * 86400000).toISOString().slice(0, 10);
-  const synced = await syncMonth(db, credentials, now.getUTCFullYear(), now.getUTCMonth(), cutoff);
+  const { cutoffDate, month, year } = getCurrentMonthCutoffDate();
+  const synced = await syncMonth(db, credentials, year, month, cutoffDate);
   return { synced };
 }
 

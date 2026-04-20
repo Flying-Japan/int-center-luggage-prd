@@ -9,6 +9,7 @@ import { formatDateJST } from "../services/storage";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { fetchStaffNamesByIds, fetchStaffProfilesByIds } from "../lib/staffProfiles";
 import { createSupabaseAdmin } from "../lib/supabase";
+import { hasMissingFinalClose, shouldIncludeClosingInStats } from "../services/cashClosing";
 
 const ops = new Hono<AppType>();
 ops.use("/*", staffAuth);
@@ -75,6 +76,39 @@ function formatDenominationLabel(amount: number): string {
 
 function uniqueStaffIds(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.map((value) => `${value ?? ""}`.trim()).filter(Boolean))];
+}
+
+const EXPERIENCE_VISITOR_TYPE_LABELS: Record<string, string> = {
+  BLOGGER: "블로거",
+  INFLUENCER: "인플루언서",
+  OTHER: "기타",
+  YOUTUBER: "유튜버",
+};
+
+const EXPERIENCE_BENEFIT_TYPE_LABELS: Record<string, string> = {
+  CASH: "지원금",
+  GIFT_CARD: "상품권",
+  OTHER: "기타",
+  PRODUCT: "물품",
+  REVIEWER_EXPERIENCE: "체험단 프로젝트",
+};
+
+function formatExperienceSchedule(date: string | null | undefined, time: string | null | undefined): string {
+  const normalizedDate = (date || "-").trim();
+  const normalizedTime = (time || "").trim();
+  return normalizedTime ? `${normalizedDate} ${normalizedTime}` : normalizedDate;
+}
+
+function getExperienceBenefitLabel(
+  benefitType: string | null | undefined,
+  benefitLabel: string | null | undefined,
+): string {
+  const customLabel = (benefitLabel || "").trim();
+  if (customLabel) {
+    return customLabel;
+  }
+
+  return EXPERIENCE_BENEFIT_TYPE_LABELS[(benefitType || "").trim()] || "-";
 }
 
 type AutoSalesSummary = {
@@ -197,31 +231,45 @@ async function resolveAutoSalesSummaryForDate(db: D1Database, businessDate: stri
 
 // GET /staff/cash-closing — Cash closing list & form
 ops.get("/staff/cash-closing", async (c) => {
-  // Show the latest closing per date with closing count to detect multi-closing dates
+  // Prefer FINAL_CLOSE for the date summary when it exists. MORNING_HANDOVER is
+  // operational carryover context, not the authoritative day-close record.
   const closings = await c.env.DB.prepare(
-    `SELECT c.*, latest.closing_count FROM luggage_cash_closings c
+    `SELECT c.*, latest.closing_count, latest.final_count, latest.morning_count FROM luggage_cash_closings c
      INNER JOIN (
-       SELECT business_date, MAX(closing_id) as max_id, COUNT(*) as closing_count
+       SELECT
+         business_date,
+         COALESCE(
+           MAX(CASE WHEN closing_type = 'FINAL_CLOSE' THEN closing_id END),
+           MAX(closing_id)
+         ) as display_id,
+         COUNT(*) as closing_count,
+         SUM(CASE WHEN closing_type = 'FINAL_CLOSE' THEN 1 ELSE 0 END) as final_count,
+         SUM(CASE WHEN closing_type = 'MORNING_HANDOVER' THEN 1 ELSE 0 END) as morning_count
        FROM luggage_cash_closings
        GROUP BY business_date
-     ) latest ON c.closing_id = latest.max_id
+     ) latest ON c.closing_id = latest.display_id
      ORDER BY c.business_date DESC LIMIT 400`
   ).all<Record<string, unknown>>();
   const staffNameMap = await fetchStaffNamesByIds(
     c.env,
     closings.results.map((closing) => closing.staff_id as string | null | undefined),
   );
-  const closingRows: Array<Record<string, unknown> & { staff_name: string | null; has_multi: boolean }> = closings.results.map((closing) => ({
+  const closingRows: Array<Record<string, unknown> & { staff_name: string | null; has_multi: boolean; missing_final: boolean }> = closings.results.map((closing) => ({
     ...closing,
     staff_name: (closing.staff_id as string | null)
       ? staffNameMap.get(closing.staff_id as string) || (closing.owner_name as string) || null
       : (closing.owner_name as string) || null,
     has_multi: ((closing.closing_count as number) || 0) > 1,
+    missing_final: hasMissingFinalClose({
+      finalCount: closing.final_count as number | null | undefined,
+      morningCount: closing.morning_count as number | null | undefined,
+    }),
   }));
   const autoSalesByDate = await resolveAutoSalesSummariesByDate(
     c.env.DB,
     closingRows.map((cl) => String(cl.business_date || ""))
   );
+  const missingFinalRows = closingRows.filter((closing) => closing.missing_final);
 
   const staff = getStaff(c);
   return c.html(
@@ -239,9 +287,12 @@ ops.get("/staff/cash-closing", async (c) => {
               <label class="field">
                 <span class="field-label">마감 유형</span>
                 <select class="control" name="closing_type" style="max-width:180px">
-                  <option value="MORNING_HANDOVER">오전 인수인계</option>
                   <option value="FINAL_CLOSE">최종 마감</option>
+                  <option value="MORNING_HANDOVER">오전 인수인계</option>
                 </select>
+                <small style="color:#666;font-size:11px;margin-top:4px;display:block">
+                  오전 인수인계는 다음날 이월 현금 확인용입니다. 일매출 확인과 월 정산 합계는 <strong>최종 마감</strong> 기준으로 보세요.
+                </small>
               </label>
 
               <div class="cash-denom-panel">
@@ -298,6 +349,42 @@ ops.get("/staff/cash-closing", async (c) => {
             </form>
           </section>
 
+          {missingFinalRows.length > 0 && (
+            <section class="card" style="border-left:4px solid #dc2626">
+              <h3 class="card-title" style="color:#991b1b">최종 마감 누락 확인 필요</h3>
+              <p style="margin-bottom:10px;font-size:13px;color:#7f1d1d">
+                아래 날짜는 오전 인수인계만 있고 최종 마감이 없습니다. 오전 인수인계는 매출 합산용이 아니라서 월 정산 차이가 커질 수 있습니다.
+              </p>
+              <div class="table-wrap" style="overflow-x:auto">
+                <table style="font-size:12px;border-collapse:collapse;width:100%;min-width:520px">
+                  <thead>
+                    <tr style="background:#fef2f2;border-bottom:1px solid #fecaca">
+                      <th style="padding:6px;text-align:left">날짜</th>
+                      <th style="padding:6px;text-align:right">오전 인수인계 현금</th>
+                      <th style="padding:6px;text-align:right">자동매출</th>
+                      <th style="padding:6px;text-align:left">작성자</th>
+                      <th style="padding:6px"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {missingFinalRows.slice(0, 12).map((cl) => {
+                      const autoAmount = autoSalesByDate.get(String(cl.business_date || ""))?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
+                      return (
+                        <tr style="border-bottom:1px solid #fee2e2">
+                          <td style="padding:6px;font-weight:600">{cl.business_date as string}</td>
+                          <td style="padding:6px;text-align:right">¥{((cl.total_amount as number) || 0).toLocaleString()}</td>
+                          <td style="padding:6px;text-align:right;color:#2563eb">¥{autoAmount.toLocaleString()}</td>
+                          <td style="padding:6px">{cl.staff_name || "-"}</td>
+                          <td style="padding:6px;text-align:right"><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:var(--primary)">상세</a></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
           <section class="card" style="padding:12px">
             <h3 class="card-title" style="margin-bottom:8px">최근 마감</h3>
             <div class="table-wrap" style="overflow-x:auto">
@@ -333,9 +420,18 @@ ops.get("/staff/cash-closing", async (c) => {
                     const dateDisplay = formatClosingDate(businessDate);
                     const autoAmount = autoSalesByDate.get(businessDate)?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
                     const diff = (((cl.total_amount as number) || 0) - STARTING_FLOAT + ((cl.paypay_amount as number) || 0)) - autoAmount;
+                    const missingFinal = Boolean((cl as Record<string, unknown> & { missing_final: boolean }).missing_final);
+                    const closingType = cl.closing_type as string;
                     return (
                       <tr style="border-bottom:1px solid #e2e8f0">
-                        <td style={`padding:2px 6px;white-space:nowrap;${dateDisplay.style}`} title={dateDisplay.title}><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:inherit;font-weight:600">{dateDisplay.label}{dateDisplay.suffix}</a>{(cl as Record<string, unknown> & { has_multi: boolean }).has_multi && <span style="margin-left:4px;font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:3px;vertical-align:middle">+1</span>}</td>
+                        <td style={`padding:2px 6px;white-space:nowrap;${dateDisplay.style}`} title={dateDisplay.title}>
+                          <a href={`/staff/cash-closing/${cl.closing_id}`} style="color:inherit;font-weight:600">{dateDisplay.label}{dateDisplay.suffix}</a>
+                          <span style={`margin-left:4px;font-size:9px;padding:1px 4px;border-radius:3px;vertical-align:middle;${closingType === "FINAL_CLOSE" ? "background:#dbeafe;color:#1d4ed8" : "background:#fef3c7;color:#92400e"}`}>
+                            {CLOSING_TYPE_LABELS[closingType] || closingType}
+                          </span>
+                          {missingFinal && <span style="margin-left:4px;font-size:9px;background:#fee2e2;color:#b91c1c;padding:1px 4px;border-radius:3px;vertical-align:middle">최종 누락</span>}
+                          {(cl as Record<string, unknown> & { has_multi: boolean }).has_multi && <span style="margin-left:4px;font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:3px;vertical-align:middle">+1</span>}
+                        </td>
                         <td style="padding:2px 4px;text-align:right">{((cl.count_10000 as number) || 0).toLocaleString()}</td>
                         <td style="padding:2px 4px;text-align:right">{((cl.count_5000 as number) || 0).toLocaleString()}</td>
                         <td style="padding:2px 4px;text-align:right">{((cl.count_2000 as number) || 0).toLocaleString()}</td>
@@ -368,20 +464,23 @@ ops.get("/staff/cash-closing", async (c) => {
                     const auto = autoSalesByDate.get(cl.business_date as string)?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
                     return {
                       date: cl.business_date as string,
+                      closingType: cl.closing_type as string,
                       total: (cl.total_amount as number) || 0,
                       paypay: (cl.paypay_amount as number) || 0,
                       auto,
-                      diff: ((cl.total_amount as number) || 0) + ((cl.paypay_amount as number) || 0) - auto,
+                      diff: ((((cl.total_amount as number) || 0) - STARTING_FLOAT) + ((cl.paypay_amount as number) || 0)) - auto,
                       f4: (cl.floor_4f_count as number) || 0,
                       f8: (cl.floor_8f_count as number) || 0,
                     };
                   });
-                  const pastRows = rows.filter(r => r.date !== todayJST);
-                  const n = rows.length;
-                  const sum = (fn: (r: typeof rows[0]) => number) => rows.reduce((s, r) => s + fn(r), 0);
+                  const statsRows = rows.filter((row) => shouldIncludeClosingInStats({ closingType: row.closingType }));
+                  const pastRows = statsRows.filter(r => r.date !== todayJST);
+                  const n = statsRows.length;
+                  if (n === 0) return null;
+                  const sum = (fn: (r: typeof statsRows[0]) => number) => statsRows.reduce((s, r) => s + fn(r), 0);
                   const avg = (fn: (r: typeof rows[0]) => number) => Math.round(sum(fn) / n);
                   const mn = (fn: (r: typeof rows[0]) => number) => pastRows.length > 0 ? Math.min(...pastRows.map(fn)) : 0;
-                  const mx = (fn: (r: typeof rows[0]) => number) => Math.max(...rows.map(fn));
+                  const mx = (fn: (r: typeof rows[0]) => number) => Math.max(...statsRows.map(fn));
                   const st = "padding:3px 6px;text-align:right;font-size:10px;font-weight:600";
                   const lb = "padding:3px 6px;font-size:10px;font-weight:700";
                   return (
@@ -1426,20 +1525,31 @@ ops.get("/staff/experience", async (c) => {
                   <input class="control" type="date" name="scheduled_date" required />
                 </label>
                 <label class="field">
+                  <span class="field-label">방문 예정 시간</span>
+                  <input class="control" type="text" name="scheduled_time" placeholder="예: 14:00" />
+                </label>
+              </div>
+              <div class="grid2">
+                <label class="field">
                   <span class="field-label">혜택 유형</span>
                   <select class="control" name="benefit_type">
                     <option value="">선택</option>
                     <option value="GIFT_CARD">상품권</option>
                     <option value="CASH">지원금</option>
                     <option value="PRODUCT">물품</option>
+                    <option value="REVIEWER_EXPERIENCE">체험단 프로젝트</option>
                     <option value="OTHER">기타</option>
                   </select>
+                </label>
+                <label class="field">
+                  <span class="field-label">혜택 금액/내용</span>
+                  <input class="control" type="text" name="benefit_amount" placeholder="예: ¥3,000" />
                 </label>
               </div>
               <div class="grid2">
                 <label class="field">
-                  <span class="field-label">혜택 금액/내용</span>
-                  <input class="control" type="text" name="benefit_amount" placeholder="예: ¥3,000" />
+                  <span class="field-label">혜택 라벨 (프로젝트명 등)</span>
+                  <input class="control" type="text" name="benefit_label" placeholder="예: 타코야끼 쿠폰 체험단" maxlength={200} />
                 </label>
                 <label class="field">
                   <span class="field-label">메모</span>
@@ -1469,13 +1579,20 @@ ops.get("/staff/experience", async (c) => {
                     const st = v.status as string;
                     const stColor = st === "SCHEDULED" ? "#64748b" : st === "VISITED" ? "#2563eb" : st === "RECEIVED" ? "#166534" : "#dc2626";
                     const stLabel = st === "SCHEDULED" ? "예정" : st === "VISITED" ? "방문" : st === "RECEIVED" ? "수령완료" : "취소";
-                    const vtLabel = (v.visitor_type as string) === "BLOGGER" ? "블로거" : (v.visitor_type as string) === "INFLUENCER" ? "인플루언서" : (v.visitor_type as string) === "YOUTUBER" ? "유튜버" : "기타";
-                    const btLabel = (v.benefit_type as string) === "GIFT_CARD" ? "상품권" : (v.benefit_type as string) === "CASH" ? "지원금" : (v.benefit_type as string) === "PRODUCT" ? "물품" : (v.benefit_type as string) === "OTHER" ? "기타" : "-";
+                    const vtLabel = EXPERIENCE_VISITOR_TYPE_LABELS[(v.visitor_type as string) || ""] || "기타";
+                    const btLabel = getExperienceBenefitLabel(
+                      v.benefit_type as string | null | undefined,
+                      v.benefit_label as string | null | undefined,
+                    );
+                    const scheduleLabel = formatExperienceSchedule(
+                      v.scheduled_date as string | null | undefined,
+                      v.scheduled_time as string | null | undefined,
+                    );
                     return (
                       <tr style="border-bottom:1px solid #e2e8f0">
                         <td style="padding:3px 6px;font-weight:600">{v.visitor_name as string}</td>
                         <td style="padding:3px 6px">{vtLabel}</td>
-                        <td style="padding:3px 6px;white-space:nowrap">{v.scheduled_date as string}</td>
+                        <td style="padding:3px 6px;white-space:nowrap">{scheduleLabel}</td>
                         <td style="padding:3px 6px">{btLabel}</td>
                         <td style="padding:3px 6px">{(v.benefit_amount as string) || "-"}</td>
                         <td style="padding:3px 6px;text-align:center"><span style={`display:inline-block;padding:1px 8px;border-radius:9999px;font-size:10px;font-weight:600;color:white;background:${stColor}`}>{stLabel}</span></td>
@@ -1488,7 +1605,7 @@ ops.get("/staff/experience", async (c) => {
                             <div style="position:absolute;z-index:10;background:white;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px;min-width:220px;font-size:11px;color:#37352f;box-shadow:0 4px 12px rgba(0,0,0,0.1);margin-top:4px">
                               <p style="margin:2px 0"><strong>방문자:</strong> {v.visitor_name as string}</p>
                               <p style="margin:2px 0"><strong>유형:</strong> {vtLabel}</p>
-                              <p style="margin:2px 0"><strong>예정일:</strong> {v.scheduled_date as string}</p>
+                              <p style="margin:2px 0"><strong>예정일:</strong> {scheduleLabel}</p>
                               <p style="margin:2px 0"><strong>혜택:</strong> {btLabel} / {(v.benefit_amount as string) || "-"}</p>
                               <p style="margin:2px 0"><strong>상태:</strong> {stLabel}</p>
                               <p style="margin:2px 0"><strong>메모:</strong> {(v.note as string) || "-"}</p>
@@ -1841,13 +1958,18 @@ ops.post("/staff/handover/experience", async (c) => {
   const staff = getStaff(c);
 
   await c.env.DB.prepare(
-    `INSERT INTO luggage_experience_visits (visitor_name, visitor_type, scheduled_date, benefit_type, benefit_amount, note, created_by_staff_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO luggage_experience_visits (
+       visitor_name, visitor_type, scheduled_date, scheduled_time,
+       benefit_type, benefit_label, benefit_amount, note, created_by_staff_id
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     String(body.visitor_name || ""),
     String(body.visitor_type || "BLOGGER"),
     String(body.scheduled_date || ""),
+    String(body.scheduled_time || "") || null,
     String(body.benefit_type || "") || null,
+    String(body.benefit_label || "").slice(0, 200) || null,
     String(body.benefit_amount || "") || null,
     String(body.note || "") || null,
     staff.id
@@ -1925,18 +2047,28 @@ ops.get("/staff/handover/experience/:id/edit", async (c) => {
                   <input class="control" type="date" name="scheduled_date" value={visit.scheduled_date as string} required />
                 </label>
                 <label class="field">
-                  <span class="field-label">혜택 유형</span>
-                  <select class="control" name="benefit_type">
-                    {[["", "선택"], ["GIFT_CARD", "상품권"], ["CASH", "지원금"], ["PRODUCT", "물품"], ["OTHER", "기타"]].map(([val, label]) => (
-                      <option value={val} selected={val === (visit.benefit_type as string ?? "")}>{label}</option>
-                    ))}
-                  </select>
+                  <span class="field-label">방문 예정 시간</span>
+                  <input class="control" type="text" name="scheduled_time" value={(visit.scheduled_time as string) || ""} placeholder="예: 14:00" />
                 </label>
               </div>
               <div class="grid2">
                 <label class="field">
+                  <span class="field-label">혜택 유형</span>
+                  <select class="control" name="benefit_type">
+                    {[["", "선택"], ["GIFT_CARD", "상품권"], ["CASH", "지원금"], ["PRODUCT", "물품"], ["REVIEWER_EXPERIENCE", "체험단 프로젝트"], ["OTHER", "기타"]].map(([val, label]) => (
+                      <option value={val} selected={val === (visit.benefit_type as string ?? "")}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label class="field">
                   <span class="field-label">혜택 금액/내용</span>
                   <input class="control" type="text" name="benefit_amount" value={(visit.benefit_amount as string) || ""} placeholder="예: ¥3,000" />
+                </label>
+              </div>
+              <div class="grid2">
+                <label class="field">
+                  <span class="field-label">혜택 라벨 (프로젝트명 등)</span>
+                  <input class="control" type="text" name="benefit_label" value={(visit.benefit_label as string) || ""} placeholder="예: 타코야끼 쿠폰 체험단" maxlength={200} />
                 </label>
                 <label class="field">
                   <span class="field-label">메모</span>
@@ -1963,15 +2095,17 @@ ops.post("/staff/handover/experience/:id/update", async (c) => {
 
   await c.env.DB.prepare(
     `UPDATE luggage_experience_visits SET
-       visitor_name = ?, visitor_type = ?, scheduled_date = ?,
-       benefit_type = ?, benefit_amount = ?, note = ?,
+       visitor_name = ?, visitor_type = ?, scheduled_date = ?, scheduled_time = ?,
+       benefit_type = ?, benefit_label = ?, benefit_amount = ?, note = ?,
        updated_at = datetime('now')
      WHERE visit_id = ?`
   ).bind(
     String(body.visitor_name || ""),
     String(body.visitor_type || "BLOGGER"),
     String(body.scheduled_date || ""),
+    String(body.scheduled_time || "") || null,
     String(body.benefit_type || "") || null,
+    String(body.benefit_label || "").slice(0, 200) || null,
     String(body.benefit_amount || "") || null,
     String(body.note || "") || null,
     visitId
