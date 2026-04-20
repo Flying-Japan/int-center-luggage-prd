@@ -1,0 +1,12 @@
+# Local worker secrets — copy to .dev.vars and replace placeholders.
+# .dev.vars is gitignored; never commit production values.
+
+# HMAC secret for the /internal/* API surface. Generate with:
+#   openssl rand -hex 32
+# Must match the secret configured in the caller (reviewer side).
+INTERNAL_API_SECRET=replace-with-openssl-rand-hex-32-output
+
+# Feature flag for the */5 sync-jobs consumer cron. Leave unset (or set
+# to anything other than "true") until the reviewer-side enqueuer is
+# live so the cron skips on every tick.
+# SYNC_JOBS_ENABLED=true

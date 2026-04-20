@@ -9,6 +9,54 @@ const EXPERIENCE_STATUSES = new Set(["SCHEDULED", "VISITED", "RECEIVED", "CANCEL
 const EXPERIENCE_VISITOR_TYPES = new Set(["BLOGGER", "INFLUENCER", "YOUTUBER", "OTHER"]);
 const EXPERIENCE_BENEFIT_TYPES = new Set(["GIFT_CARD", "CASH", "PRODUCT", "OTHER", "REVIEWER_EXPERIENCE"]);
 
+// Stable response shape for callers. Prevents raw D1 columns from leaking
+// into the contract — future schema additions stay internal unless we
+// explicitly surface them here.
+type ExperienceVisitDto = {
+  externalId: string | null;
+  visitorName: string | null;
+  visitorType: string | null;
+  scheduledDate: string | null;
+  scheduledTime: string | null;
+  benefitType: string | null;
+  benefitLabel: string | null;
+  benefitAmount: string | null;
+  status: string | null;
+  note: string | null;
+  receivedBy: string | null;
+  receivedAt: string | null;
+  processedByStaffId: string | null;
+  createdByStaffId: string | null;
+  piiMaskedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+function serializeVisit(row: Record<string, unknown> | null): ExperienceVisitDto | null {
+  if (!row) return null;
+  const str = (value: unknown): string | null =>
+    value === null || value === undefined ? null : String(value);
+  return {
+    benefitAmount: str(row.benefit_amount),
+    benefitLabel: str(row.benefit_label),
+    benefitType: str(row.benefit_type),
+    createdAt: str(row.created_at),
+    createdByStaffId: str(row.created_by_staff_id),
+    externalId: str(row.external_id),
+    note: str(row.note),
+    piiMaskedAt: str(row.pii_masked_at),
+    processedByStaffId: str(row.processed_by_staff_id),
+    receivedAt: str(row.received_at),
+    receivedBy: str(row.received_by),
+    scheduledDate: str(row.scheduled_date),
+    scheduledTime: str(row.scheduled_time),
+    status: str(row.status),
+    updatedAt: str(row.updated_at),
+    visitorName: str(row.visitor_name),
+    visitorType: str(row.visitor_type),
+  };
+}
+
 type ExperienceUpsertPayload = {
   benefitAmount?: unknown;
   benefitLabel?: unknown;
@@ -92,33 +140,22 @@ function normalizeUpsertPayload(payload: ExperienceUpsertPayload) {
 
 internalApi.get("/internal/experience/:externalId", async (c) => {
   const externalId = c.req.param("externalId");
-  const visit = await c.env.DB.prepare(
+  const row = await c.env.DB.prepare(
     "SELECT * FROM luggage_experience_visits WHERE external_id = ?",
   ).bind(externalId).first<Record<string, unknown>>();
 
-  if (!visit) {
+  if (!row) {
     return c.json({ error: "Experience visit not found" }, 404);
   }
 
-  return c.json({ visit });
+  return c.json({ visit: serializeVisit(row) });
 });
 
-internalApi.post("/internal/experience", async (c) => {
-  let payload: ExperienceUpsertPayload;
-  try {
-    payload = await c.req.json<ExperienceUpsertPayload>();
-  } catch {
-    return c.json({ error: "Invalid JSON body" }, 400);
-  }
-
-  let normalized: ReturnType<typeof normalizeUpsertPayload>;
-  try {
-    normalized = normalizeUpsertPayload(payload);
-  } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
-  }
-
-  await c.env.DB.prepare(
+async function upsertExperienceVisit(
+  db: D1Database,
+  normalized: ReturnType<typeof normalizeUpsertPayload>,
+) {
+  await db.prepare(
     `INSERT INTO luggage_experience_visits (
        visitor_name, visitor_type, scheduled_date, scheduled_time,
        benefit_type, benefit_label, benefit_amount, external_id,
@@ -148,12 +185,44 @@ internalApi.post("/internal/experience", async (c) => {
     normalized.createdByStaffId,
     normalized.piiMaskedAt,
   ).run();
+}
 
-  const visit = await c.env.DB.prepare(
+// PUT is the right verb for an idempotent, client-addressed upsert: the
+// externalId lives in the URL, the resource state lives in the body, and a
+// replay produces an identical result. POST was the initial design but made
+// 201-vs-200 ambiguous; PUT makes the create-or-update distinction explicit
+// via the pre-check below.
+internalApi.put("/internal/experience/:externalId", async (c) => {
+  const externalId = c.req.param("externalId");
+  let payload: ExperienceUpsertPayload;
+  try {
+    payload = await c.req.json<ExperienceUpsertPayload>();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  if (payload.externalId !== undefined && payload.externalId !== externalId) {
+    return c.json({ error: "externalId in URL and body must match" }, 400);
+  }
+
+  let normalized: ReturnType<typeof normalizeUpsertPayload>;
+  try {
+    normalized = normalizeUpsertPayload({ ...payload, externalId });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
+  }
+
+  const existed = await c.env.DB.prepare(
+    "SELECT 1 FROM luggage_experience_visits WHERE external_id = ? LIMIT 1",
+  ).bind(externalId).first();
+
+  await upsertExperienceVisit(c.env.DB, normalized);
+
+  const row = await c.env.DB.prepare(
     "SELECT * FROM luggage_experience_visits WHERE external_id = ?",
   ).bind(normalized.externalId).first<Record<string, unknown>>();
 
-  return c.json({ visit }, 201);
+  return c.json({ visit: serializeVisit(row) }, existed ? 200 : 201);
 });
 
 internalApi.post("/internal/experience/batch", async (c) => {
@@ -176,36 +245,7 @@ internalApi.post("/internal/experience/batch", async (c) => {
   for (const entry of payload) {
     try {
       const normalized = normalizeUpsertPayload(entry);
-      await c.env.DB.prepare(
-        `INSERT INTO luggage_experience_visits (
-           visitor_name, visitor_type, scheduled_date, scheduled_time,
-           benefit_type, benefit_label, benefit_amount, external_id,
-           status, note, created_by_staff_id, pii_masked_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'SCHEDULED', ?, ?, ?, datetime('now'), datetime('now'))
-         ON CONFLICT(external_id) WHERE external_id IS NOT NULL DO UPDATE SET
-           visitor_name = excluded.visitor_name,
-           visitor_type = excluded.visitor_type,
-           scheduled_date = excluded.scheduled_date,
-           scheduled_time = excluded.scheduled_time,
-           benefit_type = COALESCE(excluded.benefit_type, luggage_experience_visits.benefit_type),
-           benefit_label = COALESCE(excluded.benefit_label, luggage_experience_visits.benefit_label),
-           benefit_amount = COALESCE(excluded.benefit_amount, luggage_experience_visits.benefit_amount),
-           note = COALESCE(excluded.note, luggage_experience_visits.note),
-           pii_masked_at = COALESCE(excluded.pii_masked_at, luggage_experience_visits.pii_masked_at),
-           updated_at = datetime('now')`,
-      ).bind(
-        normalized.visitorName,
-        normalized.visitorType,
-        normalized.scheduledDate,
-        normalized.scheduledTime,
-        normalized.benefitType,
-        normalized.benefitLabel,
-        normalized.benefitAmount,
-        normalized.externalId,
-        normalized.note,
-        normalized.createdByStaffId,
-        normalized.piiMaskedAt,
-      ).run();
+      await upsertExperienceVisit(c.env.DB, normalized);
       results.push({ externalId: normalized.externalId, ok: true });
     } catch (error) {
       results.push({
@@ -318,11 +358,11 @@ internalApi.patch("/internal/experience/:externalId", async (c) => {
     return c.json({ error: "Experience visit not found" }, 404);
   }
 
-  const visit = await c.env.DB.prepare(
+  const row = await c.env.DB.prepare(
     "SELECT * FROM luggage_experience_visits WHERE external_id = ?",
   ).bind(externalId).first<Record<string, unknown>>();
 
-  return c.json({ visit });
+  return c.json({ visit: serializeVisit(row) });
 });
 
 export default internalApi;

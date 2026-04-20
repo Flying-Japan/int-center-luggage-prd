@@ -17,7 +17,7 @@ type FakeEnv = {
 function buildTestApp(env: FakeEnv) {
   const app = new Hono<AppType>();
   app.use("/internal/*", internalAuth);
-  app.post("/internal/experience", (c) => c.json({ ok: true }));
+  app.put("/internal/experience/:externalId", (c) => c.json({ ok: true }));
   app.get("/internal/experience/:externalId", (c) =>
     c.json({ externalId: c.req.param("externalId") }),
   );
@@ -32,13 +32,14 @@ async function dispatch(
   return app.fetch(new Request(init.url, init), env as never);
 }
 
-const BASE = "https://luggage.flyingjp.test/internal/experience";
+const BASE = "https://luggage.flyingjp.test/internal/experience/app_42";
+const METHOD = "PUT";
 const SECRET = "integration-test-secret";
 
 describe("internalAuth middleware", () => {
   it("returns 503 when the secret binding is missing", async () => {
     const { app, env } = buildTestApp({});
-    const res = await dispatch(app, env, { method: "POST", url: BASE });
+    const res = await dispatch(app, env, { method: METHOD, url: BASE });
     expect(res.status).toBe(503);
     const body = await res.json();
     expect(body).toEqual({ error: "INTERNAL_API_SECRET is not configured" });
@@ -47,7 +48,7 @@ describe("internalAuth middleware", () => {
   it("returns 401 when signature or timestamp headers are missing", async () => {
     const { app, env } = buildTestApp({ INTERNAL_API_SECRET: SECRET });
     const res = await dispatch(app, env, {
-      method: "POST",
+      method: METHOD,
       url: BASE,
       headers: { "x-internal-timestamp": "0" },
     });
@@ -60,7 +61,7 @@ describe("internalAuth middleware", () => {
     const { app, env } = buildTestApp({ INTERNAL_API_SECRET: SECRET });
     const staleTimestamp = createTimestampHeader(Date.now() - 10 * 60_000);
     const res = await dispatch(app, env, {
-      method: "POST",
+      method: METHOD,
       url: BASE,
       headers: {
         "x-internal-timestamp": staleTimestamp,
@@ -77,14 +78,14 @@ describe("internalAuth middleware", () => {
     const timestamp = createTimestampHeader();
     const signed = await signInternalRequest({
       body: JSON.stringify({ foo: "bar" }),
-      method: "POST",
+      method: METHOD,
       secret: SECRET,
       timestamp,
       url: BASE,
     });
     // Send the legit signature but with a tampered body so hashing diverges.
     const res = await dispatch(app, env, {
-      method: "POST",
+      method: METHOD,
       url: BASE,
       body: JSON.stringify({ foo: "tampered" }),
       headers: {
@@ -102,7 +103,7 @@ describe("internalAuth middleware", () => {
     const { app, env } = buildTestApp({ INTERNAL_API_SECRET: SECRET });
     const timestamp = createTimestampHeader();
     const res = await dispatch(app, env, {
-      method: "POST",
+      method: METHOD,
       url: BASE,
       headers: {
         "x-internal-timestamp": timestamp,
@@ -119,13 +120,13 @@ describe("internalAuth middleware", () => {
     const body = JSON.stringify({ externalId: "app_42", scheduledDate: "2026-05-01" });
     const signed = await signInternalRequest({
       body,
-      method: "POST",
+      method: METHOD,
       secret: SECRET,
       timestamp,
       url: BASE,
     });
     const res = await dispatch(app, env, {
-      method: "POST",
+      method: METHOD,
       url: BASE,
       body,
       headers: {

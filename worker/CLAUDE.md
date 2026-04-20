@@ -90,7 +90,16 @@ Every 5 minutes (`*/5 * * * *`): sync-jobs consumer
 
 ## Internal API (Phase 3)
 
-`src/routes/internalApi.ts` exposes a machine-to-machine surface at `/internal/*` for reviewer → luggage data flow. Every request is verified by `middleware/internalAuth.ts` using HMAC-SHA256 over a canonical string.
+`src/routes/internalApi.ts` exposes a machine-to-machine surface at `/internal/*` for reviewer → luggage data flow. Every request is verified by `middleware/internalAuth.ts` using HMAC-SHA256 over a canonical string. Responses are shaped by `serializeVisit` so raw D1 columns never leak into the contract.
+
+### Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/internal/experience/:externalId` | Fetch a single visit |
+| PUT | `/internal/experience/:externalId` | Idempotent upsert (201 on create, 200 on update) |
+| POST | `/internal/experience/batch` | Bulk upsert (up to 50). Returns 207 on partial failure |
+| PATCH | `/internal/experience/:externalId` | Partial field update + status transitions |
 
 ### HMAC authentication
 
