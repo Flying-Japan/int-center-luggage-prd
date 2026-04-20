@@ -1482,6 +1482,10 @@ ops.get("/staff/experience", async (c) => {
               </div>
               <div class="grid2">
                 <label class="field">
+                  <span class="field-label">혜택 라벨 (프로젝트명 등)</span>
+                  <input class="control" type="text" name="benefit_label" placeholder="예: 타코야끼 쿠폰 체험단" maxlength={200} />
+                </label>
+                <label class="field">
                   <span class="field-label">메모</span>
                   <input class="control" type="text" name="note" placeholder="메모" />
                 </label>
@@ -1890,15 +1894,16 @@ ops.post("/staff/handover/experience", async (c) => {
   await c.env.DB.prepare(
     `INSERT INTO luggage_experience_visits (
        visitor_name, visitor_type, scheduled_date, scheduled_time,
-       benefit_type, benefit_amount, note, created_by_staff_id
+       benefit_type, benefit_label, benefit_amount, note, created_by_staff_id
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     String(body.visitor_name || ""),
     String(body.visitor_type || "BLOGGER"),
     String(body.scheduled_date || ""),
     String(body.scheduled_time || "") || null,
     String(body.benefit_type || "") || null,
+    String(body.benefit_label || "").slice(0, 200) || null,
     String(body.benefit_amount || "") || null,
     String(body.note || "") || null,
     staff.id
@@ -1996,6 +2001,10 @@ ops.get("/staff/handover/experience/:id/edit", async (c) => {
               </div>
               <div class="grid2">
                 <label class="field">
+                  <span class="field-label">혜택 라벨 (프로젝트명 등)</span>
+                  <input class="control" type="text" name="benefit_label" value={(visit.benefit_label as string) || ""} placeholder="예: 타코야끼 쿠폰 체험단" maxlength={200} />
+                </label>
+                <label class="field">
                   <span class="field-label">메모</span>
                   <input class="control" type="text" name="note" value={(visit.note as string) || ""} placeholder="메모" />
                 </label>
@@ -2021,7 +2030,7 @@ ops.post("/staff/handover/experience/:id/update", async (c) => {
   await c.env.DB.prepare(
     `UPDATE luggage_experience_visits SET
        visitor_name = ?, visitor_type = ?, scheduled_date = ?, scheduled_time = ?,
-       benefit_type = ?, benefit_amount = ?, note = ?,
+       benefit_type = ?, benefit_label = ?, benefit_amount = ?, note = ?,
        updated_at = datetime('now')
      WHERE visit_id = ?`
   ).bind(
@@ -2030,6 +2039,7 @@ ops.post("/staff/handover/experience/:id/update", async (c) => {
     String(body.scheduled_date || ""),
     String(body.scheduled_time || "") || null,
     String(body.benefit_type || "") || null,
+    String(body.benefit_label || "").slice(0, 200) || null,
     String(body.benefit_amount || "") || null,
     String(body.note || "") || null,
     visitId
