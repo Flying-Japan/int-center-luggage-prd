@@ -6,9 +6,12 @@
     "deploy": "wrangler deploy",
     "db:migrate:local": "wrangler d1 execute center-luggage-db --local --file=src/schema.sql",
     "db:migrate:prod": "wrangler d1 execute center-luggage-db --remote --file=src/schema.sql",
+    "db:migrate:experience:local": "wrangler d1 execute center-luggage-db --local --file=./migrations/20260417_experience_infra.sql",
+    "db:migrate:experience:prod": "wrangler d1 execute center-luggage-db --remote --file=./migrations/20260417_experience_infra.sql",
     "backfill:cash-closing": "node scripts/backfill-cash-closings-from-check-sheet.mjs",
     "sync:cash-closing-staff": "node scripts/sync-cash-closing-staff-ids.mjs",
     "backfill:daily-sales": "node scripts/backfill-daily-sales-from-sheet.mjs",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },
@@ -17,8 +20,10 @@
     "@supabase/supabase-js": "^2.49.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250305.0",
+    "@cloudflare/workers-types": "^4.20260415.1",
+    "@cloudflare/vitest-pool-workers": "^0.14.7",
     "typescript": "^5.7.0",
+    "vitest": "^4.1.4",
     "wrangler": "^4.0.0"
   },
   "pnpm": {

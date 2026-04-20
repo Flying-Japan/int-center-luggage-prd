@@ -216,6 +216,50 @@ CREATE TABLE IF NOT EXISTS luggage_daily_sales (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Operations: Experience visits
+CREATE TABLE IF NOT EXISTS luggage_experience_visits (
+  visit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  visitor_name TEXT NOT NULL,
+  visitor_type TEXT NOT NULL DEFAULT 'BLOGGER',
+  scheduled_date TEXT NOT NULL,
+  scheduled_time TEXT,
+  benefit_type TEXT,
+  benefit_label TEXT,
+  benefit_amount TEXT,
+  external_id TEXT,
+  status TEXT NOT NULL DEFAULT 'SCHEDULED',
+  received_by TEXT,
+  received_at TEXT,
+  processed_by_staff_id TEXT,
+  note TEXT,
+  created_by_staff_id TEXT NOT NULL,
+  pii_masked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Infra: Internal sync retry queue
+CREATE TABLE IF NOT EXISTS sync_jobs (
+  job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  target_system TEXT NOT NULL,
+  job_type TEXT NOT NULL DEFAULT 'HTTP_REQUEST',
+  external_id TEXT NOT NULL,
+  request_method TEXT NOT NULL,
+  request_url TEXT NOT NULL,
+  request_headers TEXT,
+  request_body TEXT,
+  requires_hmac INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  next_attempt_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_error TEXT,
+  dead_letter_reason TEXT,
+  dead_lettered_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Operations: Handover mentions
 CREATE TABLE IF NOT EXISTS luggage_handover_mentions (
   mention_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -252,3 +296,7 @@ CREATE INDEX IF NOT EXISTS idx_luggage_audit_logs_order_id ON luggage_audit_logs
 CREATE INDEX IF NOT EXISTS idx_luggage_handover_notes_created ON luggage_handover_notes(created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_closings_date_type ON luggage_cash_closings(business_date, closing_type);
 CREATE INDEX IF NOT EXISTS idx_luggage_cash_closings_date ON luggage_cash_closings(business_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_experience_external_id ON luggage_experience_visits(external_id) WHERE external_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_experience_scheduled_date ON luggage_experience_visits(scheduled_date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_jobs_external_id ON sync_jobs(external_id);
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_status_next_attempt ON sync_jobs(status, next_attempt_at);

@@ -77,6 +77,39 @@ function uniqueStaffIds(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.map((value) => `${value ?? ""}`.trim()).filter(Boolean))];
 }
 
+const EXPERIENCE_VISITOR_TYPE_LABELS: Record<string, string> = {
+  BLOGGER: "블로거",
+  INFLUENCER: "인플루언서",
+  OTHER: "기타",
+  YOUTUBER: "유튜버",
+};
+
+const EXPERIENCE_BENEFIT_TYPE_LABELS: Record<string, string> = {
+  CASH: "지원금",
+  GIFT_CARD: "상품권",
+  OTHER: "기타",
+  PRODUCT: "물품",
+  REVIEWER_EXPERIENCE: "체험단 프로젝트",
+};
+
+function formatExperienceSchedule(date: string | null | undefined, time: string | null | undefined): string {
+  const normalizedDate = (date || "-").trim();
+  const normalizedTime = (time || "").trim();
+  return normalizedTime ? `${normalizedDate} ${normalizedTime}` : normalizedDate;
+}
+
+function getExperienceBenefitLabel(
+  benefitType: string | null | undefined,
+  benefitLabel: string | null | undefined,
+): string {
+  const customLabel = (benefitLabel || "").trim();
+  if (customLabel) {
+    return customLabel;
+  }
+
+  return EXPERIENCE_BENEFIT_TYPE_LABELS[(benefitType || "").trim()] || "-";
+}
+
 type AutoSalesSummary = {
   cashAmount: number;
   qrAmount: number;
@@ -1426,21 +1459,28 @@ ops.get("/staff/experience", async (c) => {
                   <input class="control" type="date" name="scheduled_date" required />
                 </label>
                 <label class="field">
+                  <span class="field-label">방문 예정 시간</span>
+                  <input class="control" type="text" name="scheduled_time" placeholder="예: 14:00" />
+                </label>
+              </div>
+              <div class="grid2">
+                <label class="field">
                   <span class="field-label">혜택 유형</span>
                   <select class="control" name="benefit_type">
                     <option value="">선택</option>
                     <option value="GIFT_CARD">상품권</option>
                     <option value="CASH">지원금</option>
                     <option value="PRODUCT">물품</option>
+                    <option value="REVIEWER_EXPERIENCE">체험단 프로젝트</option>
                     <option value="OTHER">기타</option>
                   </select>
                 </label>
-              </div>
-              <div class="grid2">
                 <label class="field">
                   <span class="field-label">혜택 금액/내용</span>
                   <input class="control" type="text" name="benefit_amount" placeholder="예: ¥3,000" />
                 </label>
+              </div>
+              <div class="grid2">
                 <label class="field">
                   <span class="field-label">메모</span>
                   <input class="control" type="text" name="note" placeholder="메모" />
@@ -1469,13 +1509,20 @@ ops.get("/staff/experience", async (c) => {
                     const st = v.status as string;
                     const stColor = st === "SCHEDULED" ? "#64748b" : st === "VISITED" ? "#2563eb" : st === "RECEIVED" ? "#166534" : "#dc2626";
                     const stLabel = st === "SCHEDULED" ? "예정" : st === "VISITED" ? "방문" : st === "RECEIVED" ? "수령완료" : "취소";
-                    const vtLabel = (v.visitor_type as string) === "BLOGGER" ? "블로거" : (v.visitor_type as string) === "INFLUENCER" ? "인플루언서" : (v.visitor_type as string) === "YOUTUBER" ? "유튜버" : "기타";
-                    const btLabel = (v.benefit_type as string) === "GIFT_CARD" ? "상품권" : (v.benefit_type as string) === "CASH" ? "지원금" : (v.benefit_type as string) === "PRODUCT" ? "물품" : (v.benefit_type as string) === "OTHER" ? "기타" : "-";
+                    const vtLabel = EXPERIENCE_VISITOR_TYPE_LABELS[(v.visitor_type as string) || ""] || "기타";
+                    const btLabel = getExperienceBenefitLabel(
+                      v.benefit_type as string | null | undefined,
+                      v.benefit_label as string | null | undefined,
+                    );
+                    const scheduleLabel = formatExperienceSchedule(
+                      v.scheduled_date as string | null | undefined,
+                      v.scheduled_time as string | null | undefined,
+                    );
                     return (
                       <tr style="border-bottom:1px solid #e2e8f0">
                         <td style="padding:3px 6px;font-weight:600">{v.visitor_name as string}</td>
                         <td style="padding:3px 6px">{vtLabel}</td>
-                        <td style="padding:3px 6px;white-space:nowrap">{v.scheduled_date as string}</td>
+                        <td style="padding:3px 6px;white-space:nowrap">{scheduleLabel}</td>
                         <td style="padding:3px 6px">{btLabel}</td>
                         <td style="padding:3px 6px">{(v.benefit_amount as string) || "-"}</td>
                         <td style="padding:3px 6px;text-align:center"><span style={`display:inline-block;padding:1px 8px;border-radius:9999px;font-size:10px;font-weight:600;color:white;background:${stColor}`}>{stLabel}</span></td>
@@ -1488,7 +1535,7 @@ ops.get("/staff/experience", async (c) => {
                             <div style="position:absolute;z-index:10;background:white;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px;min-width:220px;font-size:11px;color:#37352f;box-shadow:0 4px 12px rgba(0,0,0,0.1);margin-top:4px">
                               <p style="margin:2px 0"><strong>방문자:</strong> {v.visitor_name as string}</p>
                               <p style="margin:2px 0"><strong>유형:</strong> {vtLabel}</p>
-                              <p style="margin:2px 0"><strong>예정일:</strong> {v.scheduled_date as string}</p>
+                              <p style="margin:2px 0"><strong>예정일:</strong> {scheduleLabel}</p>
                               <p style="margin:2px 0"><strong>혜택:</strong> {btLabel} / {(v.benefit_amount as string) || "-"}</p>
                               <p style="margin:2px 0"><strong>상태:</strong> {stLabel}</p>
                               <p style="margin:2px 0"><strong>메모:</strong> {(v.note as string) || "-"}</p>
@@ -1841,12 +1888,16 @@ ops.post("/staff/handover/experience", async (c) => {
   const staff = getStaff(c);
 
   await c.env.DB.prepare(
-    `INSERT INTO luggage_experience_visits (visitor_name, visitor_type, scheduled_date, benefit_type, benefit_amount, note, created_by_staff_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO luggage_experience_visits (
+       visitor_name, visitor_type, scheduled_date, scheduled_time,
+       benefit_type, benefit_amount, note, created_by_staff_id
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     String(body.visitor_name || ""),
     String(body.visitor_type || "BLOGGER"),
     String(body.scheduled_date || ""),
+    String(body.scheduled_time || "") || null,
     String(body.benefit_type || "") || null,
     String(body.benefit_amount || "") || null,
     String(body.note || "") || null,
@@ -1925,19 +1976,25 @@ ops.get("/staff/handover/experience/:id/edit", async (c) => {
                   <input class="control" type="date" name="scheduled_date" value={visit.scheduled_date as string} required />
                 </label>
                 <label class="field">
-                  <span class="field-label">혜택 유형</span>
-                  <select class="control" name="benefit_type">
-                    {[["", "선택"], ["GIFT_CARD", "상품권"], ["CASH", "지원금"], ["PRODUCT", "물품"], ["OTHER", "기타"]].map(([val, label]) => (
-                      <option value={val} selected={val === (visit.benefit_type as string ?? "")}>{label}</option>
-                    ))}
-                  </select>
+                  <span class="field-label">방문 예정 시간</span>
+                  <input class="control" type="text" name="scheduled_time" value={(visit.scheduled_time as string) || ""} placeholder="예: 14:00" />
                 </label>
               </div>
               <div class="grid2">
                 <label class="field">
+                  <span class="field-label">혜택 유형</span>
+                  <select class="control" name="benefit_type">
+                    {[["", "선택"], ["GIFT_CARD", "상품권"], ["CASH", "지원금"], ["PRODUCT", "물품"], ["REVIEWER_EXPERIENCE", "체험단 프로젝트"], ["OTHER", "기타"]].map(([val, label]) => (
+                      <option value={val} selected={val === (visit.benefit_type as string ?? "")}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label class="field">
                   <span class="field-label">혜택 금액/내용</span>
                   <input class="control" type="text" name="benefit_amount" value={(visit.benefit_amount as string) || ""} placeholder="예: ¥3,000" />
                 </label>
+              </div>
+              <div class="grid2">
                 <label class="field">
                   <span class="field-label">메모</span>
                   <input class="control" type="text" name="note" value={(visit.note as string) || ""} placeholder="메모" />
@@ -1963,7 +2020,7 @@ ops.post("/staff/handover/experience/:id/update", async (c) => {
 
   await c.env.DB.prepare(
     `UPDATE luggage_experience_visits SET
-       visitor_name = ?, visitor_type = ?, scheduled_date = ?,
+       visitor_name = ?, visitor_type = ?, scheduled_date = ?, scheduled_time = ?,
        benefit_type = ?, benefit_amount = ?, note = ?,
        updated_at = datetime('now')
      WHERE visit_id = ?`
@@ -1971,6 +2028,7 @@ ops.post("/staff/handover/experience/:id/update", async (c) => {
     String(body.visitor_name || ""),
     String(body.visitor_type || "BLOGGER"),
     String(body.scheduled_date || ""),
+    String(body.scheduled_time || "") || null,
     String(body.benefit_type || "") || null,
     String(body.benefit_amount || "") || null,
     String(body.note || "") || null,

@@ -23,7 +23,9 @@ pattern = "luggage.flyingjp.com/*"
 zone_name = "flyingjp.com"
 
 [triggers]
-crons = ["0 15 * * *", "0 18 * * *"]
+crons = ["0 15 * * *", "0 18 * * *", "*/5 * * * *"]
 
 # Google Sheets rental revenue sync (service account credentials)
 # Set via: wrangler secret put GOOGLE_SHEETS_CREDENTIALS
+# Internal reviewer -> luggage auth
+# Set via: wrangler secret put INTERNAL_API_SECRET
