@@ -3,7 +3,10 @@ import type { AppType } from "../types";
 import { internalAuth } from "../middleware/internalAuth";
 
 const internalApi = new Hono<AppType>();
-internalApi.use("/*", internalAuth);
+// Mounted via `app.route("/", internalApi)` in index.tsx, so a bare "/*" here
+// would swallow every request on the worker. Scope the auth middleware to the
+// prefix we actually own so /customer, /login, /admin, etc. stay untouched.
+internalApi.use("/internal/*", internalAuth);
 
 const EXPERIENCE_STATUSES = new Set(["SCHEDULED", "VISITED", "RECEIVED", "CANCELLED"]);
 const EXPERIENCE_VISITOR_TYPES = new Set(["BLOGGER", "INFLUENCER", "YOUTUBER", "OTHER"]);
