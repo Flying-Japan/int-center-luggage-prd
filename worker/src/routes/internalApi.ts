@@ -50,6 +50,12 @@ function asDate(value: unknown, field: string): string {
   if (Number.isNaN(parsed.getTime())) {
     throw new Error(`${field} is not a valid date`);
   }
+  // JS Date auto-rolls over semantically invalid calendar dates (e.g. 2026-02-30
+  // becomes 2026-03-02). Regex alone passes these, so confirm the parsed value
+  // serialises back to the exact input before accepting.
+  if (!parsed.toISOString().startsWith(text)) {
+    throw new Error(`${field} is not a valid calendar date`);
+  }
   return text;
 }
 

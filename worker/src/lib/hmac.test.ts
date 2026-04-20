@@ -64,4 +64,25 @@ describe("internal hmac helpers", () => {
     expect(verifyTimestamp(createTimestampHeader(now - 299_000), now)).toBe(true);
     expect(verifyTimestamp(createTimestampHeader(now - 301_000), now)).toBe(false);
   });
+
+  it("verifyTimestamp rejects non-numeric and empty inputs", () => {
+    expect(verifyTimestamp("", Date.now())).toBe(false);
+    expect(verifyTimestamp("abc", Date.now())).toBe(false);
+  });
+
+  it("verifyInternalRequestSignature rejects signatures of the wrong length without short-circuiting", async () => {
+    // Regression guard: constantTimeEqual must not early-return on a length
+    // mismatch, so a short hex string fails without leaking the expected
+    // signature length.
+    await expect(
+      verifyInternalRequestSignature({
+        body: "{}",
+        method: "POST",
+        secret: "s",
+        signature: "deadbeef",
+        timestamp: createTimestampHeader(),
+        url: "https://luggage.flyingjp.test/internal/experience",
+      }),
+    ).resolves.toBe(false);
+  });
 });
