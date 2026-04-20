@@ -79,11 +79,16 @@ export async function hmacSha256Hex(secret: string, payload: string): Promise<st
 }
 
 export function constantTimeEqual(left: string, right: string): boolean {
-  if (left.length !== right.length) return false;
-
-  let diff = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    diff |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  // Compare over the max length rather than short-circuiting on a mismatch so
+  // the runtime does not leak the expected signature length. `diff` is seeded
+  // with the length-mismatch bit, which makes unequal-length inputs fail the
+  // final zero check without exposing a faster early-return branch.
+  const length = Math.max(left.length, right.length);
+  let diff = left.length ^ right.length;
+  for (let index = 0; index < length; index += 1) {
+    const leftCode = index < left.length ? left.charCodeAt(index) : 0;
+    const rightCode = index < right.length ? right.charCodeAt(index) : 0;
+    diff |= leftCode ^ rightCode;
   }
   return diff === 0;
 }

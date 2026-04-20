@@ -208,16 +208,27 @@ export async function runSyncJobs(env: Env) {
   let completed = 0;
   let failed = 0;
   let deadLettered = 0;
+  let crashed = 0;
 
   for (const job of jobs.results) {
-    const outcome = await processSyncJob(env, job);
-    if (outcome === "completed") completed += 1;
-    if (outcome === "failed") failed += 1;
-    if (outcome === "dead-letter") deadLettered += 1;
+    // Guard each job independently — a DB write failure inside processSyncJob's
+    // retry/dead-letter branches would otherwise bubble out and abort the
+    // remaining jobs in the batch, stranding them until the next cron tick.
+    try {
+      const outcome = await processSyncJob(env, job);
+      if (outcome === "completed") completed += 1;
+      if (outcome === "failed") failed += 1;
+      if (outcome === "dead-letter") deadLettered += 1;
+    } catch (error) {
+      crashed += 1;
+      const message = compactErrorMessage(error instanceof Error ? error.message : String(error));
+      console.error(`sync_jobs: job_id=${job.job_id} crashed outside handler:`, message);
+    }
   }
 
   return {
     completed,
+    crashed,
     deadLettered,
     failed,
     scanned: jobs.results.length,

@@ -8,6 +8,10 @@ export type Env = {
   // Internal reviewer -> luggage auth
   INTERNAL_API_SECRET: string;
 
+  // Feature flag for the */5 sync-jobs consumer cron. Optional so callers can
+  // ship the receiver code dark until the enqueuer (reviewer app) is live.
+  SYNC_JOBS_ENABLED?: string;
+
   // Supabase (staff auth + staff profiles)
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;

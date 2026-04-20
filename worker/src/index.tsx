@@ -945,6 +945,13 @@ export default {
         }
 
         if (event.cron === "*/5 * * * *") {
+          // Feature-flagged until the reviewer-side enqueuer ships. Without
+          // this gate the consumer runs on an empty queue every 5 minutes and
+          // any missing INTERNAL_API_SECRET wiring surfaces as noisy 503s.
+          if (env.SYNC_JOBS_ENABLED !== "true") {
+            console.log("Sync job consumer skipped: SYNC_JOBS_ENABLED is not 'true'");
+            return;
+          }
           const syncJobResult = await runSyncJobs(env);
           console.log(`Sync job consumer complete: ${JSON.stringify(syncJobResult)}`);
           return;
