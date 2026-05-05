@@ -7,6 +7,7 @@ import staffOrders from "./routes/staffOrders";
 import opsRoutes from "./routes/operations";
 import adminRoutes from "./routes/admin";
 import staticRoutes from "./routes/static";
+import internalApi from "./routes/internalApi";
 import { securityHeaders, errorHandler, notFoundHandler, createRateLimiter } from "./middleware/security";
 import { staffAuth, getStaff } from "./middleware/auth";
 import { runRetentionCleanup } from "./services/retention";
@@ -41,6 +42,9 @@ app.get("/", (c) => c.redirect("/customer"));
 
 // /admin shortcut → staff dashboard
 app.get("/admin", (c) => c.redirect("/staff/dashboard"));
+
+// Internal reviewer <-> luggage integration routes
+app.route("/", internalApi);
 
 // Static asset routes (favicon, etc.)
 app.route("/", staticRoutes);

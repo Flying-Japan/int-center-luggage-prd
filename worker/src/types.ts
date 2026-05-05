@@ -5,6 +5,9 @@ export type Env = {
   DB: D1Database;
   IMAGES: R2Bucket;
 
+  // Internal reviewer -> luggage auth
+  INTERNAL_API_SECRET: string;
+
   // Supabase (staff auth + staff profiles)
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;
@@ -34,12 +37,14 @@ export type Env = {
   APP_SECRET_KEY: string;
   APP_BASE_URL: string;
   DEV_STAFF_AUTH_BYPASS?: string;
+  SYNC_JOBS_ENABLED?: string;
   BUSINESS_OPEN_HOUR: string;
   BUSINESS_CLOSE_HOUR: string;
 };
 
 export type AppVariables = {
   staff: StaffUser;
+  rawBody?: ArrayBuffer;
 };
 
 /** Shorthand for Hono app type with our bindings and variables */

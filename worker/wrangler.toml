@@ -12,6 +12,8 @@ BUSINESS_CLOSE_HOUR = "21"
 # - SENTRY_BROWSER_DSN
 # - SENTRY_RELEASE
 # - CLARITY_PROJECT_ID
+# Internal reviewer -> luggage auth:
+# - INTERNAL_API_SECRET
 
 [[d1_databases]]
 binding = "DB"
