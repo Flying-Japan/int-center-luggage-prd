@@ -31,6 +31,16 @@ function clarityProjectId(value?: string) {
   return /^[a-z0-9]+$/i.test(id) ? id : "";
 }
 
+function isWithinCustomerPickupWindow(pickupDate: Date) {
+  const jst = new Date(pickupDate.getTime() + 9 * 60 * 60 * 1000);
+  const hour = jst.getUTCHours();
+  const minute = jst.getUTCMinutes();
+  const second = jst.getUTCSeconds();
+  const ms = jst.getUTCMilliseconds();
+  if (hour < 9 || hour > 21) return false;
+  return hour !== 21 || (minute === 0 && second === 0 && ms === 0);
+}
+
 function customerObservabilityScripts(env: Env, pageName: string) {
   const sentryDsn = cleanPublicConfig(env.SENTRY_BROWSER_DSN);
   const sentryRelease = cleanPublicConfig(env.SENTRY_RELEASE) || DEFAULT_SENTRY_RELEASE;
@@ -270,9 +280,9 @@ customer.get("/customer", (c) => {
     ko: "21시 이후에는 추가 출동 수수료(¥8,000)가 발생합니다.", en: "After 9 PM, a dispatch fee (¥8,000) applies.", ja: "21時以降は出動手数料（¥8,000）が発生します。",
   };
   const previewResultMeta: Record<string, string> = {
-    ko: "¥ {price_per_day}/일 · {days}일 · 할인 {discount}%",
-    en: "¥ {price_per_day}/day · {days} days · discount {discount}%",
-    ja: "¥ {price_per_day}/日 · {days}日 · 割引 {discount}%",
+    ko: "{price_per_day}/일 · {days}일 · 할인 {discount}%",
+    en: "{price_per_day}/day · {days} days · discount {discount}%",
+    ja: "{price_per_day}/日 · {days}日 · 割引 {discount}%",
   };
   const uploadOptimizing: Record<string, string> = {
     ko: "사진 최적화 중...", en: "Optimizing photos for upload...", ja: "写真を最適化中...",
@@ -1582,12 +1592,7 @@ customer.post("/customer/submit", async (c) => {
     return redirect(t("error", lang));
   }
 
-  // Validate business hours using the raw form value (already in JST)
-  // Extract hour from "YYYY-MM-DDTHH:MM" string directly
-  const pickupTimeMatch = String(expectedPickupAt).match(/T(\d{2}):(\d{2})/);
-  const pickupHour = pickupTimeMatch ? parseInt(pickupTimeMatch[1], 10) : -1;
-  const pickupMin = pickupTimeMatch ? parseInt(pickupTimeMatch[2], 10) : 0;
-  if (pickupHour < 9 || pickupHour > 21 || (pickupHour === 21 && pickupMin > 0)) {
+  if (!isWithinCustomerPickupWindow(pickupDate)) {
     return redirect(t("pickup_note", lang));
   }
 
@@ -2231,6 +2236,9 @@ customer.get("/api/price-preview", (c) => {
   const pickupDate = new Date(pickupStr);
   if (isNaN(pickupDate.getTime())) {
     return c.json({ error: "invalid expected_pickup_at" }, 400);
+  }
+  if (!isWithinCustomerPickupWindow(pickupDate)) {
+    return c.json({ detail: "영업시간 09:00~21:00 내에서 수령 가능합니다." }, 400);
   }
 
   const now = new Date();

@@ -25,5 +25,8 @@ __pycache__/
 # OMC state
 .omc/
 
+# Local browser verification artifacts
+.playwright-cli/
+
 # Supabase CLI local state
 supabase/.temp/

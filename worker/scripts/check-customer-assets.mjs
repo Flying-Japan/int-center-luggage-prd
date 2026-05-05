@@ -35,6 +35,10 @@ const forbidden = [
     pattern: /収集項目：\s*氏名、連絡先/i,
     reason: "Privacy notice must list every customer form field that is collected.",
   },
+  {
+    pattern: /¥\s+\{price_per_day\}/,
+    reason: "Price preview metadata must not prepend a second yen symbol before the formatted price.",
+  },
 ];
 
 const customerNoticeRequirements = [
