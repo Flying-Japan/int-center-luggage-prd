@@ -1,0 +1,73 @@
+#!/usr/bin/env node
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+const checkedFiles = [
+  "src/routes/customer.tsx",
+  "src/lib/brevo.ts",
+];
+
+const forbidden = [
+  {
+    pattern: /centersurvey|survey-banner/i,
+    reason: "Survey banner must not be rendered on customer-facing surfaces.",
+  },
+  {
+    pattern: /data:image\/svg\+xml/i,
+    reason: "Do not replace branded R2 promo images with inline placeholder SVGs.",
+  },
+  {
+    pattern: /wk7y2gnip6|wk7dc2q88b/i,
+    reason: "Do not reuse Microsoft Clarity project IDs from other Flying Japan products.",
+  },
+  {
+    pattern: /Collected Information:\s*Name,\s*contact number/i,
+    reason: "Privacy notice must list every customer form field that is collected.",
+  },
+  {
+    pattern: /수집 항목:\s*이름,\s*연락처/i,
+    reason: "Privacy notice must list every customer form field that is collected.",
+  },
+  {
+    pattern: /収集項目：\s*氏名、連絡先/i,
+    reason: "Privacy notice must list every customer form field that is collected.",
+  },
+];
+
+const customerNoticeRequirements = [
+  "Collected Information: name, phone number, email address, ID/passport photo, luggage photo",
+  "수집 항목: 이름, 전화번호, 이메일, 신분증/여권 사진, 짐 사진",
+  "収集項目： 氏名、電話番号、メールアドレス、本人確認書類（パスポート等）の写真、荷物写真",
+];
+
+const failures = [];
+
+for (const relativePath of checkedFiles) {
+  const source = readFileSync(join(root, relativePath), "utf8");
+  for (const check of forbidden) {
+    if (check.pattern.test(source)) {
+      failures.push(`${relativePath}: ${check.reason}`);
+    }
+  }
+
+  if (relativePath === "src/routes/customer.tsx") {
+    for (const snippet of customerNoticeRequirements) {
+      if (!source.includes(snippet)) {
+        failures.push(`${relativePath}: Customer privacy notice is missing required text: ${snippet}`);
+      }
+    }
+  }
+}
+
+if (failures.length) {
+  console.error("Customer asset guard failed:");
+  for (const failure of failures) {
+    console.error(`- ${failure}`);
+  }
+  process.exit(1);
+}
+
+console.log("Customer asset guard passed.");

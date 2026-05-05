@@ -24,10 +24,16 @@ export type Env = {
   // Brevo (email)
   BREVO_API_KEY: string;
 
+  // Browser observability for customer pages
+  SENTRY_BROWSER_DSN?: string;
+  SENTRY_RELEASE?: string;
+  CLARITY_PROJECT_ID?: string;
+
   // App config
   APP_ENV: string;
   APP_SECRET_KEY: string;
   APP_BASE_URL: string;
+  DEV_STAFF_AUTH_BYPASS?: string;
   BUSINESS_OPEN_HOUR: string;
   BUSINESS_CLOSE_HOUR: string;
 };

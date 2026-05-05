@@ -9,6 +9,12 @@ import { calculateStorageDays, calculateExtraDays } from "../services/storage";
 import { calculateExtraAmount, recalculateOrderPrepaid, normalizeFlyingPassTier } from "../services/pricing";
 import type { FlyingPassTier } from "../services/pricing";
 import { getDashboardSyncToken } from "../lib/dashboardSync";
+import {
+  normalizePaymentAllocation,
+  payableAmountFromOrder,
+  paymentAllocationDetails,
+  paymentAllocationStatements,
+} from "../lib/payments";
 
 const staffApi = new Hono<AppType>();
 
@@ -249,7 +255,7 @@ staffApi.post("/staff/api/orders/:id/cancel", async (c) => {
 
 // POST /staff/api/orders/bulk-action — Bulk status changes
 staffApi.post("/staff/api/orders/bulk-action", async (c) => {
-  const body = await c.req.json<{ order_ids: string[]; action: string }>();
+  const body = await c.req.json<{ order_ids: string[]; action: string; payment_method?: string }>();
   const staff = getStaff(c);
 
   if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
@@ -271,31 +277,73 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
     return c.json({ error: "Invalid action" }, 400);
   }
 
-  // Status guards: mark_paid only from PAYMENT_PENDING, cancel only non-PICKED_UP
-  const statusGuard = body.action === "mark_paid"
-    ? " AND status = 'PAYMENT_PENDING'"
-    : body.action === "cancel"
-      ? " AND status != 'PICKED_UP'"
-      : "";
-
   const placeholders = body.order_ids.map(() => "?").join(",");
-  const result = await c.env.DB.prepare(
-    `UPDATE luggage_orders SET status = ?, updated_at = datetime('now') WHERE order_id IN (${placeholders})${statusGuard}`
-  )
-    .bind(newStatus, ...body.order_ids)
-    .run();
+  let updatedCount = 0;
+  let auditDetails = "";
 
-  // Log each action
-  const stmts = body.order_ids.map((id) =>
-    c.env.DB.prepare(
-      "INSERT INTO luggage_audit_logs (order_id, staff_id, action, timestamp) VALUES (?, ?, ?, datetime('now'))"
-    ).bind(id, staff.id, `BULK_${body.action.toUpperCase()}`)
-  );
-  if (stmts.length > 0) {
-    await c.env.DB.batch(stmts);
+  if (body.action === "mark_paid") {
+    const pendingOrders = await c.env.DB.prepare(
+      `SELECT order_id, date(created_at, '+9 hours') as business_date,
+              prepaid_amount, final_amount, extra_amount
+       FROM luggage_orders
+       WHERE order_id IN (${placeholders}) AND status = 'PAYMENT_PENDING'`
+    )
+      .bind(...body.order_ids)
+      .all<{
+        order_id: string;
+        business_date: string;
+        prepaid_amount: number;
+        final_amount: number | null;
+        extra_amount: number | null;
+      }>();
+    if (pendingOrders.results.length === 0) return c.json({ success: true, updated: 0 });
+
+    const statements: D1PreparedStatement[] = [];
+    for (const order of pendingOrders.results) {
+      const payableAmount = payableAmountFromOrder(order);
+      const allocation = normalizePaymentAllocation(body as Record<string, unknown>, payableAmount);
+      if ("error" in allocation) return c.json({ error: allocation.error }, 400);
+      statements.push(...paymentAllocationStatements(c.env.DB, order.order_id, order.business_date, staff.id, allocation));
+      statements.push(
+        c.env.DB.prepare(
+          `UPDATE luggage_orders
+           SET status = ?, payment_method = ?, updated_at = datetime('now')
+           WHERE order_id = ?`
+        ).bind(newStatus, allocation.paymentMethod, order.order_id)
+      );
+      statements.push(
+        c.env.DB.prepare(
+          "INSERT INTO luggage_audit_logs (order_id, staff_id, action, details, timestamp) VALUES (?, ?, ?, ?, datetime('now'))"
+        ).bind(order.order_id, staff.id, `BULK_${body.action.toUpperCase()}`, paymentAllocationDetails(allocation))
+      );
+    }
+    await c.env.DB.batch(statements);
+    updatedCount = pendingOrders.results.length;
+    auditDetails = "handled";
+  } else {
+    const result = await c.env.DB.prepare(
+      `UPDATE luggage_orders
+       SET status = ?, updated_at = datetime('now')
+       WHERE order_id IN (${placeholders}) AND status != 'PICKED_UP'`
+    )
+      .bind(newStatus, ...body.order_ids)
+      .run();
+    updatedCount = result.meta.changes || 0;
   }
 
-  return c.json({ success: true, updated: result.meta.changes });
+  // Log each action
+  if (!auditDetails) {
+    const stmts = body.order_ids.map((id) =>
+      c.env.DB.prepare(
+        "INSERT INTO luggage_audit_logs (order_id, staff_id, action, details, timestamp) VALUES (?, ?, ?, ?, datetime('now'))"
+      ).bind(id, staff.id, `BULK_${body.action.toUpperCase()}`, null)
+    );
+    if (stmts.length > 0) {
+      await c.env.DB.batch(stmts);
+    }
+  }
+
+  return c.json({ success: true, updated: updatedCount });
 });
 
 // POST /staff/api/orders/:id/pickup — Mark as picked up (inline)
@@ -376,10 +424,19 @@ staffApi.post("/staff/api/orders/:id/toggle-payment", async (c) => {
   if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
 
   const order = await c.env.DB.prepare(
-    "SELECT status FROM luggage_orders WHERE order_id = ?"
+    `SELECT status, payment_method, date(created_at, '+9 hours') as business_date,
+            prepaid_amount, final_amount, extra_amount
+     FROM luggage_orders WHERE order_id = ?`
   )
     .bind(orderId)
-    .first<{ status: string }>();
+    .first<{
+      status: string;
+      payment_method: string | null;
+      business_date: string;
+      prepaid_amount: number;
+      final_amount: number | null;
+      extra_amount: number | null;
+    }>();
 
   if (!order) return c.json({ error: "Order not found" }, 404);
   if (order.status !== "PAYMENT_PENDING" && order.status !== "PAID") {
@@ -387,15 +444,33 @@ staffApi.post("/staff/api/orders/:id/toggle-payment", async (c) => {
   }
 
   const newStatus = order.status === "PAID" ? "PAYMENT_PENDING" : "PAID";
-  await c.env.DB.prepare(
-    "UPDATE luggage_orders SET status = ?, updated_at = datetime('now') WHERE order_id = ?"
-  )
-    .bind(newStatus, orderId)
-    .run();
+  const toggleBody = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
+  let paymentDetails = "";
+  let paymentMethod = order.payment_method || "CASH";
+  if (newStatus === "PAID") {
+    const payableAmount = payableAmountFromOrder(order);
+    const allocation = normalizePaymentAllocation(toggleBody, payableAmount);
+    if ("error" in allocation) return c.json({ error: allocation.error }, 400);
+    paymentMethod = allocation.paymentMethod;
+    paymentDetails = paymentAllocationDetails(allocation);
+    await c.env.DB.batch([
+      ...paymentAllocationStatements(c.env.DB, orderId, order.business_date, staff.id, allocation),
+      c.env.DB.prepare(
+        "UPDATE luggage_orders SET status = ?, payment_method = ?, updated_at = datetime('now') WHERE order_id = ?"
+      ).bind(newStatus, paymentMethod, orderId),
+    ]);
+  } else {
+    await c.env.DB.batch([
+      c.env.DB.prepare("DELETE FROM luggage_order_payments WHERE order_id = ?").bind(orderId),
+      c.env.DB.prepare(
+        "UPDATE luggage_orders SET status = ?, updated_at = datetime('now') WHERE order_id = ?"
+      ).bind(newStatus, orderId),
+    ]);
+  }
 
-  await insertAuditLog(c.env.DB, orderId, staff.id, "TOGGLE_PAYMENT", `${order.status} → ${newStatus}`);
+  await insertAuditLog(c.env.DB, orderId, staff.id, "TOGGLE_PAYMENT", `${order.status} → ${newStatus}${paymentDetails ? `, ${paymentDetails}` : ""}`);
 
-  return c.json({ success: true, status: newStatus });
+  return c.json({ success: true, status: newStatus, payment_method: newStatus === "PAID" ? paymentMethod : order.payment_method });
 });
 
 // POST /staff/api/orders/:id/update-price — Update payment method, tier, override amount
@@ -424,7 +499,11 @@ staffApi.post("/staff/api/orders/:id/update-price", async (c) => {
   if (!order) return c.json({ error: "Order not found" }, 404);
 
   const tier = normalizeFlyingPassTier(body.flying_pass_tier ?? order.flying_pass_tier);
-  const paymentMethod = body.payment_method ?? order.payment_method ?? "CASH";
+  const requestedPaymentMethod = body.payment_method ?? order.payment_method ?? "CASH";
+  const paymentMethod = ["CASH", "PAY_QR"].includes(String(requestedPaymentMethod))
+    ? String(requestedPaymentMethod)
+    : "";
+  if (!paymentMethod) return c.json({ error: "Invalid payment method" }, 400);
 
   const { finalPrepaid, flyingPassDiscountAmount: passDiscount } = recalculateOrderPrepaid(
     order.price_per_day,

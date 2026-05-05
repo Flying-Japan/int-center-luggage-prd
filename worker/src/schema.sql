@@ -40,6 +40,27 @@ CREATE TABLE IF NOT EXISTS luggage_orders (
   in_warehouse INTEGER NOT NULL DEFAULT 0
 );
 
+-- Actual tender allocations recorded by staff at payment time.
+-- payment_method on luggage_orders remains as the customer's requested/legacy method.
+CREATE TABLE IF NOT EXISTS luggage_order_payments (
+  payment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id TEXT NOT NULL,
+  business_date TEXT NOT NULL,
+  tender_type TEXT NOT NULL CHECK (tender_type IN ('CASH', 'PAY_QR')),
+  amount INTEGER NOT NULL CHECK (amount >= 0),
+  staff_id TEXT,
+  recorded_at TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (order_id) REFERENCES luggage_orders(order_id)
+);
+
+CREATE TABLE IF NOT EXISTS luggage_referral_counts (
+  business_date TEXT NOT NULL,
+  floor TEXT NOT NULL CHECK (floor IN ('4F', '8F')),
+  count INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (business_date, floor)
+);
+
 -- Core: Audit logs for image views
 CREATE TABLE IF NOT EXISTS luggage_audit_logs (
   log_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -248,6 +269,8 @@ CREATE INDEX IF NOT EXISTS idx_luggage_orders_status ON luggage_orders(status);
 CREATE INDEX IF NOT EXISTS idx_luggage_orders_created_at ON luggage_orders(created_at);
 CREATE INDEX IF NOT EXISTS idx_luggage_orders_in_warehouse ON luggage_orders(in_warehouse) WHERE in_warehouse = 1;
 CREATE INDEX IF NOT EXISTS idx_luggage_orders_parent_order_id ON luggage_orders(parent_order_id) WHERE parent_order_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_luggage_order_payments_order_id ON luggage_order_payments(order_id);
+CREATE INDEX IF NOT EXISTS idx_luggage_order_payments_business_date ON luggage_order_payments(business_date);
 CREATE INDEX IF NOT EXISTS idx_luggage_audit_logs_order_id ON luggage_audit_logs(order_id);
 CREATE INDEX IF NOT EXISTS idx_luggage_handover_notes_created ON luggage_handover_notes(created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_closings_date_type ON luggage_cash_closings(business_date, closing_type);

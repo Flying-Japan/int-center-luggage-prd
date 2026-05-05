@@ -8,6 +8,10 @@ workers_dev = true
 APP_ENV = "production"
 BUSINESS_OPEN_HOUR = "9"
 BUSINESS_CLOSE_HOUR = "21"
+# Browser observability for customer pages:
+# - SENTRY_BROWSER_DSN
+# - SENTRY_RELEASE
+# - CLARITY_PROJECT_ID
 
 [[d1_databases]]
 binding = "DB"

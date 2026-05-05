@@ -14,6 +14,12 @@ import { createSupabaseAdmin } from "../lib/supabase";
 import { displayOrderStatus, displayPaymentMethod, displayFlyingPassTier } from "../lib/display";
 import { fmtJST } from "../lib/dateFormat";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
+import {
+  normalizePaymentAllocation,
+  payableAmountFromOrder,
+  paymentAllocationDetails,
+  paymentAllocationStatements,
+} from "../lib/payments";
 
 type Order = {
   order_id: string;
@@ -90,6 +96,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
   }
 
   const staff = getStaff(c);
+  const error = c.req.query("error") || "";
 
   const fmtDatetimeLocal = (iso: string | null) => {
     if (!iso) return "";
@@ -120,6 +127,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
             </div>
             <a class="btn btn-secondary" href="/staff/dashboard">목록으로</a>
           </section>
+          {error && <p class="error-note" role="alert">{error}</p>}
 
           {/* Edit card */}
           <section class="card">
@@ -238,8 +246,19 @@ staffOrders.get("/staff/orders/:id", async (c) => {
                         <select class="control" name="payment_method">
                           <option value="PAY_QR" selected={order.payment_method === "PAY_QR"}>QR결제</option>
                           <option value="CASH" selected={order.payment_method === "CASH"}>현금</option>
+                          <option value="MIXED">분할결제</option>
                         </select>
                       </label>
+                      <div class="grid2">
+                        <label class="field">
+                          <span class="field-label">분할 현금</span>
+                          <input class="control" type="number" name="cash_amount" min="0" step="1" placeholder="분할일 때만" />
+                        </label>
+                        <label class="field">
+                          <span class="field-label">분할 QR</span>
+                          <input class="control" type="number" name="qr_amount" min="0" step="1" placeholder="분할일 때만" />
+                        </label>
+                      </div>
                       <button class="btn btn-primary" type="submit">결제 완료</button>
                     </form>
                   </>
@@ -324,16 +343,34 @@ staffOrders.post("/staff/orders/:id/mark-paid", editorAuth, async (c) => {
   const orderId = c.req.param("id");
   if (!orderId) return c.redirect("/staff/dashboard");
   const body = await c.req.parseBody();
-  const paymentMethod = ["CASH", "PAY_QR"].includes(String(body.payment_method)) ? String(body.payment_method) : "CASH";
   const staff = getStaff(c);
 
-  await c.env.DB.prepare(
-    "UPDATE luggage_orders SET status = 'PAID', payment_method = ?, updated_at = datetime('now') WHERE order_id = ?"
+  const order = await c.env.DB.prepare(
+    `SELECT order_id, date(created_at, '+9 hours') as business_date,
+            prepaid_amount, final_amount, extra_amount
+     FROM luggage_orders WHERE order_id = ?`
   )
-    .bind(paymentMethod, orderId)
-    .run();
+    .bind(orderId)
+    .first<{
+      order_id: string;
+      business_date: string;
+      prepaid_amount: number;
+      final_amount: number | null;
+      extra_amount: number | null;
+    }>();
+  if (!order) return c.redirect("/staff/dashboard");
 
-  await insertAuditLog(c.env.DB, orderId, staff.id, "MARK_PAID");
+  const allocation = normalizePaymentAllocation(body as Record<string, unknown>, payableAmountFromOrder(order));
+  if ("error" in allocation) return c.redirect(`/staff/orders/${orderId}?error=${encodeURIComponent(allocation.error)}`);
+
+  await c.env.DB.batch([
+    ...paymentAllocationStatements(c.env.DB, orderId, order.business_date, staff.id, allocation),
+    c.env.DB.prepare(
+      "UPDATE luggage_orders SET status = 'PAID', payment_method = ?, updated_at = datetime('now') WHERE order_id = ?"
+    ).bind(allocation.paymentMethod, orderId),
+  ]);
+
+  await insertAuditLog(c.env.DB, orderId, staff.id, "MARK_PAID", paymentAllocationDetails(allocation));
 
   return c.redirect(`/staff/orders/${orderId}`);
 });

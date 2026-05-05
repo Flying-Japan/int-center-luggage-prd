@@ -139,11 +139,22 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
              ROW_NUMBER() OVER (PARTITION BY a.order_id ORDER BY a.timestamp DESC) as rn
       FROM luggage_audit_logs a
       WHERE a.action = 'INLINE_UPDATE' AND a.details LIKE '%비고%'
+    ),
+    payment_allocations AS (
+      SELECT order_id,
+             SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) as payment_cash_amount,
+             SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) as payment_qr_amount
+      FROM luggage_order_payments
+      GROUP BY order_id
     )
-    SELECT o.order_id, o.name, o.tag_no, o.status, o.prepaid_amount, o.created_at, o.expected_pickup_at, o.note, o.payment_method, o.in_warehouse, o.parent_order_id, o.flying_pass_tier,
+    SELECT o.order_id, o.name, o.tag_no, o.status, o.prepaid_amount, o.final_amount, o.extra_amount,
+           o.created_at, o.expected_pickup_at, o.note, o.payment_method, o.in_warehouse, o.parent_order_id, o.flying_pass_tier,
+           COALESCE(pa.payment_cash_amount, 0) as payment_cash_amount,
+           COALESCE(pa.payment_qr_amount, 0) as payment_qr_amount,
            ne.note_staff_id, ne.note_updated_at
     FROM luggage_orders o
     LEFT JOIN note_edits ne ON ne.order_id = o.order_id AND ne.rn = 1
+    LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
     ${whereClause}
     ORDER BY o.created_at ASC LIMIT ? OFFSET ?`;
 
@@ -155,7 +166,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   const [orders, countsResult, filteredCountResult, refRows, dashboardSyncToken] = await Promise.all([
     c.env.DB.prepare(sql)
       .bind(...params, pageSize, (page - 1) * pageSize)
-      .all<{ order_id: string; name: string | null; tag_no: string | null; status: string; prepaid_amount: number; created_at: string; expected_pickup_at: string | null; note: string | null; payment_method: string | null; in_warehouse: number; parent_order_id: string | null; flying_pass_tier: string | null; note_staff_id: string | null; note_updated_at: string | null }>(),
+      .all<{ order_id: string; name: string | null; tag_no: string | null; status: string; prepaid_amount: number; final_amount: number | null; extra_amount: number | null; created_at: string; expected_pickup_at: string | null; note: string | null; payment_method: string | null; in_warehouse: number; parent_order_id: string | null; flying_pass_tier: string | null; payment_cash_amount: number; payment_qr_amount: number; note_staff_id: string | null; note_updated_at: string | null }>(),
     c.env.DB.prepare(
       `SELECT
         SUM(CASE WHEN status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
@@ -198,7 +209,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>짐보관 신청</title>
-        <link rel="stylesheet" href="/static/styles.css?v=20260415" />
+        <link rel="stylesheet" href="/static/styles.css?v=20260505-payments" />
       </head>
       <body class="staff-site">
         <StaffTopbar staff={staff} active="/staff/dashboard" />
@@ -325,6 +336,12 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       o.status === "CANCELLED" && "is-cancelled",
                       o.in_warehouse && "is-in-warehouse",
                     ].filter(Boolean).join(" ");
+                    const payableAmount = ((o.final_amount || 0) > 0 ? (o.final_amount || 0) : o.prepaid_amount) + (o.extra_amount || 0);
+                    const paymentCashAmount = o.payment_cash_amount || 0;
+                    const paymentQrAmount = o.payment_qr_amount || 0;
+                    const paymentTitle = paymentCashAmount > 0 || paymentQrAmount > 0
+                      ? `실제 결제: 현금 ¥${paymentCashAmount.toLocaleString()} / QR ¥${paymentQrAmount.toLocaleString()}`
+                      : `예약 선택: ${o.payment_method === "PAY_QR" ? "QR" : "현금"}`;
                     return (
                     <tr data-order-id={o.order_id} data-status={o.status} class={rowClasses || undefined}>
                       <td data-col-key="checkbox"><input type="checkbox" class="row-select" data-order-id={o.order_id} style="width:16px;height:16px;cursor:pointer" /></td>
@@ -334,7 +351,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       </td>
                       <td data-col-key="tag_no"><span class={`editable tag-pill ${tagColorClass(o.tag_no)}`} data-field="tag_no" data-order-id={o.order_id}>{o.tag_no ? String(o.tag_no).replace(/\.0$/, "") : "-"}</span></td>
                       <td data-col-key="created_time">{o.created_at ? new Date(o.created_at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
-                      <td data-col-key="price" class="price-cell" data-order-id={o.order_id} data-tier={o.flying_pass_tier || "NONE"} data-method={o.payment_method || "CASH"} style="cursor:pointer;position:relative"><span class="price-display">{`¥${o.prepaid_amount.toLocaleString()}`}</span></td>
+                      <td data-col-key="price" class="price-cell" data-order-id={o.order_id} data-tier={o.flying_pass_tier || "NONE"} data-method={o.payment_method || "CASH"} data-amount={payableAmount} title={paymentTitle} style="cursor:pointer;position:relative"><span class="price-display">{`¥${payableAmount.toLocaleString()}`}</span></td>
                       <td data-col-key="pickup_time">{(() => {
                         let pickupStyle = "";
                         if (o.expected_pickup_at) {
@@ -354,9 +371,9 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                         const isCancelled = o.status === "CANCELLED";
                         const isPending = o.status === "PAYMENT_PENDING";
                         const cls = isPaid ? "status-paid" : isCancelled ? "status-cancelled" : "status-payment_pending";
-                        const label = isPaid ? "결제완료" : isCancelled ? "취소" : "결제대기";
+                        const label = isPaid ? "결제완료" : isCancelled ? "취소" : "결제처리";
                         if (isPending) {
-                          return <span class={`status-pill ${cls} pill-clickable`} data-action="toggle-payment" data-order-id={o.order_id} style="cursor:pointer" title="클릭하여 결제완료 처리">{label}</span>;
+                          return <span class={`status-pill ${cls} pill-clickable`} data-action="toggle-payment" data-order-id={o.order_id} style="cursor:pointer" title="현금 전액 / PayPay·QR 전액 / 분할">{label}</span>;
                         }
                         return <span class={`status-pill ${cls}`}>{label}</span>;
                       })()}</td>
@@ -496,6 +513,40 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             </form>
           </details>
         </main>
+        <div id="payment-modal" class="payment-modal" aria-hidden="true">
+          <div class="payment-modal__backdrop" data-payment-cancel></div>
+          <section class="payment-modal__panel" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title">
+            <div class="payment-modal__head">
+              <div>
+                <p class="payment-modal__kicker">실제 수령 기준</p>
+                <h3 id="payment-modal-title">결제완료 처리</h3>
+              </div>
+              <button type="button" class="payment-modal__close" data-payment-cancel aria-label="닫기">×</button>
+            </div>
+            <p class="payment-modal__amount" data-payment-total>¥0</p>
+            <p class="payment-modal__hint" data-payment-hint>예약 선택: 현금</p>
+            <div class="payment-mode-row" role="group" aria-label="결제 방식">
+              <button type="button" class="payment-mode-btn" data-payment-mode="CASH">현금 전액</button>
+              <button type="button" class="payment-mode-btn" data-payment-mode="PAY_QR">PayPay/QR 전액</button>
+              <button type="button" class="payment-mode-btn" data-payment-mode="MIXED">분할</button>
+            </div>
+            <div class="payment-split-fields" data-payment-split>
+              <label class="field">
+                <span class="field-label">현금</span>
+                <input class="control" type="number" inputmode="numeric" min="0" step="1" data-payment-cash />
+              </label>
+              <label class="field">
+                <span class="field-label">PayPay/QR</span>
+                <input class="control" type="number" inputmode="numeric" min="0" step="1" data-payment-qr />
+              </label>
+              <p class="payment-modal__check" data-payment-check>합계 ¥0</p>
+            </div>
+            <div class="payment-modal__actions">
+              <button type="button" class="btn btn-secondary" data-payment-cancel>취소</button>
+              <button type="button" class="btn btn-primary" data-payment-submit>결제완료</button>
+            </div>
+          </section>
+        </div>
         <script dangerouslySetInnerHTML={{ __html: `
           (function(){
             // Free reason toggle for manual form
@@ -616,6 +667,131 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):'{}'});
             }
 
+            var paymentModal=document.getElementById('payment-modal');
+            var paymentState=null;
+            var paymentResolve=null;
+
+            function openPaymentDialog(opts){
+              return new Promise(function(resolve){
+                if(!paymentModal){resolve(null);return;}
+                var amount=Number(opts.amount||0);
+                var allowSplit=opts.allowSplit!==false&&amount>0;
+                paymentResolve=resolve;
+                paymentState={amount:amount,mode:opts.defaultMethod==='PAY_QR'?'PAY_QR':'CASH',allowSplit:allowSplit};
+                paymentModal.querySelector('#payment-modal-title').textContent=opts.title||'결제완료 처리';
+                paymentModal.querySelector('[data-payment-total]').textContent=amount>0?'¥'+amount.toLocaleString():(opts.totalLabel||'일괄 처리');
+                paymentModal.querySelector('[data-payment-hint]').textContent='예약 선택: '+(opts.defaultMethod==='PAY_QR'?'QR':'현금');
+                paymentModal.querySelector('[data-payment-cash]').value='';
+                paymentModal.querySelector('[data-payment-qr]').value='';
+                paymentModal.querySelector('[data-payment-mode="MIXED"]').style.display=allowSplit?'':'none';
+                setPaymentMode(paymentState.mode);
+                paymentModal.classList.add('is-open');
+                paymentModal.setAttribute('aria-hidden','false');
+              });
+            }
+
+            function closePaymentDialog(result){
+              if(!paymentModal)return;
+              paymentModal.classList.remove('is-open');
+              paymentModal.setAttribute('aria-hidden','true');
+              var resolve=paymentResolve;
+              paymentResolve=null;
+              paymentState=null;
+              if(resolve)resolve(result||null);
+            }
+
+            function setPaymentMode(mode){
+              if(!paymentState)return;
+              if(mode==='MIXED'&&!paymentState.allowSplit)mode='CASH';
+              paymentState.mode=mode;
+              paymentModal.querySelectorAll('[data-payment-mode]').forEach(function(btn){
+                btn.classList.toggle('is-active',btn.dataset.paymentMode===mode);
+              });
+              var split=paymentModal.querySelector('[data-payment-split]');
+              split.classList.toggle('is-open',mode==='MIXED');
+              if(mode==='MIXED'){
+                var cash=paymentModal.querySelector('[data-payment-cash]');
+                var qr=paymentModal.querySelector('[data-payment-qr]');
+                if(cash.value===''&&qr.value===''){cash.value='0';qr.value=String(paymentState.amount);}
+                updatePaymentCheck();
+                cash.focus();
+              }
+            }
+
+            function choosePaymentMode(mode){
+              setPaymentMode(mode);
+              if(mode==='CASH'||mode==='PAY_QR') submitPaymentDialog();
+            }
+
+            function updatePaymentCheck(changed){
+              if(!paymentState)return;
+              var cashInput=paymentModal.querySelector('[data-payment-cash]');
+              var qrInput=paymentModal.querySelector('[data-payment-qr]');
+              var amount=paymentState.amount;
+              var cash=Number(cashInput.value||0);
+              var qr=Number(qrInput.value||0);
+              if(changed==='cash'){
+                cash=Math.max(0,Math.min(amount,cash));
+                cashInput.value=String(cash);
+                qrInput.value=String(amount-cash);
+                qr=amount-cash;
+              }else if(changed==='qr'){
+                qr=Math.max(0,Math.min(amount,qr));
+                qrInput.value=String(qr);
+                cashInput.value=String(amount-qr);
+                cash=amount-qr;
+              }
+              var check=paymentModal.querySelector('[data-payment-check]');
+              var sum=cash+qr;
+              check.textContent='현금 ¥'+cash.toLocaleString()+' + QR ¥'+qr.toLocaleString()+' = ¥'+sum.toLocaleString();
+              check.classList.toggle('is-error',sum!==amount);
+            }
+
+            function submitPaymentDialog(){
+              if(!paymentState)return;
+              var mode=paymentState.mode;
+              var amount=paymentState.amount;
+              if(amount<=0){
+                closePaymentDialog({payment_method:mode==='PAY_QR'?'PAY_QR':'CASH'});
+                return;
+              }
+              if(mode==='CASH'){
+                closePaymentDialog({cash_amount:amount,qr_amount:0});
+                return;
+              }
+              if(mode==='PAY_QR'){
+                closePaymentDialog({cash_amount:0,qr_amount:amount});
+                return;
+              }
+              var cash=Number(paymentModal.querySelector('[data-payment-cash]').value||0);
+              var qr=Number(paymentModal.querySelector('[data-payment-qr]').value||0);
+              if(cash<0||qr<0||cash+qr!==amount){
+                alert('현금+QR 합계가 주문금액과 맞아야 합니다.');
+                return;
+              }
+              closePaymentDialog({cash_amount:cash,qr_amount:qr});
+            }
+
+            if(paymentModal){
+              paymentModal.querySelectorAll('[data-payment-mode]').forEach(function(btn){
+                btn.addEventListener('click',function(){choosePaymentMode(btn.dataset.paymentMode);});
+              });
+              paymentModal.querySelectorAll('[data-payment-cancel]').forEach(function(btn){
+                btn.addEventListener('click',function(){closePaymentDialog(null);});
+              });
+              paymentModal.querySelector('[data-payment-submit]').addEventListener('click',submitPaymentDialog);
+              paymentModal.querySelector('[data-payment-cash]').addEventListener('input',function(){updatePaymentCheck('cash');});
+              paymentModal.querySelector('[data-payment-qr]').addEventListener('input',function(){updatePaymentCheck('qr');});
+              document.addEventListener('keydown',function(e){
+                if(!paymentState)return;
+                if(e.key==='Escape')closePaymentDialog(null);
+                if(e.key==='Enter')submitPaymentDialog();
+                if(e.key==='1')choosePaymentMode('CASH');
+                if(e.key==='2')choosePaymentMode('PAY_QR');
+                if(e.key==='3')setPaymentMode('MIXED');
+              });
+            }
+
             window.refBtn=function(floor,delta){
               var msg=floor+(delta>0?' +1 추가':' -1 감소')+' 하시겠습니까?';
               if(!confirm(msg))return;
@@ -626,12 +802,41 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
             };
 
             function togglePayment(btn,oid){
-              if(!confirm('결제 상태를 변경하시겠습니까?')) return;
-              apiPost('/staff/api/orders/'+oid+'/toggle-payment').then(function(r){return r.json();}).then(function(d){
+              var row=btn.closest('tr');
+              var currentStatus=row?row.dataset.status:'';
+              if(currentStatus!=='PAID'){
+                var priceCell=row?row.querySelector('.price-cell'):null;
+                var amount=Number(priceCell?priceCell.dataset.amount:0);
+                openPaymentDialog({
+                  amount:amount,
+                  defaultMethod:priceCell?priceCell.dataset.method:'CASH',
+                  title:'결제완료 처리'
+                }).then(function(body){
+                  if(!body)return;
+                  apiPost('/staff/api/orders/'+oid+'/toggle-payment',body).then(function(r){return r.json();}).then(function(d){
+                    if(!d.success){alert(d.error||'실패');return;}
+                    var isPaid=d.status==='PAID';
+                    row.dataset.status=d.status;
+                    var priceCell=row.querySelector('.price-cell');
+                    if(priceCell&&d.payment_method) priceCell.dataset.method=d.payment_method;
+                    var payPill=row.querySelector('[data-col-key="pay_status"] .status-pill');
+                    if(payPill){
+                      payPill.className='status-pill '+(isPaid?'status-paid':'status-payment_pending');
+                      payPill.textContent=isPaid?'결제완료':'결제대기';
+                      if(isPaid){payPill.removeAttribute('data-action');payPill.style.cursor='';payPill.classList.remove('pill-clickable');}
+                    }
+                    refreshDashboardSyncToken();
+                  }).catch(function(){alert('네트워크 오류');});
+                });
+                return;
+              }
+              if(!confirm('결제대기 상태로 되돌리시겠습니까?')) return;
+              apiPost('/staff/api/orders/'+oid+'/toggle-payment',{}).then(function(r){return r.json();}).then(function(d){
                 if(!d.success){alert(d.error||'실패');return;}
                 var isPaid=d.status==='PAID';
-                var row=btn.closest('tr');
                 row.dataset.status=d.status;
+                var priceCell=row.querySelector('.price-cell');
+                if(priceCell&&d.payment_method) priceCell.dataset.method=d.payment_method;
                 var payPill=row.querySelector('[data-col-key="pay_status"] .status-pill');
                 if(payPill){
                   payPill.className='status-pill '+(isPaid?'status-paid':'status-payment_pending');
@@ -726,6 +931,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     if(!d.success){alert('저장 실패');return;}
                     cell.dataset.tier=d.flying_pass_tier;
                     cell.dataset.method=d.payment_method;
+                    cell.dataset.amount=String(d.prepaid_amount||0);
                     closePopover();
                     var pd=cell.querySelector('.price-display');if(pd)pd.textContent='¥'+Number(d.prepaid_amount).toLocaleString();
                     refreshDashboardSyncToken();
@@ -761,9 +967,19 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
 
             document.getElementById('bulk-paid').addEventListener('click',function(){
               var ids=getSelected();if(!ids.length)return;
-              if(!confirm(ids.length+'건을 일괄 결제완료 처리하시겠습니까?'))return;
-              apiPost('/staff/api/orders/bulk-action',{order_ids:ids,action:'mark_paid'}).then(function(r){return r.json();}).then(function(d){
-                if(d.success)window.location.reload();else alert('처리 실패');
+              openPaymentDialog({
+                amount:0,
+                totalLabel:ids.length+'건 선택',
+                defaultMethod:'CASH',
+                allowSplit:false,
+                title:'일괄 결제완료'
+              }).then(function(body){
+                if(!body||!body.payment_method)return;
+                var method=body.payment_method;
+                if(!confirm(ids.length+'건을 '+(method==='PAY_QR'?'QR결제':'현금')+'로 일괄 결제완료 처리하시겠습니까?'))return;
+                apiPost('/staff/api/orders/bulk-action',{order_ids:ids,action:'mark_paid',payment_method:method}).then(function(r){return r.json();}).then(function(d){
+                  if(d.success)window.location.reload();else alert(d.error||'처리 실패');
+                });
               });
             });
             document.getElementById('bulk-cancel').addEventListener('click',function(){
@@ -825,6 +1041,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                   .then(function(d){
                     if(!d.orders||!d.orders.length){td.textContent='데이터 없음';return;}
                     var o=d.orders[0];
+                    var methodLabel=o.payment_method==='PAY_QR'?'QR결제':o.payment_method==='CASH'?'현금':o.payment_method==='MIXED'?'분할결제':(o.payment_method||'-');
+                    var amount=Number((o.final_amount&&o.final_amount>0?o.final_amount:o.prepaid_amount)||0)+Number(o.extra_amount||0);
                     var grid=document.createElement('div');
                     grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px';
                     var items=[
@@ -833,8 +1051,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       ['전화',o.phone||'-'],
                       ['짐번호',o.tag_no?String(o.tag_no).replace(/\.0$/,''):'-'],
                       ['상태',o.status],
-                      ['결제수단',o.payment_method||'-'],
-                      ['금액','¥'+Number(o.prepaid_amount||0).toLocaleString()],
+                      ['결제수단',methodLabel],
+                      ['금액','¥'+amount.toLocaleString()],
                       ['Flying Pass',o.flying_pass_tier||'NONE'],
                       ['접수',o.created_at?new Date(o.created_at).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'}):'-'],
                       ['예정 픽업',o.expected_pickup_at?new Date(o.expected_pickup_at).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'}):'-'],

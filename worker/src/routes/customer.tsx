@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { AppType } from "../types";
+import type { AppType, Env } from "../types";
 import { t, normalizeLang } from "../lib/i18n";
 import { FLYING_PASS_TIERS, type FlyingPassTier } from "../services/pricing";
 import { loadCompletionMessages, applyAmountTemplate } from "../services/completionMessages";
@@ -18,7 +18,99 @@ import { escapeHtml } from "../lib/escapeHtml";
 
 const customer = new Hono<AppType>();
 const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
-const STATIC_ASSET_VERSION = "20260401-2";
+const STATIC_ASSET_VERSION = "20260505-rental-hq";
+const SENTRY_BROWSER_SDK_URL = "https://browser.sentry-cdn.com/8.51.0/bundle.tracing.min.js";
+const DEFAULT_SENTRY_RELEASE = "int-center-luggage-prd@2026-05-05";
+
+function cleanPublicConfig(value?: string) {
+  return value?.trim() || "";
+}
+
+function clarityProjectId(value?: string) {
+  const id = cleanPublicConfig(value);
+  return /^[a-z0-9]+$/i.test(id) ? id : "";
+}
+
+function customerObservabilityScripts(env: Env, pageName: string) {
+  const sentryDsn = cleanPublicConfig(env.SENTRY_BROWSER_DSN);
+  const sentryRelease = cleanPublicConfig(env.SENTRY_RELEASE) || DEFAULT_SENTRY_RELEASE;
+  const appEnv = cleanPublicConfig(env.APP_ENV) || "production";
+  const clarityId = clarityProjectId(env.CLARITY_PROJECT_ID);
+
+  return (
+    <>
+      {sentryDsn ? (
+        <>
+          <script src={SENTRY_BROWSER_SDK_URL} crossorigin="anonymous" />
+          <script dangerouslySetInnerHTML={{__html: `
+(function(){
+  if (!window.Sentry) return;
+  var integrations = [];
+  if (window.Sentry.browserTracingIntegration) {
+    integrations.push(window.Sentry.browserTracingIntegration());
+  }
+  window.Sentry.init({
+    dsn: ${JSON.stringify(sentryDsn)},
+    environment: ${JSON.stringify(appEnv)},
+    release: ${JSON.stringify(sentryRelease)},
+    integrations: integrations,
+    tracesSampleRate: 0.05,
+    initialScope: { tags: { app: "int-center-luggage-prd", page: ${JSON.stringify(pageName)} } },
+    beforeSend: function(event) {
+      if (event && event.request) {
+        delete event.request.cookies;
+        delete event.request.headers;
+      }
+      return event;
+    }
+  });
+  var reportedResourceFailures = {};
+  function resourcePath(source) {
+    try {
+      var url = new URL(source, window.location.href);
+      return url.host === window.location.host ? url.pathname : url.host + url.pathname;
+    } catch (e) {
+      return String(source).slice(0, 120);
+    }
+  }
+  window.addEventListener("error", function(event) {
+    var target = event && event.target;
+    if (!target || target === window || !target.tagName) return;
+    var tag = String(target.tagName).toLowerCase();
+    var source = target.currentSrc || target.src || target.href || "";
+    if (!source) return;
+    var path = resourcePath(source);
+    var key = tag + ":" + path;
+    if (reportedResourceFailures[key]) return;
+    reportedResourceFailures[key] = true;
+    window.Sentry.withScope(function(scope) {
+      scope.setLevel("warning");
+      scope.setTag("app", "int-center-luggage-prd");
+      scope.setTag("page", ${JSON.stringify(pageName)});
+      scope.setTag("resource_tag", tag);
+      scope.setTag("resource_path", path.slice(0, 180));
+      scope.setContext("resource", { tag: tag, source: source, path: path });
+      window.Sentry.captureMessage("customer_resource_load_failed");
+    });
+  }, true);
+})();
+          `}} />
+        </>
+      ) : null}
+      {clarityId ? (
+        <script dangerouslySetInnerHTML={{__html: `
+(function(c,l,a,r,i,t,y){
+  c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+  t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+  y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+})(window, document, "clarity", "script", ${JSON.stringify(clarityId)});
+window.clarity && window.clarity("set", "app", "int-center-luggage-prd");
+window.clarity && window.clarity("set", "page", ${JSON.stringify(pageName)});
+        `}} />
+      ) : null}
+    </>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // GET /customer — Intake form (faithful port of original FastAPI template)
@@ -110,6 +202,16 @@ customer.get("/customer", (c) => {
     en: "🔒 Photos are for ID verification only and auto-deleted after 2 weeks.",
     ja: "🔒 写真は本人確認用で、2週間後に自動削除されます。",
   };
+  const idPhotoRequirement: Record<string, string> = {
+    ko: "여권/신분증의 얼굴과 이름이 보이게 촬영해주세요. 번호·주소는 가려도 괜찮습니다.",
+    en: "Take a photo of your passport/ID with your face and name visible. You may cover numbers or address.",
+    ja: "パスポート・身分証のお顔とお名前が見えるように撮影してください。番号・住所は隠しても大丈夫です。",
+  };
+  const luggagePhotoRequirement: Record<string, string> = {
+    ko: "맡기실 캐리어와 가방이 모두 한 장에 보이게 촬영해주세요.",
+    en: "Take one photo showing all suitcases and bags you will store.",
+    ja: "お預けになるスーツケースとバッグがすべて1枚に写るように撮影してください。",
+  };
   const mobileSubmitHint: Record<string, string> = {
     ko: "접수 후 직원이 안내해 드립니다.",
     en: "Staff will assist you after check-in.",
@@ -121,14 +223,14 @@ customer.get("/customer", (c) => {
     ja: "受付後はご入力内容をもとに保管・ご案内を行います。実際の情報と異なる内容を入力された場合に生じる問題については当社で責任を負いかねるため、送信前にお名前・連絡先・受取予定日時をもう一度ご確認ください。",
   };
   const validationHeader: Record<string, string> = {
-    ko: "아래 항목을 확인해 주세요:",
-    en: "Please check the following:",
-    ja: "以下の項目をご確認ください:",
+    ko: "접수하기 전에 필요한 항목이 남아 있습니다",
+    en: "Required items are still missing",
+    ja: "送信前に必要な項目が残っています",
   };
   const validationSubtext: Record<string, string> = {
-    ko: "선택 또는 입력이 완료되지 않았습니다.",
-    en: "These fields are still missing or incomplete.",
-    ja: "未入力または未選択の項目があります。",
+    ko: "아래 항목을 입력하거나 사진을 추가한 뒤 다시 접수하기를 눌러주세요.",
+    en: "Please complete these items or add the required photos, then submit again.",
+    ja: "下記項目を入力、または必要な写真を追加してからもう一度お申し込みください。",
   };
   const discountTableExpand: Record<string, string> = {
     ko: "장기 보관 할인표 보기", en: "View Long-stay Discount Table", ja: "長期保管割引表を見る",
@@ -192,7 +294,9 @@ customer.get("/customer", (c) => {
     { days: "60+", rate: "20%" },
   ];
 
-  // Rental banners — shuffled randomly on each render
+  // Intake-form rental promo banners.
+  // These are the wide horizontal banners inserted between form sections.
+  // Do not use these on the completion screen or transactional email.
   const bannerDefs = [
     {
       url: RENTAL_PROMO_LINKS.usj.main,
@@ -236,6 +340,7 @@ customer.get("/customer", (c) => {
         <meta name="google-site-verification" content="_IzvQgZRjJtht2Gfv7iEaIOJXGvq574QDs-SXYQONYU" />
         <script async src={`https://www.googletagmanager.com/gtag/js?id=${LUGGAGE_GA4_MEASUREMENT_ID}`} />
         <script dangerouslySetInnerHTML={{__html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${LUGGAGE_GA4_MEASUREMENT_ID}');`}} />
+        {customerObservabilityScripts(c.env, "customer-intake")}
         <title>{customerTitle[lang] || customerTitle.ko} — {t("brand_name", lang)}</title>
         <link rel="preconnect" href="https://cdn.jsdelivr.net" />
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
@@ -350,6 +455,7 @@ a { color: inherit; text-decoration: none; }
 form { margin-top: 16px; }
 .field { display: grid; gap: 8px; margin-bottom: 14px; }
 .field-label { font-size: 13px; color: var(--subtext); font-weight: 600; }
+.required-mark { color: #dc2626; font-weight: 800; margin-left: 2px; }
 .inline-note { color: #1b64da; font-style: normal; font-size: 12px; font-weight: 700; }
 .control {
   width: 100%; min-height: 44px; border: 1px solid #cfdcf0;
@@ -364,7 +470,8 @@ form { margin-top: 16px; }
   outline: none; border-color: #87b1f6; background: #fff;
   box-shadow: 0 0 0 4px rgba(46,123,244,0.14);
 }
-.field-hint { color: #3f5e88; font-size: 12px; }
+.field-hint { color: #3f5e88; font-size: 12px; line-height: 1.45; }
+.field-hint + .field-hint { margin-top: -3px; }
 .file-picker {
   display: grid; grid-template-columns: auto minmax(0, 1fr);
   gap: 10px; padding: 10px 12px; border-radius: var(--radius-md);
@@ -589,7 +696,7 @@ form { margin-top: 16px; }
 }
         `}} />
       </head>
-      <body class="customer-site">
+      <body class="customer-site clarity-mask" data-clarity-mask="true">
         <div class="bg-orb bg-orb-left" aria-hidden="true"></div>
         <div class="bg-orb bg-orb-right" aria-hidden="true"></div>
 
@@ -626,6 +733,7 @@ form { margin-top: 16px; }
               method="post"
               enctype="multipart/form-data"
               autocomplete="off"
+              novalidate={true}
               data-preview-meta-empty={previewMetaEmpty[lang] || previewMetaEmpty.ko}
               data-preview-invalid-title={previewInvalidTitle[lang] || previewInvalidTitle.ko}
               data-preview-invalid-meta={previewInvalidMeta[lang] || previewInvalidMeta.ko}
@@ -662,34 +770,28 @@ form { margin-top: 16px; }
                 <span class="field-hint" style="color:#dc2626;font-weight:600">{lang === "ja" ? "⚠️ 受付完了メールが届きます — 正確に入力してください" : lang === "en" ? "⚠️ Confirmation email will be sent — please double-check" : "⚠️ 접수 완료 이메일이 발송됩니다 — 정확하게 입력해주세요"}</span>
               </label>
 
-              {/* Survey banner */}
-              <a href="https://t2m.io/centersurvey" target="_blank" rel="noopener" style="display:block;margin:8px 0 12px">
-                <picture>
-                  <source media="(min-width:600px)" srcset="/static/survey-banner-tablet.png" />
-                  <img src="/static/survey-banner-mobile.png" alt={lang === "ja" ? "アンケート 100円キャッシュバック" : lang === "en" ? "Survey — ¥100 cashback" : "설문 참여 100엔 캐시백"} style="width:100%;border-radius:10px" loading="lazy" />
-                </picture>
-              </a>
-
               {/* images */}
               <div class="grid2">
                 <label class="field">
-                  <span class="field-label">{t("id_image", lang)} <em class="inline-note">{idImageHint[lang] || idImageHint.ko}</em></span>
+                  <span class="field-label">{t("id_image", lang)} <span class="required-mark" aria-hidden="true">*</span> <em class="inline-note">{idImageHint[lang] || idImageHint.ko}</em></span>
                   <div class="file-picker">
-                    <input id="id_image" class="file-input" type="file" name="id_image" accept="image/*" required />
+                    <input id="id_image" class="file-input" type="file" name="id_image" accept="image/*" required aria-required="true" aria-describedby="id_image_hint id_image_retention" />
                     <button class="file-btn" type="button" data-file-trigger="id_image">{t("file_select", lang)}</button>
                     <span id="id_image_name" class="file-name" data-file-empty={fileNone[lang] || fileNone.ko}>{fileNone[lang] || fileNone.ko}</span>
                   </div>
-                  <span class="field-hint">{photoRetention[lang] || photoRetention.ko}</span>
+                  <span id="id_image_hint" class="field-hint">{idPhotoRequirement[lang] || idPhotoRequirement.ko}</span>
+                  <span id="id_image_retention" class="field-hint">{photoRetention[lang] || photoRetention.ko}</span>
                 </label>
 
                 <label class="field">
-                  <span class="field-label">{t("luggage_image", lang)}</span>
+                  <span class="field-label">{t("luggage_image", lang)} <span class="required-mark" aria-hidden="true">*</span></span>
                   <div class="file-picker">
-                    <input id="luggage_image" class="file-input" type="file" name="luggage_image" accept="image/*" required />
+                    <input id="luggage_image" class="file-input" type="file" name="luggage_image" accept="image/*" required aria-required="true" aria-describedby="luggage_image_hint luggage_image_retention" />
                     <button class="file-btn" type="button" data-file-trigger="luggage_image">{t("file_select", lang)}</button>
                     <span id="luggage_image_name" class="file-name" data-file-empty={fileNone[lang] || fileNone.ko}>{fileNone[lang] || fileNone.ko}</span>
                   </div>
-                  <span class="field-hint">{photoRetention[lang] || photoRetention.ko}</span>
+                  <span id="luggage_image_hint" class="field-hint">{luggagePhotoRequirement[lang] || luggagePhotoRequirement.ko}</span>
+                  <span id="luggage_image_retention" class="field-hint">{photoRetention[lang] || photoRetention.ko}</span>
                 </label>
               </div>
 
@@ -880,8 +982,8 @@ form { margin-top: 16px; }
                     </ul>
                     <h4>&#x1F512; Personal Information Notice</h4>
                     <ul class="notice-list">
-                      <li>Collected Information: Name, contact number</li>
-                      <li>Purpose of Use: Identity verification for baggage storage service</li>
+                      <li>Collected Information: name, phone number, email address, ID/passport photo, luggage photo</li>
+                      <li>Purpose of Use: baggage storage intake, identity verification, customer guidance, and confirmation email delivery</li>
                       <li>ID/luggage photos are automatically deleted within 14 days.</li>
                     </ul>
                   </article>
@@ -913,8 +1015,8 @@ form { margin-top: 16px; }
                     </ul>
                     <h4>&#x1F512; 個人情報の取扱いについて</h4>
                     <ul class="notice-list">
-                      <li>収集項目： 氏名、連絡先</li>
-                      <li>利用目的： 手荷物預かりサービスにおける本人確認のため</li>
+                      <li>収集項目： 氏名、電話番号、メールアドレス、本人確認書類（パスポート等）の写真、荷物写真</li>
+                      <li>利用目的： 手荷物預かり受付、本人確認、お客様へのご案内、受付完了メールの送信</li>
                       <li>本人確認書類・荷物写真は14日以内に自動削除されます。</li>
                     </ul>
                   </article>
@@ -946,8 +1048,8 @@ form { margin-top: 16px; }
                     </ul>
                     <h4>&#x1F512; 개인정보 수집 안내</h4>
                     <ul class="notice-list">
-                      <li>수집 항목: 이름, 연락처</li>
-                      <li>수집 및 이용 목적: 짐 보관 신원 확인용</li>
+                      <li>수집 항목: 이름, 전화번호, 이메일, 신분증/여권 사진, 짐 사진</li>
+                      <li>수집 및 이용 목적: 짐 보관 접수, 본인 확인, 고객 안내 및 접수 완료 이메일 발송</li>
                       <li>신분증/짐 사진은 14일 이내 자동 삭제됩니다.</li>
                     </ul>
                   </article>
@@ -965,7 +1067,7 @@ form { margin-top: 16px; }
               {/* submit */}
               <div class="submit-dock">
                 <p class="submit-dock-warning">{submitDoubleCheckNotice[lang] || submitDoubleCheckNotice.ko}</p>
-                <div id="validation-msg" class="validation-banner" aria-live="polite">
+                <div id="validation-msg" class="validation-banner" role="alert" aria-live="assertive" tabindex={-1}>
                   <p id="validation-msg-title" class="validation-banner-title"></p>
                   <p id="validation-msg-subtext" class="validation-banner-subtext"></p>
                   <ul id="validation-msg-list" class="validation-banner-list"></ul>
@@ -1312,15 +1414,15 @@ form { margin-top: 16px; }
     var cEl=formEl.querySelector('[name="consent_checked"]');
     var m=[];
     syncPickupHiddenValue();
-    if(!nEl||!nEl.value.trim())m.push({el:nEl,msg:'${lang === "ja" ? "お名前" : lang === "en" ? "Name" : "이름"}'});
-    if(!pEl||!pEl.value.trim())m.push({el:pEl,msg:'${lang === "ja" ? "電話番号" : lang === "en" ? "Phone" : "전화번호"}'});
-    if(!eEl||!eEl.value.trim()||!eEl.value.includes('@'))m.push({el:eEl,msg:'${lang === "ja" ? "メール" : lang === "en" ? "Email" : "이메일"}'});
+    if(!nEl||!nEl.value.trim())m.push({el:nEl,msg:'${lang === "ja" ? "お名前を入力してください" : lang === "en" ? "Enter your name" : "이름을 입력해주세요"}'});
+    if(!pEl||!pEl.value.trim())m.push({el:pEl,msg:'${lang === "ja" ? "電話番号を入力してください" : lang === "en" ? "Enter your phone number" : "전화번호를 입력해주세요"}'});
+    if(!eEl||!eEl.value.trim()||(eEl.validity&&!eEl.validity.valid))m.push({el:eEl,msg:'${lang === "ja" ? "メールアドレスを正しく入力してください" : lang === "en" ? "Enter a valid email address" : "이메일을 정확히 입력해주세요"}'});
     var sVal=Number(suitcaseEl&&suitcaseEl.value||0),bVal=Number(backpackEl&&backpackEl.value||0);
-    if(sVal<=0&&bVal<=0)m.push({el:suitcaseSelectEl,msg:'${lang === "ja" ? "荷物数量" : lang === "en" ? "Bag quantity" : "짐 수량"}'});
-    if(!pickupHiddenEl||!pickupHiddenEl.value)m.push({el:pickupDateEl,msg:'${lang === "ja" ? "受取予定日時" : lang === "en" ? "Pickup date & time" : "수령 예정 일시"}'});
-    if(iEl&&!iEl.files.length)m.push({el:iEl,msg:'${lang === "ja" ? "身分証写真" : lang === "en" ? "ID Photo" : "신분증 사진"}'});
-    if(lEl&&!lEl.files.length)m.push({el:lEl,msg:'${lang === "ja" ? "荷物写真" : lang === "en" ? "Luggage Photo" : "짐 사진"}'});
-    if(cEl&&!cEl.checked)m.push({el:cEl,msg:'${lang === "ja" ? "同意" : lang === "en" ? "Consent" : "유의사항 동의"}'});
+    if(sVal<=0&&bVal<=0)m.push({el:suitcaseSelectEl,msg:'${lang === "ja" ? "スーツケースまたはバッグの数量を選択してください" : lang === "en" ? "Select at least one suitcase or bag" : "캐리어 또는 가방 수량을 선택해주세요"}'});
+    if(!pickupHiddenEl||!pickupHiddenEl.value)m.push({el:pickupDateEl,msg:'${lang === "ja" ? "受取予定日時を選択してください" : lang === "en" ? "Select pickup date and time" : "수령 예정 일시를 선택해주세요"}'});
+    if(!iEl||!iEl.files||!iEl.files.length)m.push({el:iEl,msg:'${lang === "ja" ? "身分証写真を追加してください" : lang === "en" ? "Add an ID photo" : "신분증 사진을 추가해주세요"}'});
+    if(!lEl||!lEl.files||!lEl.files.length)m.push({el:lEl,msg:'${lang === "ja" ? "荷物全体の写真を追加してください" : lang === "en" ? "Add a full luggage photo" : "짐 전체 사진을 추가해주세요"}'});
+    if(!cEl||!cEl.checked)m.push({el:cEl,msg:'${lang === "ja" ? "注意事項への同意が必要です" : lang === "en" ? "Agree to the important notice" : "유의사항 동의가 필요합니다"}'});
     return m;
   }
 
@@ -1340,7 +1442,10 @@ form { margin-top: 16px; }
       validationMsgListEl.appendChild(li);
     });
     validationMsgEl.classList.add('is-visible');
-    if(shouldScroll!==false) validationMsgEl.scrollIntoView({behavior:'smooth',block:'center'});
+    if(shouldScroll!==false){
+      validationMsgEl.scrollIntoView({behavior:'smooth',block:'center'});
+      if(typeof validationMsgEl.focus==='function') validationMsgEl.focus({preventScroll:true});
+    }
   }
 
   function hideValidationBanner(){
@@ -1451,6 +1556,10 @@ customer.post("/customer/submit", async (c) => {
   const expectedPickupAt = String(body.expected_pickup_at || "").trim();
   const flyingPassTier = normalizeFlyingPassTier(String(body.flying_pass_tier || ""));
   const consentChecked = String(body.consent_checked || "") === "1";
+  const idImageFile = body.id_image;
+  const luggageImageFile = body.luggage_image;
+  const isUploadedImageFile = (value: unknown): value is File =>
+    value instanceof File && value.size > 0;
 
   // --- Validation ---
   if (!name) return redirect(t("required", lang) + ": " + t("name", lang));
@@ -1460,6 +1569,8 @@ customer.post("/customer/submit", async (c) => {
     return redirect(t("required", lang) + ": " + t("suitcase_qty", lang) + "/" + t("backpack_qty", lang));
   }
   if (!expectedPickupAt) return redirect(t("required", lang) + ": " + t("expected_pickup", lang));
+  if (!isUploadedImageFile(idImageFile)) return redirect(t("required", lang) + ": " + t("id_image", lang));
+  if (!isUploadedImageFile(luggageImageFile)) return redirect(t("required", lang) + ": " + t("luggage_image", lang));
   if (!consentChecked) return redirect(t("consent_label", lang));
 
   // Form sends JST time as "YYYY-MM-DDTHH:MM" — append +09:00 so JS treats it as JST
@@ -1487,27 +1598,21 @@ customer.post("/customer/submit", async (c) => {
   let luggageImageUrl: string | null = null;
 
   try {
-    const idImageFile = body.id_image;
-    if (idImageFile && idImageFile instanceof File && idImageFile.size > 0) {
-      const validation = validateImageUpload(idImageFile.size, idImageFile.type);
-      if (!validation.valid) return redirect(validation.error || t("upload_error", lang));
-      const ext = extFromContentType(idImageFile.type);
-      const key = buildImageKey("id", null, ext);
-      const buffer = await idImageFile.arrayBuffer();
-      await uploadImage(c.env.IMAGES, key, buffer, idImageFile.type);
-      idImageUrl = key;
-    }
+    const idValidation = validateImageUpload(idImageFile.size, idImageFile.type);
+    if (!idValidation.valid) return redirect(idValidation.error || t("upload_error", lang));
+    const idExt = extFromContentType(idImageFile.type);
+    const idKey = buildImageKey("id", null, idExt);
+    const idBuffer = await idImageFile.arrayBuffer();
+    await uploadImage(c.env.IMAGES, idKey, idBuffer, idImageFile.type);
+    idImageUrl = idKey;
 
-    const luggageImageFile = body.luggage_image;
-    if (luggageImageFile && luggageImageFile instanceof File && luggageImageFile.size > 0) {
-      const validation = validateImageUpload(luggageImageFile.size, luggageImageFile.type);
-      if (!validation.valid) return redirect(validation.error || t("upload_error", lang));
-      const ext = extFromContentType(luggageImageFile.type);
-      const key = buildImageKey("luggage", null, ext);
-      const buffer = await luggageImageFile.arrayBuffer();
-      await uploadImage(c.env.IMAGES, key, buffer, luggageImageFile.type);
-      luggageImageUrl = key;
-    }
+    const luggageValidation = validateImageUpload(luggageImageFile.size, luggageImageFile.type);
+    if (!luggageValidation.valid) return redirect(luggageValidation.error || t("upload_error", lang));
+    const luggageExt = extFromContentType(luggageImageFile.type);
+    const luggageKey = buildImageKey("luggage", null, luggageExt);
+    const luggageBuffer = await luggageImageFile.arrayBuffer();
+    await uploadImage(c.env.IMAGES, luggageKey, luggageBuffer, luggageImageFile.type);
+    luggageImageUrl = luggageKey;
   } catch (e) {
     console.error("Image upload failed:", e);
     return redirect(t("upload_error", lang));
@@ -1662,7 +1767,7 @@ customer.get("/customer/orders/:id", async (c) => {
             .fb-btn { display:inline-block; padding:10px 28px; background:#2383e2; color:#fff; border-radius:10px; text-decoration:none; font-size:13px; font-weight:600; }
           `}</style>
         </head>
-        <body style="background:#f1f5f9">
+        <body class="customer-site clarity-mask" data-clarity-mask="true" style="background:#f1f5f9">
           <header class="topbar"><div class="topbar-inner"><a class="brand" href="/customer"><img class="brand-logo-horizontal" src="/static/logo-horizontal.png?v=2" alt="Flying" height="26" style="mix-blend-mode:multiply" /></a></div></header>
           <div class="fb-card">
             <div class="fb-icon">
@@ -1711,6 +1816,7 @@ customer.get("/customer/orders/:id", async (c) => {
         <title>{t("success_title", lang)} — {t("brand_name", lang)}</title>
         <script async src={`https://www.googletagmanager.com/gtag/js?id=${LUGGAGE_GA4_MEASUREMENT_ID}`} />
         <script dangerouslySetInnerHTML={{__html: `window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${LUGGAGE_GA4_MEASUREMENT_ID}');`}} />
+        {customerObservabilityScripts(c.env, "customer-order-success")}
         <link rel="preconnect" href="https://cdn.jsdelivr.net" />
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
         <style dangerouslySetInnerHTML={{__html: `
@@ -1881,7 +1987,7 @@ a { color: inherit; text-decoration: none; }
 }
         `}} />
       </head>
-      <body>
+      <body class="customer-site clarity-mask" data-clarity-mask="true">
         <div class="bg-orb bg-orb-left" />
         <div class="bg-orb bg-orb-right" />
 
@@ -1985,6 +2091,10 @@ a { color: inherit; text-decoration: none; }
               en: "Rental services available right at our center",
               ja: "センターですぐレンタルできるサービス",
             };
+            // Completion-screen rental cards.
+            // Keep these /static/rental-item-* paths stable; email uses the same keys.
+            // Only replace the R2 objects when updating images. The intake form uses
+            // rental-banner-*-large/small instead.
             const rentalItems = [
               { img: `/static/rental-item-mario-band.jpg?v=${STATIC_ASSET_VERSION}`, ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: RENTAL_PROMO_LINKS.usj.finish },
               { img: `/static/rental-item-hp-wand.jpg?v=${STATIC_ASSET_VERSION}`, ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: RENTAL_PROMO_LINKS.usj.finish },
@@ -2149,7 +2259,7 @@ customer.all("/customer/*", (c) => {
   return c.html(
     <html lang={lang}>
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>{titles[lang] || titles.ko}</title></head>
-      <body>
+      <body class="customer-site clarity-mask" data-clarity-mask="true">
         <div class="bg-orb bg-orb-left" /><div class="bg-orb bg-orb-right" />
         <header class="topbar"><div class="topbar-inner"><a class="brand" href="/customer"><img class="brand-logo-horizontal" src="/static/logo-horizontal.png" alt="Flying Japan" height="36" /></a></div></header>
         <main class="container" style="text-align:center;padding:60px 16px">

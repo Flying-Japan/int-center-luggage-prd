@@ -23,6 +23,8 @@ admin.use("/staff/admin/extensions*", adminAuth);
 admin.get("/staff/admin/sales", async (c) => {
   const startDate = c.req.query("start_date") || "2025-10-01";
   const endDate = c.req.query("end_date") || new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const todayJST = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const STARTING_FLOAT = 40000;
 
   const whereClause = " WHERE sale_date BETWEEN ? AND ?";
   const params: string[] = [startDate, endDate];
@@ -38,7 +40,7 @@ admin.get("/staff/admin/sales", async (c) => {
     actualParams.push(startDate, endDate);
   }
 
-  const [dailyRows, rentalRows, actualLuggageRows] = await Promise.all([
+  const [dailyRows, rentalRows, actualLuggageRows, finalClosingRows] = await Promise.all([
     c.env.DB.prepare(
       `SELECT sale_date, people, cash, qr, luggage_total, rental_total FROM luggage_daily_sales${whereClause} ORDER BY sale_date DESC`
     ).bind(...params).all<{ sale_date: string; people: number; cash: number; qr: number; luggage_total: number; rental_total: number }>(),
@@ -46,18 +48,34 @@ admin.get("/staff/admin/sales", async (c) => {
       `SELECT business_date as sale_date, revenue_amount as rental_total FROM luggage_rental_daily_sales${rentalWhereClause} ORDER BY business_date DESC`
     ).bind(...params).all<{ sale_date: string; rental_total: number }>(),
     c.env.DB.prepare(
-      `SELECT
-        date(created_at, '+9 hours') as sale_date,
-        SUM(1 + companion_count) as order_count,
-        SUM(suitcase_qty) as suitcase_total,
-        SUM(backpack_qty) as backpack_total,
-        SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash,
-        SUM(CASE WHEN payment_method = 'PAY_QR' THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr,
-        SUM(COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount) as luggage_total
-      FROM luggage_orders
-      WHERE status IN ('PAID', 'PICKED_UP')${actualWhereClause}
+      `WITH payment_allocations AS (
+        SELECT order_id,
+               SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) as cash_amount,
+               SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) as qr_amount,
+               COUNT(*) as payment_count
+        FROM luggage_order_payments
+        GROUP BY order_id
+      )
+      SELECT
+        date(o.created_at, '+9 hours') as sale_date,
+        SUM(1 + o.companion_count) as order_count,
+        SUM(o.suitcase_qty) as suitcase_total,
+        SUM(o.backpack_qty) as backpack_total,
+        SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN (o.payment_method = 'CASH' OR o.payment_method IS NULL) THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as cash,
+        SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as qr,
+        SUM(COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount) as luggage_total
+      FROM luggage_orders o
+      LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
+      WHERE o.status IN ('PAID', 'PICKED_UP')${actualWhereClause.replaceAll("created_at", "o.created_at")}
       GROUP BY sale_date`
     ).bind(...actualParams).all<{ sale_date: string; order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number }>(),
+    c.env.DB.prepare(
+      `SELECT business_date as sale_date, total_amount, paypay_amount, actual_qr_amount
+       FROM luggage_cash_closings
+       WHERE closing_type = 'FINAL_CLOSE'
+         AND business_date BETWEEN ? AND ?
+       ORDER BY business_date DESC`
+    ).bind(...params).all<{ sale_date: string; total_amount: number; paypay_amount: number; actual_qr_amount: number }>(),
   ]);
 
   const rentalByDate = new Map<string, number>();
@@ -69,6 +87,13 @@ admin.get("/staff/admin/sales", async (c) => {
   const actualByDate = new Map<string, { order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number }>();
   for (const row of actualLuggageRows.results) {
     actualByDate.set(row.sale_date, row);
+  }
+
+  const finalClosingByDate = new Map<string, { cash: number; qr: number; luggage_total: number }>();
+  for (const row of finalClosingRows.results) {
+    const cash = Math.max(0, (row.total_amount || 0) - STARTING_FLOAT);
+    const qr = row.actual_qr_amount || row.paypay_amount || 0;
+    finalClosingByDate.set(row.sale_date, { cash, qr, luggage_total: cash + qr });
   }
 
   const DOW_JP = ["日", "月", "火", "水", "木", "金", "土"];
@@ -112,22 +137,26 @@ admin.get("/staff/admin/sales", async (c) => {
     sheetByDate.set(r.sale_date, r);
   }
 
-  interface MergedRow { date: string; dateJP: string; orders: number; suitcases: number; backpacks: number; cash: number; qr: number; luggage: number; rental: number; combined: number; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
+  interface MergedRow { date: string; dateJP: string; orders: number; suitcases: number; backpacks: number; cash: number; qr: number; luggage: number; rental: number; combined: number; isSettled?: boolean; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
   // Build rows from all data sources
   const allDates = new Set([
     ...actualLuggageRows.results.map(r => r.sale_date),
     ...dailyRows.results.map(r => r.sale_date),
     ...rentalRows.results.map(r => r.sale_date),
+    ...finalClosingRows.results.map(r => r.sale_date),
   ]);
   const mergedRows: MergedRow[] = [...allDates].sort((a, b) => b.localeCompare(a)).map(date => {
     const dow = DOW_JP[new Date(date + "T12:00:00Z").getUTCDay()];
     const flags = getHolidayFlags(date);
     const actual = actualByDate.get(date);
     const sheet = sheetByDate.get(date);
-    // DB orders are primary; fall back to sheet for dates before migration
-    const cash = actual ? actual.cash : (sheet?.cash || 0);
-    const qr = actual ? actual.qr : (sheet?.qr || 0);
-    const luggage = cash + qr;
+    const finalClosing = finalClosingByDate.get(date);
+    // Final cash closing is the source of truth for settled past dates.
+    // Orders remain useful for counts/items, but their customer-selected payment method can be wrong.
+    const useFinalClosing = !!finalClosing && date !== todayJST;
+    const cash = useFinalClosing ? finalClosing.cash : actual ? actual.cash : (sheet?.cash || 0);
+    const qr = useFinalClosing ? finalClosing.qr : actual ? actual.qr : (sheet?.qr || 0);
+    const luggage = useFinalClosing ? finalClosing.luggage_total : cash + qr;
     // Before ~3/30 migration, companion_count/backpack_qty were 0 in DB.
     // Use sheet people count when it's higher (includes companions).
     const dbPeople = actual?.order_count || 0;
@@ -146,6 +175,7 @@ admin.get("/staff/admin/sales", async (c) => {
       luggage,
       rental,
       combined: luggage + rental,
+      isSettled: useFinalClosing,
       isWeekend: flags.isWeekend,
       jpHoliday: flags.jp,
       krHoliday: flags.kr,
@@ -153,19 +183,27 @@ admin.get("/staff/admin/sales", async (c) => {
   });
 
   // Real-time today's sales from luggage_orders
-  const todayJST = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const todaySales = await c.env.DB.prepare(
-    `SELECT
+    `WITH payment_allocations AS (
+       SELECT order_id,
+              SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) as cash_amount,
+              SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) as qr_amount,
+              COUNT(*) as payment_count
+       FROM luggage_order_payments
+       GROUP BY order_id
+     )
+     SELECT
        COUNT(*) as order_count,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN 1 ELSE 0 END) as paid_count,
-       SUM(CASE WHEN status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') AND (payment_method = 'CASH' OR payment_method IS NULL) THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash_total,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') AND payment_method = 'PAY_QR' THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr_total,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as revenue_total,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN suitcase_qty ELSE 0 END) as suitcase_total,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN backpack_qty ELSE 0 END) as backpack_total
-     FROM luggage_orders
-     WHERE date(created_at, '+9 hours') = ?`
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN 1 ELSE 0 END) as paid_count,
+       SUM(CASE WHEN o.status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN o.status IN ('PAID','PICKED_UP') AND (o.payment_method = 'CASH' OR o.payment_method IS NULL) THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as cash_total,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.status IN ('PAID','PICKED_UP') AND o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as qr_total,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as revenue_total,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN o.suitcase_qty ELSE 0 END) as suitcase_total,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN o.backpack_qty ELSE 0 END) as backpack_total
+     FROM luggage_orders o
+     LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
+     WHERE date(o.created_at, '+9 hours') = ?`
   ).bind(todayJST).first<{
     order_count: number; paid_count: number; pending_count: number;
     cash_total: number; qr_total: number; revenue_total: number;
@@ -175,13 +213,22 @@ admin.get("/staff/admin/sales", async (c) => {
 
   // Real-time luggage breakdown for today (for mergedRows override)
   const todayLuggageRT = await c.env.DB.prepare(
-    `SELECT
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN 1 + companion_count ELSE 0 END) as people,
-       SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) AND status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash,
-       SUM(CASE WHEN payment_method = 'PAY_QR' AND status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as luggage_total
-     FROM luggage_orders
-     WHERE date(created_at, '+9 hours') = ? AND status != 'CANCELLED'`
+    `WITH payment_allocations AS (
+       SELECT order_id,
+              SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) as cash_amount,
+              SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) as qr_amount,
+              COUNT(*) as payment_count
+       FROM luggage_order_payments
+       GROUP BY order_id
+     )
+     SELECT
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN 1 + o.companion_count ELSE 0 END) as people,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN (o.payment_method = 'CASH' OR o.payment_method IS NULL) AND o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as cash,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' AND o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as qr,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as luggage_total
+     FROM luggage_orders o
+     LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
+     WHERE date(o.created_at, '+9 hours') = ? AND o.status != 'CANCELLED'`
   ).bind(todayJST).first<{ people: number; cash: number; qr: number; luggage_total: number }>();
   const tlrt = todayLuggageRT || { people: 0, cash: 0, qr: 0, luggage_total: 0 };
 
@@ -369,7 +416,7 @@ admin.get("/staff/admin/sales", async (c) => {
             <p class="stat-value">¥{Math.round(totalCombined / dayCount).toLocaleString()}</p>
           </div>
           <div class="card stat-card">
-            <p class="stat-label">현금 · QR</p>
+            <p class="stat-label">현금 · Pay</p>
             <p class="stat-value stat-value--sm">¥{totalCash.toLocaleString()} <span class="sales-td--muted">({cashPct}%)</span> / ¥{totalQr.toLocaleString()} <span class="sales-td--muted">({qrPct}%)</span></p>
           </div>
         </div>
@@ -389,9 +436,6 @@ admin.get("/staff/admin/sales", async (c) => {
         <section class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <h3 class="card-title">일별 매출 상세</h3>
-          <form method="post" action="/staff/admin/sales/backfill" style="margin:0">
-            <button type="submit" class="btn btn-secondary" style="font-size:11px;min-height:28px;padding:4px 10px" onclick="return confirm('Google Sheet 전체 데이터를 DB로 가져옵니다. 계속하시겠습니까?')">시트 백필</button>
-          </form>
         </div>
         <div style="overflow-x:auto">
         <table style="width:100%;border-collapse:collapse;font-size:13px">
@@ -420,6 +464,7 @@ admin.get("/staff/admin/sales", async (c) => {
                 <td class="sales-td" style={`white-space:nowrap;${r.jpHoliday || r.krHoliday ? "color:#dc2626;font-weight:600" : r.isWeekend ? "color:#2383e2;font-weight:600" : ""}`}>
                   {r.dateJP}{r.isWeekend && !r.jpHoliday && !r.krHoliday ? " 🔵" : ""}{r.jpHoliday ? ` 🇯🇵` : ""}{r.krHoliday ? ` 🇰🇷` : ""}
                   {r.isRealtime && <span style="margin-left:6px;font-size:9px;font-weight:700;color:#2563eb;background:#dbeafe;padding:1px 5px;border-radius:4px;letter-spacing:0.02em">실시간</span>}
+                  {r.isSettled && <span style="margin-left:6px;font-size:9px;font-weight:700;color:#166534;background:#dcfce7;padding:1px 5px;border-radius:4px;letter-spacing:0.02em">정산</span>}
                 </td>
                 <td class="sales-td sales-td--right">{r.orders || "-"}</td>
                 <td class="sales-td sales-td--right" style="color:#64748b">{r.suitcases || "-"}</td>
@@ -1223,11 +1268,7 @@ admin.post("/staff/admin/completion-message", async (c) => {
 
 // POST /staff/admin/sales/backfill — One-time full backfill from Google Sheets
 admin.post("/staff/admin/sales/backfill", async (c) => {
-  const creds = c.env.GOOGLE_SHEETS_CREDENTIALS;
-  if (!creds) return c.json({ success: false, error: "GOOGLE_SHEETS_CREDENTIALS not configured" }, 400);
-  const { backfillAllDailySales } = await import("../services/dailySalesSync");
-  const result = await backfillAllDailySales(c.env.DB, creds);
-  return c.redirect(`/staff/admin/sales?success=시트 백필 완료: ${result.months}개월, ${result.synced}건 동기화`);
+  return c.redirect("/staff/admin/sales?error=시트 백필은 비활성화되었습니다. 현재 SOT는 서비스 DB입니다.");
 });
 
 // POST /staff/admin/retention/run — Manual retention cleanup

@@ -7,6 +7,7 @@ export function displayPaymentMethod(method: string | null): string {
   switch (method) {
     case "PAY_QR": return "QR결제";
     case "CASH": return "현금";
+    case "MIXED": return "분할결제";
     default: return method;
   }
 }

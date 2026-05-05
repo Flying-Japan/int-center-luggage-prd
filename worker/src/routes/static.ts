@@ -78,14 +78,8 @@ staticRoutes.get("/static/logo-horizontal.png", async (c) => {
   return serveR2Image(c, "static/logo-horizontal.png", "image/png");
 });
 
-staticRoutes.get("/static/survey-banner-mobile.png", async (c) => {
-  return serveR2Image(c, "static/survey-banner-mobile.png", "image/png");
-});
-
-staticRoutes.get("/static/survey-banner-tablet.png", async (c) => {
-  return serveR2Image(c, "static/survey-banner-tablet.png", "image/png");
-});
-
+// Intake-form wide rental promo banners.
+// Used only inside the customer application form between input sections.
 staticRoutes.get("/static/rental-banner-usj-large.jpg", async (c) => {
   return serveR2Image(c, "static/rental-banner-usj-large.jpg", "image/jpeg");
 });
@@ -110,7 +104,18 @@ staticRoutes.get("/static/rental-banner-stroller-small.jpg", async (c) => {
   return serveR2Image(c, "static/rental-banner-stroller-small.jpg", "image/jpeg");
 });
 
-// Rental item card images (served from R2)
+// Completion/email rental card images.
+// Stable public paths used by both the application completion page and Brevo email.
+// Do not rename these /static/rental-item-* paths; update the R2 object contents
+// at the same keys when replacing images.
+// Source originals live in lib-assets/images/luggage-system:
+// Frame 24 -> rental-item-mario-band.jpg
+// Frame 25 -> rental-item-hp-wand.jpg
+// Frame 27 -> rental-item-dyson-straight.jpg
+// Frame 28 -> rental-item-dyson-airwrap.jpg
+// Frame 29 -> rental-item-cybex-stroller.jpg
+// Frame 30 -> rental-item-kidstravel-stroller.jpg
+// Frame 26 -> rental-item-trike-stroller.jpg
 const rentalItemImageNames = [
   "rental-item-mario-band.jpg",
   "rental-item-hp-wand.jpg",
@@ -1929,6 +1934,55 @@ body.staff-site .luggage-hover-card { border: 1px solid var(--line); border-radi
 body.staff-site .luggage-hover-card img { border-radius: 8px; }
 
 body.staff-site .col-resize-handle::after { background: rgba(47, 128, 248, 0.4); }
+
+/* ── Actual payment modal ── */
+body.staff-site .payment-modal { display: none; position: fixed; inset: 0; z-index: 1000; }
+body.staff-site .payment-modal.is-open { display: block; }
+body.staff-site .payment-modal__backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.38); }
+body.staff-site .payment-modal__panel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(460px, calc(100vw - 28px));
+  transform: translate(-50%, -50%);
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  padding: 18px;
+}
+body.staff-site .payment-modal__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+body.staff-site .payment-modal__head h3 { margin: 2px 0 0; font-size: 18px; line-height: 1.2; }
+body.staff-site .payment-modal__kicker { margin: 0; font-size: 11px; font-weight: 700; color: var(--primary); }
+body.staff-site .payment-modal__close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+body.staff-site .payment-modal__amount { margin: 14px 0 2px; font-size: 28px; font-weight: 800; letter-spacing: 0; }
+body.staff-site .payment-modal__hint { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
+body.staff-site .payment-mode-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+body.staff-site .payment-mode-btn {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+body.staff-site .payment-mode-btn.is-active { border-color: var(--primary); color: var(--primary); background: #eff6ff; }
+body.staff-site .payment-split-fields { display: none; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+body.staff-site .payment-split-fields.is-open { display: grid; }
+body.staff-site .payment-split-fields .field { margin: 0; }
+body.staff-site .payment-modal__check { grid-column: 1 / -1; margin: 0; font-size: 12px; font-weight: 700; color: var(--muted); }
+body.staff-site .payment-modal__check.is-error { color: #dc2626; }
+body.staff-site .payment-modal__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
 /* ═══════════════════════════════════════════════════
    END STAFF SITE OVERRIDES

@@ -3,7 +3,7 @@
 import { RENTAL_PROMO_LINKS } from "./rentalLinks";
 
 const BREVO_API = "https://api.brevo.com/v3/smtp/email";
-const STATIC_ASSET_VERSION = "20260417-1";
+const STATIC_ASSET_VERSION = "20260505-rental-hq";
 
 interface OrderConfirmationData {
   orderId: string;
@@ -35,6 +35,10 @@ export async function sendOrderConfirmation(
     ? `[Flying Japan] Luggage Storage Confirmed (${orderId})`
     : `[Flying Japan] 짐 보관 접수 완료 (${orderId})`;
 
+  // Transactional-email rental cards.
+  // Keep these /static/rental-item-* paths stable; the completion screen uses the same keys.
+  // Only replace the R2 objects when updating images. Do not use the intake-form
+  // rental-banner-*-large/small assets here.
   const rentalItems = [
     { img: `https://luggage.flyingjp.com/static/rental-item-mario-band.jpg?v=${STATIC_ASSET_VERSION}`, ko: "마리오 파워업밴드", en: "Mario Power-Up Band", ja: "マリオパワーアップバンド", url: RENTAL_PROMO_LINKS.usj.email },
     { img: `https://luggage.flyingjp.com/static/rental-item-hp-wand.jpg?v=${STATIC_ASSET_VERSION}`, ko: "해리포터 지팡이", en: "Harry Potter Wand", ja: "ハリーポッター杖", url: RENTAL_PROMO_LINKS.usj.email },

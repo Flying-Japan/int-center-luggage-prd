@@ -126,17 +126,26 @@ async function fetchLiveOrderSalesSummariesByDate(db: D1Database, businessDates:
   if (!dateRange) return new Map();
 
   const rows = await db.prepare(
-    `SELECT
-       date(created_at, '+9 hours') as business_date,
-       SUM(CASE WHEN payment_method = 'PAY_QR' THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr_amount,
-       SUM(CASE WHEN payment_method = 'CASH' OR payment_method IS NULL THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash_amount,
-       SUM(COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount) as total_amount,
+    `WITH payment_allocations AS (
+       SELECT order_id,
+              SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) as cash_amount,
+              SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) as qr_amount,
+              COUNT(*) as payment_count
+       FROM luggage_order_payments
+       GROUP BY order_id
+     )
+     SELECT
+       date(o.created_at, '+9 hours') as business_date,
+       SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as qr_amount,
+       SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN o.payment_method = 'CASH' OR o.payment_method IS NULL THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as cash_amount,
+       SUM(COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount) as total_amount,
        COUNT(*) as order_count
-     FROM luggage_orders
-     WHERE date(created_at, '+9 hours') >= ?
-       AND date(created_at, '+9 hours') <= ?
-       AND status != 'CANCELLED'
-     GROUP BY date(created_at, '+9 hours')`
+     FROM luggage_orders o
+     LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
+     WHERE date(o.created_at, '+9 hours') >= ?
+       AND date(o.created_at, '+9 hours') <= ?
+       AND o.status IN ('PAID', 'PICKED_UP')
+     GROUP BY date(o.created_at, '+9 hours')`
   ).bind(dateRange.rangeStart, dateRange.rangeEnd).all<{
     business_date: string;
     cash_amount: number;
@@ -172,16 +181,14 @@ async function resolveAutoSalesSummariesByDate(db: D1Database, businessDates: st
   for (const businessDate of uniqueDates) {
     const daily = dailySalesByDate.get(businessDate);
     const live = liveOrdersByDate.get(businessDate);
-    if (businessDate === today && live && live.totalAmount > 0) {
+    // Service DB is the SOT. Google Sheet rows are only a fallback for old dates
+    // that do not have service-side paid order data.
+    if (live && (live.totalAmount > 0 || live.orderCount > 0 || businessDate === today)) {
       result.set(businessDate, live);
       continue;
     }
     if (daily && daily.totalAmount > 0) {
       result.set(businessDate, daily);
-      continue;
-    }
-    if (live && live.totalAmount > 0) {
-      result.set(businessDate, live);
       continue;
     }
     if (daily) {
@@ -332,7 +339,8 @@ ops.get("/staff/cash-closing", async (c) => {
                     const businessDate = cl.business_date as string;
                     const dateDisplay = formatClosingDate(businessDate);
                     const autoAmount = autoSalesByDate.get(businessDate)?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
-                    const diff = (((cl.total_amount as number) || 0) - STARTING_FLOAT + ((cl.paypay_amount as number) || 0)) - autoAmount;
+                    const actualQr = ((cl.actual_qr_amount as number) || 0) || ((cl.paypay_amount as number) || 0);
+                    const diff = (((cl.total_amount as number) || 0) - STARTING_FLOAT + actualQr) - autoAmount;
                     return (
                       <tr style="border-bottom:1px solid #e2e8f0">
                         <td style={`padding:2px 6px;white-space:nowrap;${dateDisplay.style}`} title={dateDisplay.title}><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:inherit;font-weight:600">{dateDisplay.label}{dateDisplay.suffix}</a>{(cl as Record<string, unknown> & { has_multi: boolean }).has_multi && <span style="margin-left:4px;font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:3px;vertical-align:middle">+1</span>}</td>
@@ -371,7 +379,7 @@ ops.get("/staff/cash-closing", async (c) => {
                       total: (cl.total_amount as number) || 0,
                       paypay: (cl.paypay_amount as number) || 0,
                       auto,
-                      diff: ((cl.total_amount as number) || 0) + ((cl.paypay_amount as number) || 0) - auto,
+                      diff: ((cl.total_amount as number) || 0) - STARTING_FLOAT + (((cl.actual_qr_amount as number) || 0) || ((cl.paypay_amount as number) || 0)) - auto,
                       f4: (cl.floor_4f_count as number) || 0,
                       f8: (cl.floor_8f_count as number) || 0,
                     };
@@ -456,13 +464,14 @@ ops.post("/staff/cash-closing", async (c) => {
     "SELECT closing_id FROM luggage_cash_closings WHERE business_date = ? AND closing_type = ?"
   ).bind(businessDate, closingType).first();
   if (existing) return c.redirect("/staff/cash-closing?error=이미 해당 날짜/유형의 정산이 존재합니다");
-  // 차액 = (현금Total - 시제40000) + PayPay - 자동매출
+  // 차액 = (현금Total - 시제40000) + 실제 QR - 자동매출
   const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, businessDate);
   const checkAutoAmount = autoSales?.totalAmount ?? 0;
   const expectedAmount = checkAutoAmount;
-  const actualAmount = (totalAmount - STARTING_FLOAT) + paypayAmount;
+  const actualQrForTotal = actualQrAmount || paypayAmount;
+  const actualAmount = (totalAmount - STARTING_FLOAT) + actualQrForTotal;
   const differenceAmount = actualAmount - expectedAmount;
-  const qrDifferenceAmount = actualQrAmount - (autoSales?.qrAmount ?? 0);
+  const qrDifferenceAmount = actualQrForTotal - (autoSales?.qrAmount ?? 0);
 
   await c.env.DB.prepare(
     `INSERT INTO luggage_cash_closings (
@@ -479,7 +488,7 @@ ops.post("/staff/cash-closing", async (c) => {
   )
     .bind(
       businessDate, closingType,
-      ...denomValues, totalAmount, paypayAmount, actualQrAmount,
+      ...denomValues, totalAmount, paypayAmount, actualQrForTotal,
       actualAmount, checkAutoAmount, expectedAmount,
       differenceAmount, qrDifferenceAmount,
       rentalCash, wandRefund,
@@ -548,7 +557,8 @@ ops.get("/staff/cash-closing/:id", async (c) => {
 
   const cl = closing as Record<string, unknown>;
   const autoAmount = autoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
-  const differenceAmount = (((cl.total_amount as number) || 0) - STARTING_FLOAT + ((cl.paypay_amount as number) || 0)) - autoAmount;
+  const actualQrForTotal = ((cl.actual_qr_amount as number) || 0) || ((cl.paypay_amount as number) || 0);
+  const differenceAmount = (((cl.total_amount as number) || 0) - STARTING_FLOAT + actualQrForTotal) - autoAmount;
   const closingStaffName = (cl.staff_id as string | null)
     ? cashClosingStaffNameMap.get(cl.staff_id as string) || (cl.owner_name as string) || "-"
     : (cl.owner_name as string) || "-";
@@ -812,13 +822,14 @@ ops.post("/staff/cash-closing/:id/edit", async (c) => {
   const wandRefund = parseInt(String(body.wand_refund || "0"), 10) || 0;
   const floor4fCount = parseInt(String(body.floor_4f_count || "0"), 10) || 0;
   const floor8fCount = parseInt(String(body.floor_8f_count || "0"), 10) || 0;
-  // 차액 = (현금Total - 시제40000) + PayPay - 자동매출
+  // 차액 = (현금Total - 시제40000) + 실제 QR - 자동매출
   const cl = existing as Record<string, unknown>;
   const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, cl.business_date as string);
   const expectedAmount = autoSales?.totalAmount ?? ((cl.expected_amount as number) || 0);
-  const actualAmount = (totalAmount - STARTING_FLOAT) + paypayAmount;
+  const actualQrForTotal = actualQrAmount || paypayAmount;
+  const actualAmount = (totalAmount - STARTING_FLOAT) + actualQrForTotal;
   const differenceAmount = actualAmount - expectedAmount;
-  const qrDiff = actualQrAmount - (autoSales?.qrAmount ?? 0);
+  const qrDiff = actualQrForTotal - (autoSales?.qrAmount ?? 0);
 
   await c.env.DB.prepare(
     `UPDATE luggage_cash_closings SET
@@ -832,7 +843,7 @@ ops.post("/staff/cash-closing/:id/edit", async (c) => {
      WHERE closing_id = ?`
   )
     .bind(
-      ...denomValues, totalAmount, paypayAmount, actualQrAmount,
+      ...denomValues, totalAmount, paypayAmount, actualQrForTotal,
       actualAmount, expectedAmount, expectedAmount, differenceAmount, qrDiff,
       rentalCash, wandRefund,
       floor4fCount, floor8fCount,

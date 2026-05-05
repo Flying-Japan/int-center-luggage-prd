@@ -10,7 +10,8 @@
     "sync:cash-closing-staff": "node scripts/sync-cash-closing-staff-ids.mjs",
     "backfill:daily-sales": "node scripts/backfill-daily-sales-from-sheet.mjs",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit && node scripts/check-customer-assets.mjs",
+    "check:customer-assets": "node scripts/check-customer-assets.mjs"
   },
   "dependencies": {
     "hono": "^4.7.0",
