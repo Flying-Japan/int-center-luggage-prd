@@ -21,6 +21,15 @@ const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
 const STATIC_ASSET_VERSION = "20260505-rental-hq";
 const SENTRY_BROWSER_SDK_URL = "https://browser.sentry-cdn.com/8.51.0/bundle.tracing.min.js";
 const DEFAULT_SENTRY_RELEASE = "int-center-luggage-prd@2026-05-05";
+const OPTIONAL_EXTERNAL_RESOURCE_HOSTS = [
+  "clarity.ms",
+  "browser.sentry-cdn.com",
+  "googletagmanager.com",
+  "google-analytics.com",
+  "analytics.google.com",
+  "stats.g.doubleclick.net",
+  "static.cloudflareinsights.com",
+];
 
 function cleanPublicConfig(value?: string) {
   return value?.trim() || "";
@@ -56,8 +65,35 @@ function customerObservabilityScripts(env: Env, pageName: string) {
 (function(){
   if (!window.Sentry) return;
   var integrations = [];
+  var optionalExternalResourceHosts = ${JSON.stringify(OPTIONAL_EXTERNAL_RESOURCE_HOSTS)};
   if (window.Sentry.browserTracingIntegration) {
     integrations.push(window.Sentry.browserTracingIntegration());
+  }
+  function resourceHost(reference) {
+    var text = String(reference || "").trim().toLowerCase();
+    if (!text) return "";
+    try {
+      if (/^[a-z][a-z0-9+.-]*:\\/\\//i.test(text)) {
+        return new URL(text).host.toLowerCase();
+      }
+    } catch (e) {}
+    var firstSegment = text.split(/[/?#]/)[0];
+    if (firstSegment.indexOf(".") !== -1) return firstSegment;
+    try {
+      return new URL(text, window.location.href).host.toLowerCase();
+    } catch (e) {
+      return "";
+    }
+  }
+  function isOptionalExternalResourceFailure(source, path) {
+    var host = resourceHost(source) || resourceHost(path);
+    for (var i = 0; i < optionalExternalResourceHosts.length; i += 1) {
+      var optionalHost = optionalExternalResourceHosts[i];
+      if (host === optionalHost || host.endsWith("." + optionalHost)) {
+        return true;
+      }
+    }
+    return false;
   }
   window.Sentry.init({
     dsn: ${JSON.stringify(sentryDsn)},
@@ -67,6 +103,12 @@ function customerObservabilityScripts(env: Env, pageName: string) {
     tracesSampleRate: 0.05,
     initialScope: { tags: { app: "int-center-luggage-prd", page: ${JSON.stringify(pageName)} } },
     beforeSend: function(event) {
+      if (event && event.message === "customer_required_resource_load_failed") {
+        var resource = event.contexts && event.contexts.resource;
+        if (resource && isOptionalExternalResourceFailure(resource.source, resource.path)) {
+          return null;
+        }
+      }
       if (event && event.request) {
         delete event.request.cookies;
         delete event.request.headers;
@@ -90,6 +132,7 @@ function customerObservabilityScripts(env: Env, pageName: string) {
     var source = target.currentSrc || target.src || target.href || "";
     if (!source) return;
     var path = resourcePath(source);
+    if (isOptionalExternalResourceFailure(source, path)) return;
     var key = tag + ":" + path;
     if (reportedResourceFailures[key]) return;
     reportedResourceFailures[key] = true;
@@ -100,7 +143,7 @@ function customerObservabilityScripts(env: Env, pageName: string) {
       scope.setTag("resource_tag", tag);
       scope.setTag("resource_path", path.slice(0, 180));
       scope.setContext("resource", { tag: tag, source: source, path: path });
-      window.Sentry.captureMessage("customer_resource_load_failed");
+      window.Sentry.captureMessage("customer_required_resource_load_failed");
     });
   }, true);
 })();
