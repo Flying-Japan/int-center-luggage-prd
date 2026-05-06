@@ -24,6 +24,10 @@ const forbidden = [
     reason: "Do not reuse Microsoft Clarity project IDs from other Flying Japan products.",
   },
   {
+    pattern: /captureMessage\("customer_resource_load_failed"\)/,
+    reason: "Customer resource alerts must use the actionable required-resource failure message.",
+  },
+  {
     pattern: /Collected Information:\s*Name,\s*contact number/i,
     reason: "Privacy notice must list every customer form field that is collected.",
   },
@@ -47,6 +51,13 @@ const customerNoticeRequirements = [
   "収集項目： 氏名、電話番号、メールアドレス、本人確認書類（パスポート等）の写真、荷物写真",
 ];
 
+const customerObservabilityRequirements = [
+  "isOptionalExternalResourceFailure",
+  "customer_required_resource_load_failed",
+  "browser.sentry-cdn.com",
+  "static.cloudflareinsights.com",
+];
+
 const failures = [];
 
 for (const relativePath of checkedFiles) {
@@ -61,6 +72,12 @@ for (const relativePath of checkedFiles) {
     for (const snippet of customerNoticeRequirements) {
       if (!source.includes(snippet)) {
         failures.push(`${relativePath}: Customer privacy notice is missing required text: ${snippet}`);
+      }
+    }
+
+    for (const snippet of customerObservabilityRequirements) {
+      if (!source.includes(snippet)) {
+        failures.push(`${relativePath}: Customer observability guard is missing required text: ${snippet}`);
       }
     }
   }
