@@ -102,12 +102,13 @@ staffApi.get("/staff/api/handover/unread", async (c) => {
 staffApi.get("/staff/api/orders/new", async (c) => {
   const raw = c.req.query("since") || "";
   if (!raw) return c.json({ orders: [], count: 0 });
-  // Normalize ISO string (2026-03-30T06:25:19.000Z) to D1 format (2026-03-30 06:25:19)
-  const since = raw.replace("T", " ").replace(/\.\d+Z$/, "").replace("Z", "");
   const result = await c.env.DB.prepare(
     `SELECT order_id, name, tag_no, status, prepaid_amount, created_at, expected_pickup_at, note, payment_method, in_warehouse, parent_order_id, flying_pass_tier
-     FROM luggage_orders WHERE created_at > ? ORDER BY created_at DESC`
-  ).bind(since).all();
+     FROM luggage_orders
+     WHERE parent_order_id IS NULL
+       AND datetime(created_at) > datetime(?)
+     ORDER BY datetime(created_at) DESC`
+  ).bind(raw).all();
   return c.json({ orders: result.results, count: result.results.length });
 });
 

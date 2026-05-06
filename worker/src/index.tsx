@@ -1172,17 +1172,21 @@ export default {
           const rentalResult = await syncRentalRevenue(env.DB, env.NAVER_ORDERS_SUPABASE_URL, env.NAVER_ORDERS_SUPABASE_KEY);
           console.log(`Rental revenue sync complete: ${JSON.stringify(rentalResult)}`);
         }
-        // Auto-extend overdue orders + email + handover note
-        const { generateExtensionOrders } = await import("./services/extension");
-        const { sendExtensionNotification } = await import("./lib/brevo");
-        const extResult = await generateExtensionOrders(env.DB);
-        console.log(`Extension orders: created=${extResult.created}, skipped=${extResult.skippedDup}`);
-        if (env.BREVO_API_KEY) {
-          for (const ext of extResult.extendedOrders) {
-            if (ext.email) {
-              await sendExtensionNotification(env.BREVO_API_KEY, { name: ext.name, email: ext.email, tagNo: ext.tagNo, amount: ext.amount }).catch(e => console.error("Extension email failed:", e));
+        if (env.AUTO_EXTENSION_ENABLED === "true") {
+          // Auto-extend overdue orders + email + handover note
+          const { generateExtensionOrders } = await import("./services/extension");
+          const { sendExtensionNotification } = await import("./lib/brevo");
+          const extResult = await generateExtensionOrders(env.DB);
+          console.log(`Extension orders: created=${extResult.created}, skipped=${extResult.skippedDup}`);
+          if (env.BREVO_API_KEY) {
+            for (const ext of extResult.extendedOrders) {
+              if (ext.email) {
+                await sendExtensionNotification(env.BREVO_API_KEY, { name: ext.name, email: ext.email, tagNo: ext.tagNo, amount: ext.amount }).catch(e => console.error("Extension email failed:", e));
+              }
             }
           }
+        } else {
+          console.log("Extension orders skipped: AUTO_EXTENSION_ENABLED is not true");
         }
       })()
     );
