@@ -6,8 +6,11 @@ import { dirname, join } from "node:path";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const checkedFiles = [
+  "src/index.tsx",
   "src/routes/customer.tsx",
+  "src/routes/staffApi.ts",
   "src/lib/brevo.ts",
+  "src/services/extension.ts",
 ];
 
 const forbidden = [
@@ -58,6 +61,21 @@ const customerObservabilityRequirements = [
   "static.cloudflareinsights.com",
 ];
 
+const operationalGuardRequirements = {
+  "src/index.tsx": [
+    'env.AUTO_EXTENSION_ENABLED === "true"',
+    "Extension orders skipped: AUTO_EXTENSION_ENABLED is not true",
+  ],
+  "src/routes/staffApi.ts": [
+    "parent_order_id IS NULL",
+    "datetime(created_at) > datetime(?)",
+  ],
+  "src/services/extension.ts": [
+    "toSqliteDateTime",
+    "created_at: toSqliteDateTime(now)",
+  ],
+};
+
 const failures = [];
 
 for (const relativePath of checkedFiles) {
@@ -79,6 +97,12 @@ for (const relativePath of checkedFiles) {
       if (!source.includes(snippet)) {
         failures.push(`${relativePath}: Customer observability guard is missing required text: ${snippet}`);
       }
+    }
+  }
+
+  for (const snippet of operationalGuardRequirements[relativePath] || []) {
+    if (!source.includes(snippet)) {
+      failures.push(`${relativePath}: Operational guard is missing required text: ${snippet}`);
     }
   }
 }

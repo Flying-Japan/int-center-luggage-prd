@@ -38,6 +38,7 @@ export type Env = {
   APP_BASE_URL: string;
   DEV_STAFF_AUTH_BYPASS?: string;
   SYNC_JOBS_ENABLED?: string;
+  AUTO_EXTENSION_ENABLED?: string;
   BUSINESS_OPEN_HOUR: string;
   BUSINESS_CLOSE_HOUR: string;
 };

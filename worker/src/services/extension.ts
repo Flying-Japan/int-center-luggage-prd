@@ -7,6 +7,10 @@ import { buildOrderId } from "./orderNumber";
 
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
+function toSqliteDateTime(date: Date) {
+  return date.toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "");
+}
+
 /** Build an extension order record from a parent order row. */
 async function buildExtensionOrderRecord(
   db: D1Database,
@@ -27,7 +31,7 @@ async function buildExtensionOrderRecord(
 
   return {
     order_id: orderId,
-    created_at: now.toISOString(),
+    created_at: toSqliteDateTime(now),
     name: parent.name,
     phone: parent.phone,
     companion_count: 0,
