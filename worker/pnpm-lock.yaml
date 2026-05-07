@@ -12,8 +12,8 @@ importers:
         specifier: ^2.49.0
         version: 2.99.1
       hono:
-        specifier: ^4.7.0
-        version: 4.12.8
+        specifier: ^4.12.18
+        version: 4.12.18
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20250305.0
@@ -472,8 +472,8 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
-  hono@4.12.8:
-    resolution: {integrity: sha512-VJCEvtrezO1IAR+kqEYnxUOoStaQPGrCmX3j4wDTNOcD1uRPFpGlwQUIW8niPuvHXaTUxeOUl5MMDGrl+tmO9A==}
+  hono@4.12.18:
+    resolution: {integrity: sha512-RWzP96k/yv0PQfyXnWjs6zot20TqfpfsNXhOnev8d1InAxubW93L11/oNUc3tQqn2G0bSdAOBpX+2uDFHV7kdQ==}
     engines: {node: '>=16.9.0'}
 
   iceberg-js@0.8.1:
@@ -894,7 +894,7 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
-  hono@4.12.8: {}
+  hono@4.12.18: {}
 
   iceberg-js@0.8.1: {}
 

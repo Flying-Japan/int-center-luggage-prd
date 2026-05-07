@@ -14,8 +14,8 @@
     "check:customer-assets": "node scripts/check-customer-assets.mjs"
   },
   "dependencies": {
-    "hono": "^4.7.0",
-    "@supabase/supabase-js": "^2.49.0"
+    "@supabase/supabase-js": "^2.49.0",
+    "hono": "^4.12.18"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250305.0",
@@ -23,7 +23,11 @@
     "wrangler": "^4.0.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "sharp", "workerd"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "workerd"
+    ]
   },
   "packageManager": "pnpm@10.29.3"
 }
