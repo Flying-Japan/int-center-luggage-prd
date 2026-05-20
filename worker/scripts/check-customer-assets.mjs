@@ -56,9 +56,12 @@ const customerNoticeRequirements = [
 
 const customerObservabilityRequirements = [
   "isOptionalExternalResourceFailure",
+  "isOptionalLocalResourceFailure",
+  "shouldIgnoreResourceFailure",
   "customer_required_resource_load_failed",
   "browser.sentry-cdn.com",
   "static.cloudflareinsights.com",
+  "/static/logo-horizontal.png",
 ];
 
 const operationalGuardRequirements = {

@@ -30,6 +30,15 @@ const OPTIONAL_EXTERNAL_RESOURCE_HOSTS = [
   "stats.g.doubleclick.net",
   "static.cloudflareinsights.com",
 ];
+const OPTIONAL_LOCAL_RESOURCE_PATHS = [
+  "/static/logo-horizontal.png",
+  "/static/logo-horizontal-white.png",
+  "/static/flying-pass-white.jpg",
+];
+const OPTIONAL_LOCAL_RESOURCE_PREFIXES = [
+  "/static/rental-banner-",
+  "/static/rental-item-",
+];
 
 function cleanPublicConfig(value?: string) {
   return value?.trim() || "";
@@ -66,6 +75,8 @@ function customerObservabilityScripts(env: Env, pageName: string) {
   if (!window.Sentry) return;
   var integrations = [];
   var optionalExternalResourceHosts = ${JSON.stringify(OPTIONAL_EXTERNAL_RESOURCE_HOSTS)};
+  var optionalLocalResourcePaths = ${JSON.stringify(OPTIONAL_LOCAL_RESOURCE_PATHS)};
+  var optionalLocalResourcePrefixes = ${JSON.stringify(OPTIONAL_LOCAL_RESOURCE_PREFIXES)};
   if (window.Sentry.browserTracingIntegration) {
     integrations.push(window.Sentry.browserTracingIntegration());
   }
@@ -95,6 +106,26 @@ function customerObservabilityScripts(env: Env, pageName: string) {
     }
     return false;
   }
+  function isOptionalLocalResourceFailure(path) {
+    var resourcePath = String(path || "").split("?")[0];
+    for (var i = 0; i < optionalLocalResourcePaths.length; i += 1) {
+      if (resourcePath === optionalLocalResourcePaths[i]) {
+        return true;
+      }
+    }
+    for (var j = 0; j < optionalLocalResourcePrefixes.length; j += 1) {
+      if (resourcePath.indexOf(optionalLocalResourcePrefixes[j]) === 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+  function shouldIgnoreResourceFailure(source, path, tag) {
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return true;
+    if (isOptionalExternalResourceFailure(source, path)) return true;
+    return tag === "img" && isOptionalLocalResourceFailure(path);
+  }
   window.Sentry.init({
     dsn: ${JSON.stringify(sentryDsn)},
     environment: ${JSON.stringify(appEnv)},
@@ -105,7 +136,7 @@ function customerObservabilityScripts(env: Env, pageName: string) {
     beforeSend: function(event) {
       if (event && event.message === "customer_required_resource_load_failed") {
         var resource = event.contexts && event.contexts.resource;
-        if (resource && isOptionalExternalResourceFailure(resource.source, resource.path)) {
+        if (resource && shouldIgnoreResourceFailure(resource.source, resource.path, resource.tag)) {
           return null;
         }
       }
@@ -132,7 +163,7 @@ function customerObservabilityScripts(env: Env, pageName: string) {
     var source = target.currentSrc || target.src || target.href || "";
     if (!source) return;
     var path = resourcePath(source);
-    if (isOptionalExternalResourceFailure(source, path)) return;
+    if (shouldIgnoreResourceFailure(source, path, tag)) return;
     var key = tag + ":" + path;
     if (reportedResourceFailures[key]) return;
     reportedResourceFailures[key] = true;
