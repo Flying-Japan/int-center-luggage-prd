@@ -7,6 +7,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const checkedFiles = [
   "src/index.tsx",
+  "src/middleware/security.ts",
   "src/routes/customer.tsx",
   "src/routes/staffApi.ts",
   "src/lib/brevo.ts",
@@ -66,6 +67,12 @@ const customerObservabilityRequirements = [
 ];
 
 const operationalGuardRequirements = {
+  "src/middleware/security.ts": [
+    "isCustomerPage",
+    'c.res.headers.set("Cache-Control", "no-store, max-age=0")',
+    'c.res.headers.set("Pragma", "no-cache")',
+    'c.res.headers.set("Expires", "0")',
+  ],
   "src/index.tsx": [
     'env.AUTO_EXTENSION_ENABLED === "true"',
     "Extension orders skipped: AUTO_EXTENSION_ENABLED is not true",

@@ -25,6 +25,7 @@ export async function securityHeaders(c: Context, next: Next) {
   const contentType = c.res.headers.get("Content-Type") || "";
   const path = new URL(c.req.url).pathname;
   const isStaffPage = path.startsWith("/staff/") || path === "/staff";
+  const isCustomerPage = path === "/customer" || path.startsWith("/customer/");
   if (contentType.includes("text/html")) {
     const html = await c.res.text();
     const injectedHtml = isStaffPage ? html : injectGa4Snippet(html);
@@ -33,6 +34,12 @@ export async function securityHeaders(c: Context, next: Next) {
       statusText: c.res.statusText,
       headers: new Headers(c.res.headers),
     });
+
+    if (isCustomerPage) {
+      c.res.headers.set("Cache-Control", "no-store, max-age=0");
+      c.res.headers.set("Pragma", "no-cache");
+      c.res.headers.set("Expires", "0");
+    }
   }
 
   c.res.headers.set("X-Frame-Options", "DENY");
