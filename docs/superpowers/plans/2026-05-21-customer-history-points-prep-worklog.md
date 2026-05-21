@@ -1,56 +1,56 @@
 # Customer History And Points Prep Work Log
 
-## 2026-05-21 WORK
+## 2026-05-21 WORK (W1-W2 + W8 helper foundation)
 
 진행 요약:
 - Account `person_id`를 주문과 연결할 수 있도록 `account_person_id` 기반 nullable 스키마를 추가했다.
 - 포인트 잔액 스냅샷과 포인트 거래 원장 테이블을 추가했다.
 - 최근 이력 조회와 포인트 잔액 조회를 담당하는 customer context 서비스를 추가했다.
 - 포인트 사용량 계산과 주문 수금액 계산 helper를 추가했다.
-- 관리 매출과 운영 정산의 주문 금액 집계가 공통 helper SQL을 쓰도록 변경했다.
-- live route는 migration 선적용 없이도 배포할 수 있도록 기존 컬럼만 참조하는 호환 모드로 연결했다.
-
-최종 변경 파일 목록:
-- `worker/src/schema.sql`
-- `worker/migrations/20260521_customer_history_points_prep.sql`
-- `worker/src/types.ts`
-- `worker/src/services/customerContext.ts`
-- `worker/src/services/customerContext.test.ts`
-- `worker/src/services/points.ts`
-- `worker/src/services/points.test.ts`
-- `worker/src/services/orderAmounts.ts`
-- `worker/src/services/orderAmounts.test.ts`
-- `worker/src/routes/admin.tsx`
-- `worker/src/routes/operations.tsx`
 
 체크리스트:
-- [x] W1 일부: `luggage_customer_profiles` 추가.
-- [x] W1 일부: `luggage_customer_point_accounts` 추가.
-- [x] W1 일부: `luggage_customer_point_transactions` 추가.
-- [x] W1 일부: `luggage_orders`에 계정/포인트/이전 preset 준비 컬럼 추가.
-- [x] W1 일부: 최근 이력/포인트 조회용 인덱스 추가.
-- [x] W2 일부: `CustomerSession`, `CustomerProfile`, `RecentCustomerOrder`, `CustomerContext` 타입 추가.
-- [x] W2 일부: `getCurrentCustomer`, `loadCustomerContext`, `loadRecentCustomerOrders`, `loadPointBalance` 추가.
-- [x] 선행 안정화: 포인트 전액 사용/패스 전액 할인 시 매출 집계가 `prepaid_amount`로 되튀지 않는 주문 금액 helper 추가.
+- [x] W1: schema + migration foundation (orders nullable + 3 new tables + indexes)
+- [x] W2: customer context adapter (`getCurrentCustomer`, `loadCustomerContext`, `loadRecentCustomerOrders`, `loadPointBalance`)
+- [x] W8 일부: amount aggregation helper foundation (`orderCollectedAmountSql`)
+
+## 2026-05-21 WORK 2 (W3-W7 full implementation)
+
+진행 요약:
+- 포인트 ledger의 5개 mutation helper와 status-transition orchestrator를 추가했다.
+- `/customer` GET을 async로 전환하고 customer context 로드, 프로필 카드, 최근 이력 카드, 포인트 입력 UI를 인증 고객에게만 노출했다.
+- `/api/price-preview`가 `points_to_use`를 받고 서버에서 잔액/금액으로 캐핑한 뒤 `final_amount`/`point_discount_amount`를 반환하도록 했다.
+- `/customer/submit`이 인증 시 Account 프로필로 name/phone/email을 덮어쓰고, INSERT 전에 포인트를 RESERVE하며, INSERT 실패 시 release + R2 cleanup을 수행하도록 했다.
+- staff mark-paid / cancel / bulk-action / toggle-payment 라우트가 `applyPointEffectsForStatusChange`를 통해 commit/earn/release/void을 적용하도록 hook을 걸었다.
+- vitest 인프라 (`@cloudflare/vitest-pool-workers`, `vitest.config.mts`, `pnpm test` script)를 prep 브랜치에 추가했다.
+
+체크리스트:
+- [x] W3: `reservePointUseForOrder`, `commitReservedPointUseForOrder`, `releaseReservedPointUseForOrder`, `postEarnedPointsForPaidOrder`, `voidEarnedPointsForOrder`, `applyPointEffectsForStatusChange`
+- [x] W4: profile summary + recent history cards + `applyRecentOrderPreset` JS
+- [x] W5: point input + 전액사용 button + price-preview API points field
+- [x] W6: submit flow uses profile + caps + reserves + insert + release-on-failure
+- [x] W7: mark-paid, cancel, bulk-action, toggle-payment status hooks
+- [x] Vitest infra (`@cloudflare/vitest-pool-workers`, `vitest.config.mts`, `pnpm test`)
 
 실행 명령어 및 결과:
-- `pnpm --dir worker test src/services/orderAmounts.test.ts src/services/points.test.ts src/services/customerContext.test.ts` -> 통과, 3 files / 14 tests.
-- `pnpm --dir worker typecheck` -> 통과.
-- `pnpm --dir worker test` -> 통과, 12 files / 50 tests.
+- `pnpm --dir worker typecheck` → 통과
+- `pnpm --dir worker test` → 통과 (3 files / 32 tests)
 
 커밋:
-- 없음. 사용자가 커밋을 요청하지 않아 작업트리에만 반영했다.
+- `bc82429` feat(worker): customer history + points prep — services, migration, schema
+- `ad28d2f` feat(worker): add CustomerSession + AppVariables.customer (history/points prep)
+- `33bd630` chore(worker): add vitest infra for prep tests
+- `c0597c7` feat(worker): customer history + points UI/submit + ledger mutation helpers
+- `8c93a95` feat(worker): wire point ledger effects into staff status transitions
+
+PR: https://github.com/Flying-Japan/int-center-luggage-prd/pull/6
 
 주의할 리스크:
-- 실제 고객 context/포인트 UI를 route에 연결하기 전에는 `worker/migrations/20260521_customer_history_points_prep.sql` 적용이 필요하다.
-- SQLite/D1은 `ALTER TABLE ADD COLUMN IF NOT EXISTS`를 지원하지 않으므로 migration 재실행 전 `schema_migrations` 확인이 필요하다.
-- 실제 포인트 적립/차감 hook과 고객 폼 UI는 아직 구현하지 않았다.
+- live 코드가 새 컬럼을 참조하기 시작했으므로 **이 PR이 머지되기 전에** `worker/migrations/20260521_customer_history_points_prep.sql`을 D1에 적용해야 한다.
+- 로그인 미들웨어가 `c.set("customer", session)`을 세팅하기 전까지 인증 path는 비활성. guest path는 그대로 동작.
+- admin/operations 매출 SQL을 `orderCollectedAmountSql`로 교체하는 작업은 phase 3 PR에서 별도 진행 중. 머지 순서 dependency 주의.
 
-Completed checklist items in this WORK:
-- W1 schema/migration foundation, W2 customer context foundation, amount aggregation helper foundation.
-
-Validations passed in this state:
-- Targeted service tests, full worker test suite, and worker typecheck.
-
-Risk points to watch in Review (if any):
-- Deploy/migration ordering and existing schema drift around `view_token` / `luggage_referral_counts`.
+남은 작업 (이 PR scope 밖):
+- 로그인 / 회원가입 UI + middleware
+- 고객 마이페이지 + 포인트 상세 내역
+- 운영자용 포인트 수동 조정 UI
+- admin.tsx / operations.tsx의 매출 expression이 `orderCollectedAmountSql`을 채택 (phase 3 PR)
