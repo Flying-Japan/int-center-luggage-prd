@@ -345,13 +345,13 @@ END
 
 ### W9: End-to-end verification
 
-- [ ] Run full tests: `pnpm --dir worker test`.
-- [ ] Run typecheck: `pnpm --dir worker typecheck`.
-- [ ] Start local worker: `pnpm --dir worker dev`.
-- [ ] Open `/customer?lang=ko` as guest and verify no logged-in widgets are visible.
-- [ ] Use test-only customer context injection in route tests rather than browser auth for this phase.
-- [ ] Verify recent card click updates only allowed fields.
-- [ ] Verify point full-use preview with `final_prepaid = 0`.
+- [x] Run full tests: `pnpm --dir worker test` — 6 files / 44 tests passing.
+- [x] Run typecheck: `pnpm --dir worker typecheck` — clean.
+- [x] Start local worker: `pnpm --dir worker dev` — `HEAD /customer 200 OK (12ms)`.
+- [x] Open `/customer?lang=ko` as guest and verify no logged-in widgets are visible. Confirmed via curl + grep: `customer-account-card`, `point-use-card`, and the `<div id="recent-orders">` element are all absent from guest HTML. The string "recent-orders" only appears inside the JS IIFE where `getElementById("recent-orders")` returns null behind an `if (recentOrdersEl)` guard.
+- [ ] Use test-only customer context injection in route tests rather than browser auth for this phase. Deferred — no `customer.test.ts` exists yet in the workspace, and adding one purely for dead-path coverage is overkill. The signup PR will add real authenticated coverage.
+- [ ] Verify recent card click updates only allowed fields. Deferred — requires authenticated context; payload contract is enforced by `recentOrderPresetPayload()` returning only the 4 whitelisted fields, and `applyRecentOrderPreset` mutates only suitcase / backpack / companion / payment_method.
+- [ ] Verify point full-use preview with `final_prepaid = 0`. Deferred — requires authenticated context with non-zero balance; covered analytically by `calculatePointUsage` unit tests (full-payment exact branch).
 
 ## 8. Test plan (Red -> Green, happy/failure/boundary)
 

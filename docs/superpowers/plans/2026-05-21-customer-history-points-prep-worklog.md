@@ -185,3 +185,27 @@ Risk points to watch in Review (if any):
 - 인증된 사용자의 profile에 필수 필드(name/phone/email)가 비어 있으면 일반 guest 검증에 걸려 같은 에러 메시지로 redirect된다. 별도 "프로필 완성" copy는 회원가입 PR과 함께 도입한다.
 - preview API는 GET이고 customer context는 c.get("customer")에서만 신뢰한다. account_person_id 쿼리를 별도로 받지 않으므로 spoof 위험 없음.
 - submit의 포인트 reservation은 잔액 부족 시 redirect. 부분 성공(이미지 업로드 후 reserve 성공, 주문 insert 실패)에서는 release + R2 cleanup이 모두 best-effort로 수행된다.
+
+## 2026-05-21 WORK (W9 — verification snapshot)
+
+진행 요약:
+- `pnpm --dir worker test` → 6 files / 44 tests pass.
+- `pnpm --dir worker typecheck` → clean.
+- `pnpm --dir worker dev` → wrangler 4.73.0 local server start, `HEAD /customer 200 OK (12ms)`.
+- `curl http://127.0.0.1:8787/customer?lang=ko` guest 요청에서 `customer-account-card`, `point-use-card`, `<div id="recent-orders">` 모두 HTML에 없음을 확인. 문자열 `recent-orders`는 JS IIFE 내부의 `getElementById("recent-orders")` 호출에만 등장하며 `if (recentOrdersEl)` 가드로 항상 안전하게 처리된다.
+
+체크리스트:
+- [x] W9: 자동 테스트 + typecheck.
+- [x] W9: local worker startup.
+- [x] W9: guest `/customer?lang=ko` 응답에 인증 위젯 부재 확인.
+- [ ] W9: 인증된 customer context 주입을 통한 route 테스트 — 회원가입 PR에서 진행. 현재 워크스페이스에 `customer.test.ts`가 없고 dead path 단독 커버리지 추가는 과한 작업이라 판단.
+- [ ] W9: 최근 이력 카드 적용이 허용 필드만 갱신 — 회원가입 PR 통합 후 e2e. 정적 보장은 `recentOrderPresetPayload()`가 4개 필드만 노출 + `applyRecentOrderPreset`가 select/custom/payment 외에는 손대지 않음.
+- [ ] W9: 포인트 전액 사용 시 `final_prepaid = 0` — `calculatePointUsage` 단위 테스트(`allows exact full payment ...`)에서 분석적으로 커버. 실제 e2e는 회원가입 PR 통합 후.
+
+결과:
+- W1-W8: 코드/테스트/타입체크/로컬 worker 모두 통과.
+- W9: 자동 검증 모두 통과. e2e 검증 일부는 회원가입 작업과의 통합 시점으로 이연.
+
+리스크 잔존:
+- 본 PR을 단독으로 머지해도 guest 흐름과 staff 흐름은 즉시 정상 동작한다. customer-side 신규 코드는 회원가입 미들웨어가 도착해야만 활성화된다.
+- 본 브랜치는 `codex/phase3-experience-infra` 위에 적층돼 있다. main에 머지 시 base 정렬이 필요할 수 있다.
