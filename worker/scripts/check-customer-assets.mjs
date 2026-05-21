@@ -31,6 +31,10 @@ const forbidden = [
     reason: "Customer resource alerts must use the actionable required-resource failure message.",
   },
   {
+    pattern: /captureMessage\("customer_required_resource_load_failed"\)/,
+    reason: "Customer browser resource-load alerts are noisy; suppress this message instead of emitting it.",
+  },
+  {
     pattern: /Collected Information:\s*Name,\s*contact number/i,
     reason: "Privacy notice must list every customer form field that is collected.",
   },
@@ -55,13 +59,10 @@ const customerNoticeRequirements = [
 ];
 
 const customerObservabilityRequirements = [
-  "isOptionalExternalResourceFailure",
-  "isOptionalLocalResourceFailure",
-  "shouldIgnoreResourceFailure",
+  "SUPPRESSED_RESOURCE_FAILURE_MESSAGE",
   "customer_required_resource_load_failed",
+  "event.message === suppressedResourceFailureMessage",
   "browser.sentry-cdn.com",
-  "static.cloudflareinsights.com",
-  "/static/logo-horizontal.png",
 ];
 
 const operationalGuardRequirements = {

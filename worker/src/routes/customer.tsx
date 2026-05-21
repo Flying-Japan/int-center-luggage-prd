@@ -21,24 +21,7 @@ const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
 const STATIC_ASSET_VERSION = "20260505-rental-hq";
 const SENTRY_BROWSER_SDK_URL = "https://browser.sentry-cdn.com/8.51.0/bundle.tracing.min.js";
 const DEFAULT_SENTRY_RELEASE = "int-center-luggage-prd@2026-05-05";
-const OPTIONAL_EXTERNAL_RESOURCE_HOSTS = [
-  "clarity.ms",
-  "browser.sentry-cdn.com",
-  "googletagmanager.com",
-  "google-analytics.com",
-  "analytics.google.com",
-  "stats.g.doubleclick.net",
-  "static.cloudflareinsights.com",
-];
-const OPTIONAL_LOCAL_RESOURCE_PATHS = [
-  "/static/logo-horizontal.png",
-  "/static/logo-horizontal-white.png",
-  "/static/flying-pass-white.jpg",
-];
-const OPTIONAL_LOCAL_RESOURCE_PREFIXES = [
-  "/static/rental-banner-",
-  "/static/rental-item-",
-];
+const SUPPRESSED_RESOURCE_FAILURE_MESSAGE = "customer_required_resource_load_failed";
 
 function cleanPublicConfig(value?: string) {
   return value?.trim() || "";
@@ -74,57 +57,9 @@ function customerObservabilityScripts(env: Env, pageName: string) {
 (function(){
   if (!window.Sentry) return;
   var integrations = [];
-  var optionalExternalResourceHosts = ${JSON.stringify(OPTIONAL_EXTERNAL_RESOURCE_HOSTS)};
-  var optionalLocalResourcePaths = ${JSON.stringify(OPTIONAL_LOCAL_RESOURCE_PATHS)};
-  var optionalLocalResourcePrefixes = ${JSON.stringify(OPTIONAL_LOCAL_RESOURCE_PREFIXES)};
+  var suppressedResourceFailureMessage = ${JSON.stringify(SUPPRESSED_RESOURCE_FAILURE_MESSAGE)};
   if (window.Sentry.browserTracingIntegration) {
     integrations.push(window.Sentry.browserTracingIntegration());
-  }
-  function resourceHost(reference) {
-    var text = String(reference || "").trim().toLowerCase();
-    if (!text) return "";
-    try {
-      if (/^[a-z][a-z0-9+.-]*:\\/\\//i.test(text)) {
-        return new URL(text).host.toLowerCase();
-      }
-    } catch (e) {}
-    var firstSegment = text.split(/[/?#]/)[0];
-    if (firstSegment.indexOf(".") !== -1) return firstSegment;
-    try {
-      return new URL(text, window.location.href).host.toLowerCase();
-    } catch (e) {
-      return "";
-    }
-  }
-  function isOptionalExternalResourceFailure(source, path) {
-    var host = resourceHost(source) || resourceHost(path);
-    for (var i = 0; i < optionalExternalResourceHosts.length; i += 1) {
-      var optionalHost = optionalExternalResourceHosts[i];
-      if (host === optionalHost || host.endsWith("." + optionalHost)) {
-        return true;
-      }
-    }
-    return false;
-  }
-  function isOptionalLocalResourceFailure(path) {
-    var resourcePath = String(path || "").split("?")[0];
-    for (var i = 0; i < optionalLocalResourcePaths.length; i += 1) {
-      if (resourcePath === optionalLocalResourcePaths[i]) {
-        return true;
-      }
-    }
-    for (var j = 0; j < optionalLocalResourcePrefixes.length; j += 1) {
-      if (resourcePath.indexOf(optionalLocalResourcePrefixes[j]) === 0) {
-        return true;
-      }
-    }
-    return false;
-  }
-  function shouldIgnoreResourceFailure(source, path, tag) {
-    if (typeof navigator !== "undefined" && navigator.onLine === false) return true;
-    if (typeof document !== "undefined" && document.visibilityState === "hidden") return true;
-    if (isOptionalExternalResourceFailure(source, path)) return true;
-    return tag === "img" && isOptionalLocalResourceFailure(path);
   }
   window.Sentry.init({
     dsn: ${JSON.stringify(sentryDsn)},
@@ -134,11 +69,8 @@ function customerObservabilityScripts(env: Env, pageName: string) {
     tracesSampleRate: 0.05,
     initialScope: { tags: { app: "int-center-luggage-prd", page: ${JSON.stringify(pageName)} } },
     beforeSend: function(event) {
-      if (event && event.message === "customer_required_resource_load_failed") {
-        var resource = event.contexts && event.contexts.resource;
-        if (resource && shouldIgnoreResourceFailure(resource.source, resource.path, resource.tag)) {
-          return null;
-        }
+      if (event && event.message === suppressedResourceFailureMessage) {
+        return null;
       }
       if (event && event.request) {
         delete event.request.cookies;
@@ -147,36 +79,6 @@ function customerObservabilityScripts(env: Env, pageName: string) {
       return event;
     }
   });
-  var reportedResourceFailures = {};
-  function resourcePath(source) {
-    try {
-      var url = new URL(source, window.location.href);
-      return url.host === window.location.host ? url.pathname : url.host + url.pathname;
-    } catch (e) {
-      return String(source).slice(0, 120);
-    }
-  }
-  window.addEventListener("error", function(event) {
-    var target = event && event.target;
-    if (!target || target === window || !target.tagName) return;
-    var tag = String(target.tagName).toLowerCase();
-    var source = target.currentSrc || target.src || target.href || "";
-    if (!source) return;
-    var path = resourcePath(source);
-    if (shouldIgnoreResourceFailure(source, path, tag)) return;
-    var key = tag + ":" + path;
-    if (reportedResourceFailures[key]) return;
-    reportedResourceFailures[key] = true;
-    window.Sentry.withScope(function(scope) {
-      scope.setLevel("warning");
-      scope.setTag("app", "int-center-luggage-prd");
-      scope.setTag("page", ${JSON.stringify(pageName)});
-      scope.setTag("resource_tag", tag);
-      scope.setTag("resource_path", path.slice(0, 180));
-      scope.setContext("resource", { tag: tag, source: source, path: path });
-      window.Sentry.captureMessage("customer_required_resource_load_failed");
-    });
-  }, true);
 })();
           `}} />
         </>
