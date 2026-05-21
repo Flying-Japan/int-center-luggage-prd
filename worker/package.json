@@ -11,15 +11,18 @@
     "backfill:daily-sales": "node scripts/backfill-daily-sales-from-sheet.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit && node scripts/check-customer-assets.mjs",
-    "check:customer-assets": "node scripts/check-customer-assets.mjs"
+    "check:customer-assets": "node scripts/check-customer-assets.mjs",
+    "test": "vitest run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",
     "hono": "^4.12.18"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.14.9",
     "@cloudflare/workers-types": "^4.20250305.0",
     "typescript": "^5.7.0",
+    "vitest": "^4.1.7",
     "wrangler": "^4.0.0"
   },
   "pnpm": {
