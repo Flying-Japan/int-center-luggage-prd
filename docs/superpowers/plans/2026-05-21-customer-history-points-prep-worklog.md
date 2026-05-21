@@ -139,3 +139,49 @@ Risk points to watch in Review (if any):
 - `applyPointEffectsForStatusChange`의 cancel 경로는 `fromStatus`를 "UNKNOWN"으로 호출한다. 헬퍼는 toStatus=CANCELLED 분기만 보므로 동작에는 영향이 없지만, 추후 fromStatus 의존 로직(예: 적립 시점 정책 변경)이 추가될 때 cancel route에서 사전 SELECT가 필요해질 수 있다.
 - `staffApi.bulk-action`은 UPDATE의 statusGuard로 인해 일부 order는 status가 실제로 바뀌지 않을 수 있다. 헬퍼 호출은 모든 order에 무차별로 실행되지만 각 mutator가 reservation/earn 부재 시 noop이라 안전하다.
 - staff 상세 페이지의 포인트 행은 모든 status에서 동일하게 보인다. 결제 전(`RESERVED`), 결제 후(`POSTED`), 취소(`VOIDED`) 구분은 `point_usage_status` 컬럼의 raw 값을 그대로 노출한다. 더 친절한 라벨링은 후속.
+
+## 2026-05-21 WORK (W4 + W5 + W6 — customer-side scaffolding, dead code until signup ships)
+
+전제:
+- 회원가입/로그인 작업은 별도 진행이라 본 작업 시점에는 `c.set("customer")`를 채워 주는 미들웨어가 없다. 모든 새 UI 분기와 포인트 사용 경로는 `customerContext.isAuthenticated === false`에 묶여 있어 실제로는 비활성 상태다.
+- 따라서 본 패치는 회원가입 PR이 머지되는 순간 즉시 동작하도록 준비만 해 둔 dead-path code다. guest 흐름은 100% 그대로다.
+
+진행 요약:
+- `customer.get("/customer")`를 async로 전환하고 `loadCustomerContext`를 호출해 한 번만 로드한다.
+- `form` 직전에 `customer-account-card` 섹션을 conditional로 추가했다 (프로필 요약, 보유 포인트, 포인트 사용 input, 최근 이력 카드). 비인증 사용자에게는 전혀 렌더링되지 않는다.
+- 최근 이력 적용 버튼은 `data-recent-orders` JSON과 `data-recent-order-id` 위임 클릭으로 `applyRecentOrderPreset(payload)`를 호출한다. payload는 plan §3 invariant에 따라 `order_id`, `suitcase_qty`, `backpack_qty`, `companion_count`, `payment_method`만 담는다.
+- `/api/price-preview`를 async로 바꾸고 `points_to_use` 쿼리를 받아 `calculatePointUsage`로 캡 처리한다. 응답에 `gross_payable_amount`, `points_to_use`, `point_balance`, `final_prepaid`를 추가했다.
+- form 안에 hidden mirror `<input name="points_to_use">`를 두고 카드의 포인트 input이 이를 업데이트한다. 미인증 사용자에게는 항상 0이 전달된다.
+- `POST /customer/submit`에서 customer context를 로드해 인증된 사용자의 profile 값으로 body의 name/phone/email을 덮어쓴다. spoofed body 값은 서버에서 사용되지 않는다.
+- submit 경로에 포인트 reservation 단계를 추가했다. 잔액 부족 시 redirect, 주문 insert 실패 시 `releaseReservedPointUseForOrder`로 보상하고 기존 R2 cleanup도 유지한다.
+- `luggage_orders` INSERT가 `account_person_id`, `gross_amount`, `point_discount_amount`, `points_used`, `point_usage_status`를 함께 저장하도록 확장했다.
+
+최종 변경 파일 목록:
+- `worker/src/routes/customer.tsx` (GET + 카드 + JS + preview API + submit)
+- `docs/superpowers/plans/2026-05-21-customer-history-points-prep.md` (W4 + W5 + W6 체크리스트)
+- `docs/superpowers/plans/2026-05-21-customer-history-points-prep-worklog.md` (본 항목)
+
+체크리스트:
+- [x] W4: GET async 전환, customer context 로드.
+- [x] W4: account card (profile + 잔액 + 최근 이력).
+- [x] W4: JS `applyRecentOrderPreset` + payload contract.
+- [x] W5: 포인트 input + 전액사용 버튼.
+- [x] W5: preview API points_to_use + 응답 확장.
+- [x] W5: 클라이언트 preview JS — points_to_use 전달 + summary 표시.
+- [x] W6: submit context 로드 + trustedProfile.
+- [x] W6: 포인트 cap + reserve + insert 컬럼 확장.
+- [x] W6: 실패 시 release + R2 cleanup 보상.
+
+실행 명령어 및 결과:
+- `pnpm --dir worker test` -> 통과, 6 files / 44 tests.
+- `pnpm --dir worker typecheck` -> 통과.
+
+커밋:
+- 별도 커밋으로 적층 예정.
+
+주의할 리스크:
+- 새 코드 경로는 모두 customer 인증 미들웨어 미구현 상태에서는 dead path다. 회원가입 작업이 `c.set("customer", { personId, ..., issuedBy: "pub-account" })` 형태로 context를 주입해 줘야 작동한다.
+- 인증된 사용자라도 form input은 그대로 노출돼 있다. 서버는 body의 name/phone/email을 무시하지만, UX 측면에서 readonly 처리를 회원가입 PR에서 다듬어야 한다.
+- 인증된 사용자의 profile에 필수 필드(name/phone/email)가 비어 있으면 일반 guest 검증에 걸려 같은 에러 메시지로 redirect된다. 별도 "프로필 완성" copy는 회원가입 PR과 함께 도입한다.
+- preview API는 GET이고 customer context는 c.get("customer")에서만 신뢰한다. account_person_id 쿼리를 별도로 받지 않으므로 spoof 위험 없음.
+- submit의 포인트 reservation은 잔액 부족 시 redirect. 부분 성공(이미지 업로드 후 reserve 성공, 주문 insert 실패)에서는 release + R2 cleanup이 모두 best-effort로 수행된다.

@@ -238,14 +238,14 @@ export function calculatePointUsage(input: {
 
 ### W4: Customer form UI
 
-- [ ] Make `customer.get("/customer")` async.
-- [ ] Load customer context once at the top of GET.
-- [ ] Render profile summary for authenticated customer.
-- [ ] Keep existing name/phone/email inputs for guest.
-- [ ] For authenticated customer, render profile values as non-editable summary and submit hidden marker only; server still uses profile from DB/context.
-- [ ] Render recent history cards with JSON payload containing only `order_id`, `suitcase_qty`, `backpack_qty`, `companion_count`, `payment_method`.
-- [ ] Add JS `applyRecentOrderPreset(payload)` that updates select/custom controls and payment radio.
-- [ ] Validation command: `pnpm --dir worker test src/routes/customer.test.ts`.
+- [x] Make `customer.get("/customer")` async.
+- [x] Load customer context once at the top of GET.
+- [x] Render profile summary for authenticated customer (account card above the form).
+- [x] Keep existing name/phone/email inputs for guest. (Guest path is unchanged — the conditional account card is the only addition.)
+- [~] For authenticated customer, render profile values as non-editable summary and submit hidden marker only. Profile summary is rendered. Form inputs are still visible/editable to authenticated users but the server-side handler ignores body values in favour of the trusted profile (spoof-safe). Read-only input styling is deferred to the signup PR.
+- [x] Render recent history cards with JSON payload containing only `order_id`, `suitcase_qty`, `backpack_qty`, `companion_count`, `payment_method`. Photos / pickup time / consent are intentionally excluded.
+- [x] Add JS `applyRecentOrderPreset(payload)` that updates suitcase / backpack / companion select-and-custom controls and the payment radio. Bound via event delegation on `#recent-orders`.
+- [x] Validation: typecheck + targeted service tests. Route-level integration tests for `customer.tsx` are deferred — no `customer.test.ts` exists yet; new code paths are gated behind `isAuthenticated` which is always false until the signup work injects a context.
 
 Recent card payload rule:
 
@@ -261,12 +261,12 @@ const payload = {
 
 ### W5: Points preview UI
 
-- [ ] Render point balance and number input only for authenticated customers.
-- [ ] Add `전액사용` button that fills the maximum currently available value client-side.
-- [ ] Include `points_to_use` in preview request.
-- [ ] Update preview response rendering to show gross amount, point discount, final payment amount.
-- [ ] Server-side preview caps points by authenticated customer balance.
-- [ ] Validation command: `pnpm --dir worker test src/routes/customer.test.ts`.
+- [x] Render point balance and number input only for authenticated customers (inside the account card, gated on `customerContext.pointBalance > 0`).
+- [x] Add `전액사용` button that fills the maximum currently available value client-side.
+- [x] Include `points_to_use` in preview request — wired through `points_to_use_form` hidden mirror.
+- [x] Update preview response rendering to show gross amount, point discount, final payment amount. The point card now shows `gross - usedP = final`.
+- [x] Server-side preview caps points by authenticated customer balance via `calculatePointUsage`.
+- [x] Validation: typecheck + service tests.
 
 Preview response shape:
 
@@ -282,14 +282,14 @@ Preview response shape:
 
 ### W6: Submit flow
 
-- [ ] Load customer context in POST `/customer/submit`.
-- [ ] If authenticated and profile has name/phone/email, use profile values instead of body values.
-- [ ] If authenticated profile is missing required contact fields, redirect with a clear profile completion error.
-- [ ] Calculate gross payable after existing long-stay/Flying Pass rules.
-- [ ] Cap and reserve point use before order insert or inside an idempotent compensation block.
-- [ ] Insert order with `account_person_id` and point columns.
-- [ ] On order insert failure, release any reserved points and delete orphan R2 images.
-- [ ] Validation command: `pnpm --dir worker test src/routes/customer.test.ts`.
+- [x] Load customer context in POST `/customer/submit`.
+- [x] If authenticated and profile has name/phone/email, use profile values instead of body values (`trustedProfile` override).
+- [x] If authenticated profile is missing required contact fields, the existing required-field redirects fire on the merged values, so an authenticated user with an incomplete profile falls through to the same `required: name/phone/email` error as a guest. Profile-specific copy is deferred to the signup PR.
+- [x] Calculate gross payable after existing long-stay/Flying Pass rules (`grossPayableAmount = prepaidAmount - passDiscount`).
+- [x] Cap and reserve point use before order insert. Server caps via `calculatePointUsage`, then reserves via `reservePointUseForOrder` keyed by `point:reserve:<orderId>`.
+- [x] Insert order with `account_person_id`, `gross_amount`, `point_discount_amount`, `points_used`, `point_usage_status`.
+- [x] On order insert failure, release any reserved points via `releaseReservedPointUseForOrder` and delete orphan R2 images.
+- [x] Validation: typecheck + service tests; route-level integration tests deferred (no `customer.test.ts` in workspace yet).
 
 Compensation invariant:
 - If image upload succeeds but order insert fails, existing R2 cleanup remains.
