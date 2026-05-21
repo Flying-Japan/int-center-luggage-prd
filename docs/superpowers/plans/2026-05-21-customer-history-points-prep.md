@@ -213,12 +213,12 @@ export type CustomerSession = {
 ### W3: Point service
 
 - [x] Add `calculatePointUsage({ requestedPoints, balancePoints, payableAmount, minimumUnit })`.
-- [ ] Add `reservePointUseForOrder(db, input)` using idempotency key `point:reserve:${orderId}`.
-- [ ] Add `commitReservedPointUseForOrder(db, orderId)` with no balance delta, only status transition.
-- [ ] Add `releaseReservedPointUseForOrder(db, orderId)` that inserts a positive release transaction once.
-- [ ] Add `postEarnedPointsForPaidOrder(db, orderId, paidAmount)` using idempotency key `point:earn:${orderId}`.
-- [ ] Add `voidEarnedPointsForOrder(db, orderId)` for payment reversal.
-- [ ] Validation command: `pnpm --dir worker test src/services/points.test.ts`.
+- [x] Add `reservePointUseForOrder(db, input)` using idempotency key `point:reserve:${orderId}`.
+- [x] Add `commitReservedPointUseForOrder(db, orderId)` with no balance delta, only status transition.
+- [x] Add `releaseReservedPointUseForOrder(db, orderId)` that inserts a positive release transaction once.
+- [x] Add `postEarnedPointsForPaidOrder(db, orderId)` using idempotency key `point:earn:${orderId}`. Paid amount is resolved from the order row via `calculateOrderCollectedAmount`, so the helper is callable from any status-transition path without an extra argument.
+- [x] Add `voidEarnedPointsForOrder(db, orderId)` for payment reversal.
+- [x] Validation command: `pnpm --dir worker test src/services/points.test.ts`.
 
 Core calculation:
 

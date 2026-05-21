@@ -1,5 +1,17 @@
 import type { StaffUser } from "./middleware/auth";
 
+/**
+ * Authenticated customer session, injected by future signup/login work.
+ * Identity is owned by pub-account-prd; Luggage only consumes the canonical
+ * person_id and never derives or merges it from email/phone.
+ */
+export type CustomerSession = {
+  personId: string;
+  email?: string;
+  provider: string;
+  issuedBy: "pub-account";
+};
+
 export type Env = {
   // Cloudflare bindings
   DB: D1Database;
@@ -41,6 +53,7 @@ export type Env = {
 
 export type AppVariables = {
   staff: StaffUser;
+  customer?: CustomerSession;
   rawBody?: ArrayBuffer;
 };
 
