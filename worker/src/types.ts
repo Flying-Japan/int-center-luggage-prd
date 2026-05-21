@@ -1,5 +1,12 @@
 import type { StaffUser } from "./middleware/auth";
 
+export type CustomerSession = {
+  personId: string;
+  email?: string;
+  provider: string;
+  issuedBy: "pub-account";
+};
+
 export type Env = {
   // Cloudflare bindings
   DB: D1Database;
@@ -45,6 +52,7 @@ export type Env = {
 
 export type AppVariables = {
   staff: StaffUser;
+  customer?: CustomerSession;
   rawBody?: ArrayBuffer;
 };
 
