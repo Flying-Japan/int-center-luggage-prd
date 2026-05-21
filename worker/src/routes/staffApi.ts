@@ -15,6 +15,7 @@ import {
   paymentAllocationDetails,
   paymentAllocationStatements,
 } from "../lib/payments";
+import { applyPointEffectsForStatusChange } from "../services/points";
 
 const staffApi = new Hono<AppType>();
 
@@ -243,11 +244,33 @@ staffApi.post("/staff/api/orders/:id/cancel", async (c) => {
   const staff = getStaff(c);
   if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
 
+  const order = await c.env.DB.prepare(
+    `SELECT status, account_person_id, prepaid_amount, final_amount, extra_amount
+     FROM luggage_orders WHERE order_id = ?`
+  )
+    .bind(orderId)
+    .first<{
+      status: string;
+      account_person_id: string | null;
+      prepaid_amount: number;
+      final_amount: number | null;
+      extra_amount: number | null;
+    }>();
+  if (!order) return c.json({ error: "Order not found" }, 404);
+
   await c.env.DB.prepare(
     "UPDATE luggage_orders SET status = 'CANCELLED', updated_at = datetime('now') WHERE order_id = ?"
   )
     .bind(orderId)
     .run();
+
+  await applyPointEffectsForStatusChange(c.env.DB, {
+    accountPersonId: order.account_person_id,
+    orderId,
+    fromStatus: order.status,
+    toStatus: "CANCELLED",
+    paidAmount: payableAmountFromOrder(order),
+  });
 
   await insertAuditLog(c.env.DB, orderId, staff.id, "CANCEL");
 
@@ -284,7 +307,8 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
 
   if (body.action === "mark_paid") {
     const pendingOrders = await c.env.DB.prepare(
-      `SELECT order_id, date(created_at, '+9 hours') as business_date,
+      `SELECT order_id, status, account_person_id,
+              date(created_at, '+9 hours') as business_date,
               prepaid_amount, final_amount, extra_amount
        FROM luggage_orders
        WHERE order_id IN (${placeholders}) AND status = 'PAYMENT_PENDING'`
@@ -292,6 +316,8 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
       .bind(...body.order_ids)
       .all<{
         order_id: string;
+        status: string;
+        account_person_id: string | null;
         business_date: string;
         prepaid_amount: number;
         final_amount: number | null;
@@ -319,9 +345,33 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
       );
     }
     await c.env.DB.batch(statements);
+    for (const order of pendingOrders.results) {
+      await applyPointEffectsForStatusChange(c.env.DB, {
+        accountPersonId: order.account_person_id,
+        orderId: order.order_id,
+        fromStatus: order.status,
+        toStatus: "PAID",
+        paidAmount: payableAmountFromOrder(order),
+      });
+    }
     updatedCount = pendingOrders.results.length;
     auditDetails = "handled";
   } else {
+    const targetedOrders = await c.env.DB.prepare(
+      `SELECT order_id, status, account_person_id,
+              prepaid_amount, final_amount, extra_amount
+       FROM luggage_orders
+       WHERE order_id IN (${placeholders}) AND status != 'PICKED_UP'`
+    )
+      .bind(...body.order_ids)
+      .all<{
+        order_id: string;
+        status: string;
+        account_person_id: string | null;
+        prepaid_amount: number;
+        final_amount: number | null;
+        extra_amount: number | null;
+      }>();
     const result = await c.env.DB.prepare(
       `UPDATE luggage_orders
        SET status = ?, updated_at = datetime('now')
@@ -330,6 +380,17 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
       .bind(newStatus, ...body.order_ids)
       .run();
     updatedCount = result.meta.changes || 0;
+    if (newStatus === "CANCELLED") {
+      for (const order of targetedOrders.results) {
+        await applyPointEffectsForStatusChange(c.env.DB, {
+          accountPersonId: order.account_person_id,
+          orderId: order.order_id,
+          fromStatus: order.status,
+          toStatus: "CANCELLED",
+          paidAmount: payableAmountFromOrder(order),
+        });
+      }
+    }
   }
 
   // Log each action
@@ -425,7 +486,7 @@ staffApi.post("/staff/api/orders/:id/toggle-payment", async (c) => {
   if (!canEditOrders(staff.role)) return denyEditorOnlyJson(c);
 
   const order = await c.env.DB.prepare(
-    `SELECT status, payment_method, date(created_at, '+9 hours') as business_date,
+    `SELECT status, payment_method, account_person_id, date(created_at, '+9 hours') as business_date,
             prepaid_amount, final_amount, extra_amount
      FROM luggage_orders WHERE order_id = ?`
   )
@@ -433,6 +494,7 @@ staffApi.post("/staff/api/orders/:id/toggle-payment", async (c) => {
     .first<{
       status: string;
       payment_method: string | null;
+      account_person_id: string | null;
       business_date: string;
       prepaid_amount: number;
       final_amount: number | null;
@@ -468,6 +530,14 @@ staffApi.post("/staff/api/orders/:id/toggle-payment", async (c) => {
       ).bind(newStatus, orderId),
     ]);
   }
+
+  await applyPointEffectsForStatusChange(c.env.DB, {
+    accountPersonId: order.account_person_id,
+    orderId,
+    fromStatus: order.status,
+    toStatus: newStatus,
+    paidAmount: payableAmountFromOrder(order),
+  });
 
   await insertAuditLog(c.env.DB, orderId, staff.id, "TOGGLE_PAYMENT", `${order.status} → ${newStatus}${paymentDetails ? `, ${paymentDetails}` : ""}`);
 
