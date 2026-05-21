@@ -10,6 +10,9 @@ import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { fetchStaffNamesByIds, fetchStaffProfilesByIds } from "../lib/staffProfiles";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { hasMissingFinalClose, shouldIncludeClosingInStats } from "../services/cashClosing";
+import { orderCollectedAmountSql } from "../services/orderAmounts";
+
+const COLLECTED_AMOUNT_SQL = orderCollectedAmountSql();
 
 const ops = new Hono<AppType>();
 ops.use("/*", staffAuth);
@@ -162,9 +165,9 @@ async function fetchLiveOrderSalesSummariesByDate(db: D1Database, businessDates:
   const rows = await db.prepare(
     `SELECT
        date(created_at, '+9 hours') as business_date,
-       SUM(CASE WHEN payment_method = 'PAY_QR' THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr_amount,
-       SUM(CASE WHEN payment_method = 'CASH' OR payment_method IS NULL THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash_amount,
-       SUM(COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount) as total_amount,
+       SUM(CASE WHEN payment_method = 'PAY_QR' THEN ${COLLECTED_AMOUNT_SQL} ELSE 0 END) as qr_amount,
+       SUM(CASE WHEN payment_method = 'CASH' OR payment_method IS NULL THEN ${COLLECTED_AMOUNT_SQL} ELSE 0 END) as cash_amount,
+       SUM(${COLLECTED_AMOUNT_SQL}) as total_amount,
        COUNT(*) as order_count
      FROM luggage_orders
      WHERE date(created_at, '+9 hours') >= ?

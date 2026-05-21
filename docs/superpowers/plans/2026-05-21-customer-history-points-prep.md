@@ -297,11 +297,11 @@ Compensation invariant:
 
 ### W7: Staff payment hooks
 
-- [ ] In `staffOrders.post("/staff/orders/:id/mark-paid")`, after successful status update, commit reserved use and post earned points.
-- [ ] In `staffApi.post("/staff/api/orders/:id/toggle-payment")`, when transitioning to `PAID`, commit/earn; when transitioning back to `PAYMENT_PENDING`, void earned points and keep or release reserved points according to approved policy.
-- [ ] In `staffApi.post("/staff/api/orders/bulk-action")`, apply the same point logic per affected order.
-- [ ] In cancel routes, release reserved use and void earned points once.
-- [ ] Validation command: `pnpm --dir worker test src/routes/staffApi.test.ts src/routes/staffOrders.test.ts`.
+- [x] In `staffOrders.post("/staff/orders/:id/mark-paid")`, after successful status update, commit reserved use and post earned points.
+- [x] In `staffApi.post("/staff/api/orders/:id/toggle-payment")`, when transitioning to `PAID`, commit/earn; when transitioning back to `PAYMENT_PENDING`, void earned points. Reserved points are kept so the order can return to `PAID` without losing its reservation.
+- [x] In `staffApi.post("/staff/api/orders/bulk-action")`, apply the same point logic per affected order.
+- [x] In `staffApi.post("/staff/api/orders/:id/cancel")`, release reserved use and void earned points once.
+- [x] Validation command: matrix tests on `applyPointEffectsForStatusChange` in `points.test.ts` (PAID/CANCELLED/PAYMENT_PENDING transitions). Route-level integration tests deferred — no `staffApi.test.ts` / `staffOrders.test.ts` exists yet in the workspace.
 
 Required helper:
 
@@ -328,10 +328,10 @@ export async function applyPointEffectsForStatusChange(db: D1Database, input: {
 
 ### W8: Admin and staff display
 
-- [ ] Add staff order detail rows: 포인트 사용, 포인트 적립 예정/완료, 실제 결제금액.
-- [ ] Adjust admin revenue SQL expression so point-covered `final_amount = 0` does not fallback to `prepaid_amount`.
-- [ ] Keep guest/legacy order display unchanged when `points_used = 0`.
-- [ ] Validation command: `pnpm --dir worker test && pnpm --dir worker typecheck`.
+- [x] Add staff order detail rows: 포인트 사용 + 포인트 적립 + 사용 상태 (`point_usage_status`). Row is hidden when both `points_used` and `points_earned` are 0, so guest/legacy orders look identical to before.
+- [x] Adjust admin revenue SQL expression so point-covered `final_amount = 0` does not fallback to `prepaid_amount`. Both `admin.tsx` and `operations.tsx` now use `orderCollectedAmountSql()` from `services/orderAmounts.ts` instead of the legacy `COALESCE(NULLIF(final_amount, 0), prepaid_amount)` pattern.
+- [x] Keep guest/legacy order display unchanged when `points_used = 0`.
+- [x] Validation command: `pnpm --dir worker test && pnpm --dir worker typecheck`.
 
 Revenue expression policy:
 

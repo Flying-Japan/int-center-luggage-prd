@@ -8,6 +8,9 @@ import { adminAuth, editorAuth, getStaff } from "../middleware/auth";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
+import { orderCollectedAmountSql } from "../services/orderAmounts";
+
+const COLLECTED_AMOUNT_SQL = orderCollectedAmountSql();
 
 const admin = new Hono<AppType>();
 admin.use("/staff/admin/sales/*", editorAuth);
@@ -51,9 +54,9 @@ admin.get("/staff/admin/sales", async (c) => {
         SUM(1 + companion_count) as order_count,
         SUM(suitcase_qty) as suitcase_total,
         SUM(backpack_qty) as backpack_total,
-        SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash,
-        SUM(CASE WHEN payment_method = 'PAY_QR' THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr,
-        SUM(COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount) as luggage_total
+        SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) THEN ${COLLECTED_AMOUNT_SQL} ELSE 0 END) as cash,
+        SUM(CASE WHEN payment_method = 'PAY_QR' THEN ${COLLECTED_AMOUNT_SQL} ELSE 0 END) as qr,
+        SUM(${COLLECTED_AMOUNT_SQL}) as luggage_total
       FROM luggage_orders
       WHERE status IN ('PAID', 'PICKED_UP')${actualWhereClause}
       GROUP BY sale_date`
@@ -163,9 +166,9 @@ admin.get("/staff/admin/sales", async (c) => {
        COUNT(*) as order_count,
        SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN 1 ELSE 0 END) as paid_count,
        SUM(CASE WHEN status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') AND (payment_method = 'CASH' OR payment_method IS NULL) THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash_total,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') AND payment_method = 'PAY_QR' THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr_total,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as revenue_total,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') AND (payment_method = 'CASH' OR payment_method IS NULL) THEN ${COLLECTED_AMOUNT_SQL} ELSE 0 END) as cash_total,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') AND payment_method = 'PAY_QR' THEN ${COLLECTED_AMOUNT_SQL} ELSE 0 END) as qr_total,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN ${COLLECTED_AMOUNT_SQL} ELSE 0 END) as revenue_total,
        SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN suitcase_qty ELSE 0 END) as suitcase_total,
        SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN backpack_qty ELSE 0 END) as backpack_total
      FROM luggage_orders
@@ -181,9 +184,9 @@ admin.get("/staff/admin/sales", async (c) => {
   const todayLuggageRT = await c.env.DB.prepare(
     `SELECT
        SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN 1 + companion_count ELSE 0 END) as people,
-       SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) AND status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as cash,
-       SUM(CASE WHEN payment_method = 'PAY_QR' AND status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as qr,
-       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount ELSE 0 END) as luggage_total
+       SUM(CASE WHEN (payment_method = 'CASH' OR payment_method IS NULL) AND status IN ('PAID','PICKED_UP') THEN ${COLLECTED_AMOUNT_SQL} ELSE 0 END) as cash,
+       SUM(CASE WHEN payment_method = 'PAY_QR' AND status IN ('PAID','PICKED_UP') THEN ${COLLECTED_AMOUNT_SQL} ELSE 0 END) as qr,
+       SUM(CASE WHEN status IN ('PAID','PICKED_UP') THEN ${COLLECTED_AMOUNT_SQL} ELSE 0 END) as luggage_total
      FROM luggage_orders
      WHERE date(created_at, '+9 hours') = ? AND status != 'CANCELLED'`
   ).bind(todayJST).first<{ people: number; cash: number; qr: number; luggage_total: number }>();

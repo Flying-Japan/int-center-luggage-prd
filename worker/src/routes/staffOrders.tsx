@@ -8,6 +8,7 @@ import { staffAuth, editorAuth, getStaff, insertAuditLog } from "../middleware/a
 import { downloadImage, logImageView } from "../lib/r2";
 import { buildOrderId, buildSameDayTag, buildOvernightTag } from "../services/orderNumber";
 import { calculatePricePerDay, calculatePrepaidAmount, normalizeFlyingPassTier, flyingPassDiscountAmount, calculateExtraAmount } from "../services/pricing";
+import { applyPointEffectsForStatusChange } from "../services/points";
 import { calculateStorageDays, calculateExtraDays } from "../services/storage";
 import { createBugTask } from "../lib/asana";
 import { createSupabaseAdmin } from "../lib/supabase";
@@ -49,6 +50,10 @@ type Order = {
   companion_count: number;
   consent_checked: number;
   updated_at: string;
+  account_person_id: string | null;
+  points_used: number;
+  points_earned: number;
+  point_usage_status: string;
 };
 
 const staffOrders = new Hono<AppType>();
@@ -186,6 +191,9 @@ staffOrders.get("/staff/orders/:id", async (c) => {
               <p><strong>짐</strong><span>캐리어 {order.suitcase_qty}, 백팩 {order.backpack_qty}, 세트 {order.set_qty}</span></p>
               <p><strong>요금</strong><span>일 {yen(order.price_per_day)}, 선결제 {yen(order.prepaid_amount)}, 추가 {yen(order.extra_amount)}, 최종 {yen(order.final_amount)}</span></p>
               <p><strong>멤버할인</strong><span>{displayFlyingPassTier(order.flying_pass_tier)} / 할인 {yen(order.flying_pass_discount_amount)} / 직원수정 {order.staff_prepaid_override_amount !== null ? yen(order.staff_prepaid_override_amount) : "없음"}</span></p>
+              {(order.points_used > 0 || order.points_earned > 0) ? (
+                <p><strong>포인트</strong><span>사용 {order.points_used.toLocaleString()}P / 적립 {order.points_earned.toLocaleString()}P / 상태 {order.point_usage_status || "-"}</span></p>
+              ) : null}
               <p><strong>일수</strong><span>예정 {order.expected_storage_days}, 실제 {order.actual_storage_days || "-"}, 초과 {order.extra_days}</span></p>
               {order.parent_order_id && (
                 <p><strong>원본 접수</strong><span><a href={`/staff/orders/${order.parent_order_id}`} style="color:var(--primary);text-decoration:underline">{order.parent_order_id}</a> <span class="extension-badge">연장</span></span></p>
@@ -332,6 +340,12 @@ staffOrders.post("/staff/orders/:id/mark-paid", editorAuth, async (c) => {
   )
     .bind(paymentMethod, orderId)
     .run();
+
+  await applyPointEffectsForStatusChange(c.env.DB, {
+    orderId,
+    fromStatus: "PAYMENT_PENDING",
+    toStatus: "PAID",
+  });
 
   await insertAuditLog(c.env.DB, orderId, staff.id, "MARK_PAID");
 

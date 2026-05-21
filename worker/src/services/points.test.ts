@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  applyPointEffectsForStatusChange,
   calculatePointUsage,
   commitReservedPointUseForOrder,
   InsufficientPointBalanceError,
@@ -477,6 +478,102 @@ describe("point ledger operations", () => {
   it("voidEarnedPointsForOrder is a noop when no earn exists", async () => {
     const result = await voidEarnedPointsForOrder(db as unknown as D1Database, "missing");
     expect(result.outcome).toBe("noop");
+  });
+
+  it("applyPointEffectsForStatusChange commits and earns on transition to PAID", async () => {
+    seedAccount(db, "p1", 1000);
+    seedOrder(db, {
+      order_id: "o1",
+      account_person_id: "p1",
+      final_amount: 2000,
+      prepaid_amount: 2000,
+    });
+    await reservePointUseForOrder(db as unknown as D1Database, {
+      accountPersonId: "p1",
+      orderId: "o1",
+      pointsToUse: 300,
+    });
+
+    const effects = await applyPointEffectsForStatusChange(db as unknown as D1Database, {
+      orderId: "o1",
+      fromStatus: "PAYMENT_PENDING",
+      toStatus: "PAID",
+    });
+    expect(effects.committed).toBe("applied");
+    expect(effects.earned).toBe("applied");
+    expect(db.accounts.get("p1")?.balance_points).toBe(720); // 1000 - 300 + 20
+    expect(db.transactions.find((t) => t.transaction_type === "USE_RESERVE")?.status).toBe("POSTED");
+    expect(db.orders.get("o1")?.points_earned).toBe(20);
+
+    const replay = await applyPointEffectsForStatusChange(db as unknown as D1Database, {
+      orderId: "o1",
+      fromStatus: "PAYMENT_PENDING",
+      toStatus: "PAID",
+    });
+    expect(replay.committed).toBe("already");
+    expect(replay.earned).toBe("already");
+  });
+
+  it("applyPointEffectsForStatusChange releases and voids on transition to CANCELLED", async () => {
+    seedAccount(db, "p1", 1000);
+    seedOrder(db, {
+      order_id: "o1",
+      account_person_id: "p1",
+      final_amount: 2000,
+      prepaid_amount: 2000,
+    });
+    await reservePointUseForOrder(db as unknown as D1Database, {
+      accountPersonId: "p1",
+      orderId: "o1",
+      pointsToUse: 200,
+    });
+    await postEarnedPointsForPaidOrder(db as unknown as D1Database, "o1");
+
+    const effects = await applyPointEffectsForStatusChange(db as unknown as D1Database, {
+      orderId: "o1",
+      fromStatus: "PAID",
+      toStatus: "CANCELLED",
+    });
+    expect(effects.released).toBe("applied");
+    expect(effects.voided).toBe("applied");
+    // 1000 - 200 reserve + 20 earn + 200 release - 20 void = 1000
+    expect(db.accounts.get("p1")?.balance_points).toBe(1000);
+  });
+
+  it("applyPointEffectsForStatusChange voids earned points on PAID -> PAYMENT_PENDING", async () => {
+    seedAccount(db, "p1", 0);
+    seedOrder(db, {
+      order_id: "o1",
+      account_person_id: "p1",
+      final_amount: 3000,
+      prepaid_amount: 3000,
+    });
+    await postEarnedPointsForPaidOrder(db as unknown as D1Database, "o1");
+    expect(db.accounts.get("p1")?.balance_points).toBe(30);
+
+    const effects = await applyPointEffectsForStatusChange(db as unknown as D1Database, {
+      orderId: "o1",
+      fromStatus: "PAID",
+      toStatus: "PAYMENT_PENDING",
+    });
+    expect(effects.voided).toBe("applied");
+    expect(effects.committed).toBe("noop");
+    expect(db.accounts.get("p1")?.balance_points).toBe(0);
+  });
+
+  it("applyPointEffectsForStatusChange is a noop when fromStatus equals toStatus", async () => {
+    seedAccount(db, "p1", 500);
+    const effects = await applyPointEffectsForStatusChange(db as unknown as D1Database, {
+      orderId: "o1",
+      fromStatus: "PAID",
+      toStatus: "PAID",
+    });
+    expect(effects).toEqual({
+      committed: "noop",
+      earned: "noop",
+      released: "noop",
+      voided: "noop",
+    });
   });
 
   it("voidEarnedPointsForOrder caps reversal at the current balance to avoid going negative", async () => {

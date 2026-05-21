@@ -102,3 +102,40 @@ Validations passed in this state:
 Risk points to watch in Review (if any):
 - D1 `batch()`가 atomic transaction임을 전제로 했다. 운영 D1에서 batch 실패 시 부분 commit이 없다는 게 보장되는지 deploy 전에 한 번 더 확인이 필요하다.
 - `reservePointUseForOrder`는 race 발생 시 (UPDATE changes != 1) 보상으로 삽입된 트랜잭션 행을 DELETE하지만, batch 자체가 rollback되었다면 DELETE 대상이 존재하지 않을 수 있다. 보상 경로는 idempotent하므로 무해.
+
+## 2026-05-21 WORK (W7 + W8)
+
+진행 요약:
+- staff 결제/취소/일괄 처리 경로에 포인트 ledger 효과를 연결하는 `applyPointEffectsForStatusChange` 헬퍼를 `points.ts`에 추가했다.
+- 4개 경로에서 헬퍼를 호출하도록 배선했다: `staffApi.ts`의 `/cancel`, `/bulk-action`, `/toggle-payment`와 `staffOrders.tsx`의 `/mark-paid`.
+- 헬퍼는 status 매트릭스(PAID/CANCELLED/PAYMENT_PENDING)에 따라 commit/earn/release/void 호출을 분기하며 각 mutator의 idempotency에 의존한다.
+- 매출 집계 SQL을 `admin.tsx`와 `operations.tsx`에서 통일했다. 기존 `COALESCE(NULLIF(final_amount, 0), prepaid_amount) + extra_amount` 9개 expression을 `services/orderAmounts.ts`의 `orderCollectedAmountSql()`로 교체했다.
+- staff 주문 상세 페이지에 포인트 사용/적립/상태 행을 추가했다. `points_used = 0` 그리고 `points_earned = 0`이면 행 자체가 숨겨져서 guest/legacy 주문 표시는 그대로다.
+
+최종 변경 파일 목록:
+- `worker/src/services/points.ts` (헬퍼 추가)
+- `worker/src/services/points.test.ts` (매트릭스 테스트 추가)
+- `worker/src/routes/staffApi.ts` (3개 hook 배선)
+- `worker/src/routes/staffOrders.tsx` (mark-paid hook 배선 + Order type 확장 + 포인트 행 표시)
+- `worker/src/routes/admin.tsx` (매출 expression 통일)
+- `worker/src/routes/operations.tsx` (매출 expression 통일)
+- `docs/superpowers/plans/2026-05-21-customer-history-points-prep.md` (W7 + W8 체크리스트)
+- `docs/superpowers/plans/2026-05-21-customer-history-points-prep-worklog.md` (본 항목)
+
+체크리스트:
+- [x] W7: 4개 staff status 전환 경로에 점수 hook 배선.
+- [x] W7: `applyPointEffectsForStatusChange` 매트릭스 테스트 (PAID/CANCELLED/PAYMENT_PENDING + 동일 status no-op).
+- [x] W8: 매출 SQL expression 9곳 통일.
+- [x] W8: staff 상세 페이지 포인트 행 + guest invariant 유지 (points_used=0 && points_earned=0이면 숨김).
+
+실행 명령어 및 결과:
+- `pnpm --dir worker test` -> 통과, 6 files / 44 tests.
+- `pnpm --dir worker typecheck` -> 통과.
+
+커밋:
+- 별도 커밋으로 적층 예정.
+
+주의할 리스크:
+- `applyPointEffectsForStatusChange`의 cancel 경로는 `fromStatus`를 "UNKNOWN"으로 호출한다. 헬퍼는 toStatus=CANCELLED 분기만 보므로 동작에는 영향이 없지만, 추후 fromStatus 의존 로직(예: 적립 시점 정책 변경)이 추가될 때 cancel route에서 사전 SELECT가 필요해질 수 있다.
+- `staffApi.bulk-action`은 UPDATE의 statusGuard로 인해 일부 order는 status가 실제로 바뀌지 않을 수 있다. 헬퍼 호출은 모든 order에 무차별로 실행되지만 각 mutator가 reservation/earn 부재 시 noop이라 안전하다.
+- staff 상세 페이지의 포인트 행은 모든 status에서 동일하게 보인다. 결제 전(`RESERVED`), 결제 후(`POSTED`), 취소(`VOIDED`) 구분은 `point_usage_status` 컬럼의 raw 값을 그대로 노출한다. 더 친절한 라벨링은 후속.

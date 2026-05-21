@@ -339,6 +339,66 @@ export async function voidEarnedPointsForOrder(
   return { outcome: "applied", pointsDelta: -appliedDelta, balanceAfter: newBalance };
 }
 
+export type OrderStatusChange = {
+  orderId: string;
+  fromStatus: string;
+  toStatus: string;
+};
+
+export type StatusChangePointEffects = {
+  committed: PointMutationOutcome;
+  earned: PointMutationOutcome;
+  released: PointMutationOutcome;
+  voided: PointMutationOutcome;
+};
+
+/**
+ * Reacts to a staff-side order status transition by running the matching
+ * point ledger mutators. Each underlying mutator is idempotent, so calling
+ * this multiple times for the same transition is safe.
+ *
+ * Matrix:
+ * - any → PAID: commit reserved use, post earned points.
+ * - any → CANCELLED: release reserved use, void earned points.
+ * - PAID → PAYMENT_PENDING: void earned points (reservation is kept; the
+ *   order can move back to PAID without losing its reservation).
+ */
+export async function applyPointEffectsForStatusChange(
+  db: D1Database,
+  change: OrderStatusChange
+): Promise<StatusChangePointEffects> {
+  const noop: PointMutationOutcome = "noop";
+  const effects: StatusChangePointEffects = {
+    committed: noop,
+    earned: noop,
+    released: noop,
+    voided: noop,
+  };
+
+  if (change.fromStatus === change.toStatus) return effects;
+
+  if (change.toStatus === "PAID") {
+    const commit = await commitReservedPointUseForOrder(db, change.orderId);
+    effects.committed = commit.outcome;
+    const earn = await postEarnedPointsForPaidOrder(db, change.orderId);
+    effects.earned = earn.outcome;
+  }
+
+  if (change.toStatus === "CANCELLED") {
+    const release = await releaseReservedPointUseForOrder(db, change.orderId);
+    effects.released = release.outcome;
+    const voidResult = await voidEarnedPointsForOrder(db, change.orderId);
+    effects.voided = voidResult.outcome;
+  }
+
+  if (change.fromStatus === "PAID" && change.toStatus === "PAYMENT_PENDING") {
+    const voidResult = await voidEarnedPointsForOrder(db, change.orderId);
+    effects.voided = voidResult.outcome;
+  }
+
+  return effects;
+}
+
 async function findTransactionByKey(db: D1Database, idempotencyKey: string): Promise<PointTransactionRow | null> {
   const row = await db.prepare(
     `SELECT transaction_id, account_person_id, order_id, transaction_type, points_delta, status, balance_after, idempotency_key

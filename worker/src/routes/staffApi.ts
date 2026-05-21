@@ -8,6 +8,7 @@ import { staffAuth, getStaff, insertAuditLog } from "../middleware/auth";
 import { calculateStorageDays, calculateExtraDays } from "../services/storage";
 import { calculateExtraAmount, recalculateOrderPrepaid, normalizeFlyingPassTier } from "../services/pricing";
 import type { FlyingPassTier } from "../services/pricing";
+import { applyPointEffectsForStatusChange } from "../services/points";
 import { getDashboardSyncToken } from "../lib/dashboardSync";
 
 const staffApi = new Hono<AppType>();
@@ -242,6 +243,12 @@ staffApi.post("/staff/api/orders/:id/cancel", async (c) => {
     .bind(orderId)
     .run();
 
+  await applyPointEffectsForStatusChange(c.env.DB, {
+    orderId,
+    fromStatus: "UNKNOWN",
+    toStatus: "CANCELLED",
+  });
+
   await insertAuditLog(c.env.DB, orderId, staff.id, "CANCEL");
 
   return c.json({ success: true });
@@ -293,6 +300,19 @@ staffApi.post("/staff/api/orders/bulk-action", async (c) => {
   );
   if (stmts.length > 0) {
     await c.env.DB.batch(stmts);
+  }
+
+  // Replay point ledger effects for each affected order. Each mutator is
+  // idempotent so this is safe even when the UPDATE's statusGuard skipped a
+  // row (e.g. cancel attempted on PICKED_UP). Reservations and earned
+  // points are only touched when the actual ledger state warrants it.
+  const fromStatus = body.action === "mark_paid" ? "PAYMENT_PENDING" : "UNKNOWN";
+  for (const orderId of body.order_ids) {
+    await applyPointEffectsForStatusChange(c.env.DB, {
+      orderId,
+      fromStatus,
+      toStatus: newStatus,
+    });
   }
 
   return c.json({ success: true, updated: result.meta.changes });
@@ -392,6 +412,12 @@ staffApi.post("/staff/api/orders/:id/toggle-payment", async (c) => {
   )
     .bind(newStatus, orderId)
     .run();
+
+  await applyPointEffectsForStatusChange(c.env.DB, {
+    orderId,
+    fromStatus: order.status,
+    toStatus: newStatus,
+  });
 
   await insertAuditLog(c.env.DB, orderId, staff.id, "TOGGLE_PAYMENT", `${order.status} → ${newStatus}`);
 
