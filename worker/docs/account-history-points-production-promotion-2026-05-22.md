@@ -21,6 +21,31 @@ point usage promotion without deploying production behavior yet.
 - Point usage validation and order snapshot fields.
 - Point ledger mutation helpers and staff status transition hooks already
   present in this prep branch.
+- Customer submit now reserves point usage and inserts the order in a single D1
+  `batch()` transaction. The intake transaction stays `RESERVED` so existing
+  staff status transitions can commit or release it later.
+- Previous-history selection records `source_preset_order_id` only after
+  ownership is checked against the signed Account person.
+
+## Branch Verification
+
+Last run on 2026-05-22 JST from `/private/tmp/luggage-prep`:
+
+```sh
+pnpm --dir worker typecheck
+pnpm --dir worker test
+pnpm --dir worker run check:schema-drift
+pnpm --dir worker run check:static-assets
+pnpm --dir worker run deploy:dry-run
+```
+
+Results:
+
+- Typecheck passed.
+- Vitest passed: 5 files, 44 tests.
+- Schema drift passed for 3 tables, 7 columns, and 5 indexes.
+- Customer asset guard passed.
+- Wrangler dry run passed with no deployment.
 
 ## Required Verification Before Deployment
 

@@ -10,6 +10,28 @@ export type PointUsageResult = {
   amountAfterPoints: number;
 };
 
+export type PointUsageValidationError =
+  | "POINTS_REQUIRE_AUTH"
+  | "POINTS_EXCEED_BALANCE"
+  | "POINTS_EXCEED_PAYABLE";
+
+export type PointUsageStatus = "NONE" | "RESERVED";
+
+export type ResolvedPointUsage = {
+  ok: boolean;
+  error?: PointUsageValidationError;
+  pointsToUse: number;
+  pointDiscountAmount: number;
+  amountAfterPoints: number;
+  pointUsageStatus: PointUsageStatus;
+};
+
+export type PointUsageLedgerInput = {
+  accountPersonId: string;
+  orderId: string;
+  pointsUsed: number;
+};
+
 export const POINT_EARN_RATE_DEFAULT = 0.01;
 export const POINT_MINIMUM_USE_UNIT = 100;
 
@@ -43,6 +65,82 @@ export function calculatePointUsage(input: PointUsageInput): PointUsageResult {
   return {
     pointsToUse,
     amountAfterPoints: Math.max(0, payable - pointsToUse),
+  };
+}
+
+export function pointUsageIdempotencyKey(orderId: string): string {
+  return RESERVE_KEY(String(orderId));
+}
+
+export function buildPointUsageLedgerStatements(
+  db: D1Database,
+  input: PointUsageLedgerInput,
+): D1PreparedStatement[] {
+  const points = normalizePositiveInteger(input.pointsUsed);
+  if (points <= 0) return [];
+
+  const idempotencyKey = pointUsageIdempotencyKey(input.orderId);
+
+  return [
+    db.prepare(
+      `INSERT OR IGNORE INTO luggage_customer_point_transactions (
+         account_person_id, order_id, transaction_type, points_delta, status,
+         balance_after, idempotency_key, reason, created_at, updated_at
+       )
+       SELECT ?, ?, ?, ?, ?, balance_points - ?, ?, ?, datetime('now'), datetime('now')
+       FROM luggage_customer_point_accounts
+       WHERE account_person_id = ?
+         AND balance_points >= ?`
+    ).bind(
+      input.accountPersonId,
+      input.orderId,
+      TX_TYPE_USE,
+      -points,
+      STATUS_RESERVED,
+      points,
+      idempotencyKey,
+      `intake order ${input.orderId}`,
+      input.accountPersonId,
+      points,
+    ),
+    db.prepare(
+      `UPDATE luggage_customer_point_accounts
+       SET balance_points = balance_points - ?,
+           lifetime_used_points = lifetime_used_points + ?,
+           updated_at = datetime('now')
+       WHERE account_person_id = ?
+         AND changes() = 1`
+    ).bind(points, points, input.accountPersonId),
+  ];
+}
+
+export function resolvePointUsage(
+  input: PointUsageInput & { isAuthenticated: boolean },
+): ResolvedPointUsage {
+  const requested = normalizePositiveInteger(input.requestedPoints);
+  const balance = normalizePositiveInteger(input.balancePoints);
+  const payable = normalizePositiveInteger(input.payableAmount);
+
+  if (requested <= 0) return resolvedNoUsage(payable);
+  if (!input.isAuthenticated) return rejectedUsage("POINTS_REQUIRE_AUTH", payable);
+  if (requested > balance) return rejectedUsage("POINTS_EXCEED_BALANCE", payable);
+  if (requested > payable) return rejectedUsage("POINTS_EXCEED_PAYABLE", payable);
+
+  const usage = calculatePointUsage({
+    requestedPoints: requested,
+    balancePoints: balance,
+    payableAmount: payable,
+    minimumUnit: input.minimumUnit,
+  });
+
+  if (usage.pointsToUse <= 0) return resolvedNoUsage(payable);
+
+  return {
+    ok: true,
+    pointsToUse: usage.pointsToUse,
+    pointDiscountAmount: usage.pointsToUse,
+    amountAfterPoints: usage.amountAfterPoints,
+    pointUsageStatus: "RESERVED",
   };
 }
 
@@ -468,6 +566,27 @@ export async function applyPointEffectsForStatusChange(
   if (input.fromStatus === "PAID" && input.toStatus === "PAYMENT_PENDING") {
     await voidEarnedPointsForOrder(db, input.orderId);
   }
+}
+
+function resolvedNoUsage(payableAmount: number): ResolvedPointUsage {
+  return {
+    ok: true,
+    pointsToUse: 0,
+    pointDiscountAmount: 0,
+    amountAfterPoints: payableAmount,
+    pointUsageStatus: "NONE",
+  };
+}
+
+function rejectedUsage(error: PointUsageValidationError, payableAmount: number): ResolvedPointUsage {
+  return {
+    ok: false,
+    error,
+    pointsToUse: 0,
+    pointDiscountAmount: 0,
+    amountAfterPoints: payableAmount,
+    pointUsageStatus: "NONE",
+  };
 }
 
 function normalizeMinimumUnit(value: number | undefined): number {

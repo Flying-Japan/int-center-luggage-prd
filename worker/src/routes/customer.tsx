@@ -15,13 +15,18 @@ import {
 import { calculateStorageDays } from "../services/storage";
 import { buildOrderId, buildSameDayTag, buildOvernightTag } from "../services/orderNumber";
 import { escapeHtml } from "../lib/escapeHtml";
-import { loadCustomerContext, type CustomerContext } from "../services/customerContext";
 import {
-  InsufficientPointsError,
+  loadCustomerContext,
+  resolveCustomerIntakeIdentity,
+  verifyOwnedSourcePresetOrder,
+  type CustomerContext,
+} from "../services/customerContext";
+import {
+  buildPointUsageLedgerStatements,
   POINT_MINIMUM_USE_UNIT,
   calculatePointUsage,
-  releaseReservedPointUseForOrder,
-  reservePointUseForOrder,
+  resolvePointUsage,
+  type PointUsageValidationError,
 } from "../services/points";
 
 const customer = new Hono<AppType>();
@@ -38,6 +43,28 @@ function cleanPublicConfig(value?: string) {
 function clarityProjectId(value?: string) {
   const id = cleanPublicConfig(value);
   return /^[a-z0-9]+$/i.test(id) ? id : "";
+}
+
+function pointUsageErrorMessage(error: PointUsageValidationError | undefined, lang: string): string {
+  const messages: Record<PointUsageValidationError, Record<string, string>> = {
+    POINTS_REQUIRE_AUTH: {
+      ko: "포인트는 로그인한 고객만 사용할 수 있습니다.",
+      en: "Points can only be used by signed-in customers.",
+      ja: "ポイントはログイン済みのお客様のみ利用できます。",
+    },
+    POINTS_EXCEED_BALANCE: {
+      ko: "사용 가능한 포인트를 초과했습니다.",
+      en: "Point use exceeds the available balance.",
+      ja: "利用可能なポイントを超えています。",
+    },
+    POINTS_EXCEED_PAYABLE: {
+      ko: "포인트는 결제 예정 금액을 초과해 사용할 수 없습니다.",
+      en: "Points cannot exceed the payable amount.",
+      ja: "ポイントはお支払い予定金額を超えて利用できません。",
+    },
+  };
+  if (!error) return messages.POINTS_EXCEED_BALANCE[lang] || messages.POINTS_EXCEED_BALANCE.ko;
+  return messages[error][lang] || messages[error].ko;
 }
 
 function isWithinCustomerPickupWindow(pickupDate: Date) {
@@ -834,6 +861,7 @@ form { margin-top: 16px; }
               {customerCtx.isAuthenticated && (
                 <input type="hidden" name="account_person_id_marker" value="1" />
               )}
+              <input id="source_preset_order_id" type="hidden" name="source_preset_order_id" value="" />
               <input id="points_to_use" type="hidden" name="points_to_use" value="0" />
 
               {/* name */}
@@ -1221,6 +1249,7 @@ form { margin-top: 16px; }
   var idImageInputEl = document.getElementById("id_image");
   var luggageImageInputEl = document.getElementById("luggage_image");
   var paymentMethodEls = formEl ? Array.from(formEl.querySelectorAll('input[name="payment_method"]')) : [];
+  var sourcePresetOrderIdEl = document.getElementById("source_preset_order_id");
   if (!suitcaseEl || !backpackEl || !pickupDateEl || !pickupTimeEl || !pickupHiddenEl || !priceValueEl || !formEl) return;
 
   var messages = {
@@ -1521,6 +1550,7 @@ form { margin-top: 16px; }
       var radio = formEl.querySelector('input[name="payment_method"][value="'+payload.payment_method+'"]');
       if (radio) radio.checked = true;
     }
+    if (sourcePresetOrderIdEl) sourcePresetOrderIdEl.value = String(payload.order_id || "");
     refreshPreview();
   };
 
@@ -1716,12 +1746,16 @@ customer.post("/customer/submit", async (c) => {
 
   // --- Load authenticated customer context (null for guests) ---
   const customerCtx = await loadCustomerContext(c);
-  const accountPersonId = customerCtx.isAuthenticated ? customerCtx.session!.personId : null;
 
   // --- Field extraction (profile overrides body values for authenticated users) ---
-  let name = String(body.name || "").trim();
-  let phone = String(body.phone || "").trim();
-  let email = String(body.email || "").trim();
+  const identity = resolveCustomerIntakeIdentity({
+    session: customerCtx.session,
+    formName: String(body.name || ""),
+    formPhone: String(body.phone || ""),
+    formEmail: String(body.email || ""),
+  });
+  const accountPersonId = identity.accountPersonId;
+  let { name, phone, email } = identity;
   if (customerCtx.isAuthenticated && customerCtx.profile) {
     if (customerCtx.profile.displayName) name = customerCtx.profile.displayName;
     if (customerCtx.profile.phone) phone = customerCtx.profile.phone;
@@ -1735,7 +1769,8 @@ customer.post("/customer/submit", async (c) => {
   const expectedPickupAt = String(body.expected_pickup_at || "").trim();
   const flyingPassTier = normalizeFlyingPassTier(String(body.flying_pass_tier || ""));
   const consentChecked = String(body.consent_checked || "") === "1";
-  const requestedPoints = customerCtx.isAuthenticated ? Math.max(0, parseInt(String(body.points_to_use || "0"), 10) || 0) : 0;
+  const sourcePresetOrderIdRaw = String(body.source_preset_order_id || "").trim();
+  const requestedPoints = Math.max(0, parseInt(String(body.points_to_use || "0"), 10) || 0);
   const idImageFile = body.id_image;
   const luggageImageFile = body.luggage_image;
   const isUploadedImageFile = (value: unknown): value is File =>
@@ -1752,6 +1787,13 @@ customer.post("/customer/submit", async (c) => {
   if (!isUploadedImageFile(idImageFile)) return redirect(t("required", lang) + ": " + t("id_image", lang));
   if (!isUploadedImageFile(luggageImageFile)) return redirect(t("required", lang) + ": " + t("luggage_image", lang));
   if (!consentChecked) return redirect(t("consent_label", lang));
+
+  const sourcePresetOrderId = accountPersonId && sourcePresetOrderIdRaw
+    ? await verifyOwnedSourcePresetOrder(c.env.DB, accountPersonId, sourcePresetOrderIdRaw)
+    : null;
+  if (sourcePresetOrderIdRaw && accountPersonId && !sourcePresetOrderId) {
+    return redirect(t("error", lang));
+  }
 
   // Form sends JST time as "YYYY-MM-DDTHH:MM" — append +09:00 so JS treats it as JST
   const pickupDateStr = expectedPickupAt.includes("+") || expectedPickupAt.includes("Z")
@@ -1771,6 +1813,10 @@ customer.post("/customer/submit", async (c) => {
   // Uses null orderId for key generation since orderId doesn't exist yet.
   let idImageUrl: string | null = null;
   let luggageImageUrl: string | null = null;
+  const cleanupUploadedImages = async () => {
+    if (idImageUrl) try { await c.env.IMAGES.delete(idImageUrl); } catch { /* best-effort */ }
+    if (luggageImageUrl) try { await c.env.IMAGES.delete(luggageImageUrl); } catch { /* best-effort */ }
+  };
 
   try {
     const idValidation = validateImageUpload(idImageFile.size, idImageFile.type);
@@ -1819,50 +1865,22 @@ customer.post("/customer/submit", async (c) => {
   const passDiscount = flyingPassDiscountAmount(prepaidAmount, flyingPassTier);
   const finalPrepaid = Math.max(0, prepaidAmount - passDiscount);
 
-  // --- Point usage (authenticated only; server-side caps win) ---
-  let pointsToUse = 0;
-  if (accountPersonId && requestedPoints > 0 && finalPrepaid > 0) {
-    const usage = calculatePointUsage({
-      requestedPoints,
-      balancePoints: customerCtx.pointBalance,
-      payableAmount: finalPrepaid,
-      minimumUnit: POINT_MINIMUM_USE_UNIT,
-    });
-    pointsToUse = usage.pointsToUse;
-  }
-  const finalAmount = Math.max(0, finalPrepaid - pointsToUse);
-  const pointUsageStatus = pointsToUse > 0 ? "RESERVED" : "NONE";
+  // --- Point usage (authenticated only; server-side validation wins) ---
+  const pointUsage = resolvePointUsage({
+    isAuthenticated: !!accountPersonId,
+    requestedPoints,
+    balancePoints: customerCtx.pointBalance,
+    payableAmount: finalPrepaid,
+    minimumUnit: POINT_MINIMUM_USE_UNIT,
+  });
+  if (!pointUsage.ok) return redirect(pointUsageErrorMessage(pointUsage.error, lang));
+  const pointsEarned = 0;
+  const finalAmount = pointUsage.amountAfterPoints;
+  const hasPointUsage = !!accountPersonId && pointUsage.pointsToUse > 0;
 
-  // --- Reserve points before order insert (so the ledger is always consistent) ---
-  if (accountPersonId && pointsToUse > 0) {
-    try {
-      await reservePointUseForOrder(c.env.DB, {
-        accountPersonId,
-        orderId,
-        pointsToUse,
-        reason: `intake order ${orderId}`,
-      });
-    } catch (e) {
-      if (idImageUrl) try { await c.env.IMAGES.delete(idImageUrl); } catch { /* best-effort */ }
-      if (luggageImageUrl) try { await c.env.IMAGES.delete(luggageImageUrl); } catch { /* best-effort */ }
-      if (e instanceof InsufficientPointsError) {
-        return redirect(
-          lang === "en"
-            ? "Insufficient points balance."
-            : lang === "ja"
-              ? "ポイント残高が不足しています。"
-              : "포인트 잔액이 부족합니다.",
-        );
-      }
-      console.error("Point reservation failed:", e);
-      return redirect(t("error", lang));
-    }
-  }
-
-  // --- Insert order (clean up R2 + release points on failure) ---
+  // --- Insert order and reserve point usage in one D1 batch ---
   try {
-    await c.env.DB.prepare(
-      `INSERT INTO luggage_orders (
+    const orderColumns = `(
         order_id, tag_no, name, phone, email, payment_method, companion_count,
         suitcase_qty, backpack_qty, set_qty,
         expected_pickup_at, expected_storage_days,
@@ -1872,48 +1890,59 @@ customer.post("/customer/submit", async (c) => {
         point_discount_amount, points_used, points_earned, point_usage_status,
         final_amount,
         id_image_url, luggage_image_url,
-        account_person_id,
+        account_person_id, source_preset_order_id,
         consent_checked, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING')`
-    )
-      .bind(
+      )`;
+    const orderPlaceholders = `${Array.from({ length: 28 }, () => "?").join(", ")}, 'PAYMENT_PENDING'`;
+    const orderInsertSql = hasPointUsage
+      ? `INSERT INTO luggage_orders ${orderColumns} SELECT ${orderPlaceholders} WHERE changes() = 1`
+      : `INSERT INTO luggage_orders ${orderColumns} VALUES (${orderPlaceholders})`;
+    const orderInsertStatement = c.env.DB.prepare(orderInsertSql).bind(
+      orderId,
+      tagNo,
+      name,
+      phone,
+      email,
+      paymentMethod,
+      companionCount,
+      suitcaseQty,
+      backpackQty,
+      setQty,
+      pickupDate.toISOString(),
+      storageDays,
+      pricePerDay,
+      discountRate,
+      finalPrepaid, // gross_amount = post-pass, pre-points payable
+      prepaidAmount,
+      flyingPassTier,
+      passDiscount,
+      pointUsage.pointDiscountAmount,
+      pointUsage.pointsToUse,
+      pointsEarned,
+      pointUsage.pointUsageStatus,
+      finalAmount,
+      idImageUrl,
+      luggageImageUrl,
+      accountPersonId,
+      sourcePresetOrderId,
+      1
+    );
+    const ledgerStatements = hasPointUsage
+      ? buildPointUsageLedgerStatements(c.env.DB, {
+        accountPersonId: accountPersonId!,
         orderId,
-        tagNo,
-        name,
-        phone,
-        email,
-        paymentMethod,
-        companionCount,
-        suitcaseQty,
-        backpackQty,
-        setQty,
-        pickupDate.toISOString(),
-        storageDays,
-        pricePerDay,
-        discountRate,
-        finalPrepaid, // gross_amount = post-pass, pre-points payable
-        prepaidAmount,
-        flyingPassTier,
-        passDiscount,
-        pointsToUse, // point_discount_amount
-        pointsToUse, // points_used
-        0, // points_earned (set when payment is finalized)
-        pointUsageStatus,
-        finalAmount,
-        idImageUrl,
-        luggageImageUrl,
-        accountPersonId,
-        1
-      )
-      .run();
+        pointsUsed: pointUsage.pointsToUse,
+      })
+      : [];
+    const batchResults = await c.env.DB.batch([...ledgerStatements, orderInsertStatement]);
+    const orderResult = batchResults[batchResults.length - 1];
+    if ((orderResult.meta?.changes ?? 0) !== 1) {
+      await cleanupUploadedImages();
+      return redirect(pointUsageErrorMessage("POINTS_EXCEED_BALANCE", lang));
+    }
   } catch (e) {
     // Clean up orphaned R2 objects
-    if (idImageUrl) try { await c.env.IMAGES.delete(idImageUrl); } catch { /* best-effort */ }
-    if (luggageImageUrl) try { await c.env.IMAGES.delete(luggageImageUrl); } catch { /* best-effort */ }
-    // Release any points we reserved (best-effort — idempotent)
-    if (accountPersonId && pointsToUse > 0) {
-      try { await releaseReservedPointUseForOrder(c.env.DB, orderId); } catch { /* best-effort */ }
-    }
+    await cleanupUploadedImages();
     console.error("Order insert failed:", e);
     return redirect(t("upload_error", lang));
   }

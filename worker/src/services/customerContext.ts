@@ -31,6 +31,13 @@ export type CustomerContext = {
   isAuthenticated: boolean;
 };
 
+export type CustomerIntakeIdentity = {
+  accountPersonId: string | null;
+  name: string;
+  phone: string;
+  email: string;
+};
+
 type ProfileRow = {
   account_person_id: string;
   display_name: string | null;
@@ -58,8 +65,26 @@ type PointAccountRow = {
   balance_points: number | null;
 };
 
+type SourcePresetRow = {
+  order_id: string;
+};
+
 export function getCurrentCustomer(c: Context<AppType>): CustomerSession | null {
   return c.get("customer") ?? null;
+}
+
+export function resolveCustomerIntakeIdentity(input: {
+  session: CustomerSession | null;
+  formName: string;
+  formPhone: string;
+  formEmail: string;
+}): CustomerIntakeIdentity {
+  return {
+    accountPersonId: input.session?.personId ?? null,
+    name: firstNonBlank(input.session?.displayName, input.formName),
+    phone: firstNonBlank(input.session?.phone, input.formPhone),
+    email: firstNonBlank(input.session?.email, input.formEmail),
+  };
 }
 
 export async function loadCustomerContext(c: Context<AppType>, limit = 3): Promise<CustomerContext> {
@@ -163,6 +188,26 @@ export async function loadPointBalance(db: D1Database, accountPersonId: string):
   return numberOrZero(row?.balance_points);
 }
 
+export async function verifyOwnedSourcePresetOrder(
+  db: D1Database,
+  accountPersonId: string,
+  sourcePresetOrderId: string
+): Promise<string | null> {
+  const cleaned = sourcePresetOrderId.trim();
+  if (!cleaned) return null;
+
+  const row = await db.prepare(
+    `SELECT order_id
+     FROM luggage_orders
+     WHERE order_id = ?
+       AND account_person_id = ?
+       AND parent_order_id IS NULL
+     LIMIT 1`
+  ).bind(cleaned, accountPersonId).first<SourcePresetRow>();
+
+  return row?.order_id ?? null;
+}
+
 function clampLimit(limit: number): number {
   if (!Number.isFinite(limit)) return 3;
   return Math.max(1, Math.min(10, Math.floor(limit)));
@@ -171,4 +216,12 @@ function clampLimit(limit: number): number {
 function numberOrZero(value: number | null | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return value;
+}
+
+function firstNonBlank(...values: Array<string | undefined>): string {
+  for (const value of values) {
+    const cleaned = value?.trim();
+    if (cleaned) return cleaned;
+  }
+  return "";
 }
