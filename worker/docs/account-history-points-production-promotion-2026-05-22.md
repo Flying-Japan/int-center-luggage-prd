@@ -91,6 +91,13 @@ pnpm --dir worker run smoke:account-context -- \
   --context-cookie-file /tmp/fj-account-context.cookie
 ```
 
+The same flow can be run as one command from this Luggage promotion worktree:
+
+```sh
+pnpm --dir worker run smoke:cross-app-account-handoff -- \
+  --account-dir /path/to/pub-account-prd
+```
+
 ## Production Smoke Checklist
 
 Do not use real customer PII for smoke data.
