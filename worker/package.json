@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "deploy:dry-run": "wrangler deploy --dry-run",
     "db:migrate:local": "wrangler d1 execute center-luggage-db --local --file=src/schema.sql",
     "db:migrate:prod": "wrangler d1 execute center-luggage-db --remote --file=src/schema.sql",
     "backfill:cash-closing": "node scripts/backfill-cash-closings-from-check-sheet.mjs",
@@ -12,6 +13,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit && node scripts/check-customer-assets.mjs",
     "check:customer-assets": "node scripts/check-customer-assets.mjs",
+    "check:static-assets": "node scripts/check-customer-assets.mjs",
+    "check:schema-drift": "node scripts/check-schema-drift.mjs",
     "test": "vitest run"
   },
   "dependencies": {

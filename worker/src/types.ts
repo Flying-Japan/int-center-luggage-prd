@@ -3,6 +3,9 @@ import type { StaffUser } from "./middleware/auth";
 export type CustomerSession = {
   personId: string;
   email?: string;
+  displayName?: string;
+  phone?: string;
+  locale?: string;
   provider: string;
   issuedBy: "pub-account";
 };
@@ -14,6 +17,10 @@ export type Env = {
 
   // Internal reviewer -> luggage auth
   INTERNAL_API_SECRET: string;
+
+  // Account -> luggage signed customer context
+  ACCOUNT_CONTEXT_SECRET?: string;
+  ACCOUNT_CONTEXT_MAX_AGE_SECONDS?: string;
 
   // Supabase (staff auth + staff profiles)
   SUPABASE_URL: string;

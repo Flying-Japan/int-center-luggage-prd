@@ -10,6 +10,7 @@ import staticRoutes from "./routes/static";
 import internalApi from "./routes/internalApi";
 import { securityHeaders, errorHandler, notFoundHandler, createRateLimiter } from "./middleware/security";
 import { staffAuth, getStaff } from "./middleware/auth";
+import { optionalCustomerAuth } from "./middleware/customerAuth";
 import { runRetentionCleanup } from "./services/retention";
 import { runMidnightRollover } from "./services/midnightRollover";
 import { syncDailySales } from "./services/dailySalesSync";
@@ -33,6 +34,11 @@ app.notFound(notFoundHandler);
 // Rate limiting on sensitive endpoints
 app.post("/staff/login", createRateLimiter(10, 60_000));
 app.post("/customer/submit", createRateLimiter(20, 60_000));
+
+// Optional signed Account customer context for customer-facing luggage routes.
+app.use("/customer", optionalCustomerAuth);
+app.use("/customer/*", optionalCustomerAuth);
+app.use("/api/price-preview", optionalCustomerAuth);
 
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", service: "luggage-storage" }));
