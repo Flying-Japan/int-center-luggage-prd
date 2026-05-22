@@ -219,6 +219,27 @@ function renderPointsField(ctx: CustomerContext, lang: string) {
   );
 }
 
+function buildCustomerContextApiPayload(ctx: CustomerContext) {
+  return {
+    is_authenticated: ctx.isAuthenticated,
+    point_balance: ctx.isAuthenticated ? ctx.pointBalance : 0,
+    recent_orders: ctx.isAuthenticated
+      ? ctx.recentOrders.map((order) => ({
+        order_id: order.orderId,
+        created_at: order.createdAt,
+        suitcase_qty: order.suitcaseQty,
+        backpack_qty: order.backpackQty,
+        companion_count: order.companionCount,
+        payment_method: order.paymentMethod,
+        gross_amount: order.grossAmount,
+        point_discount_amount: order.pointDiscountAmount,
+        final_amount: order.finalAmount,
+        status: order.status,
+      }))
+      : [],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // GET /customer — Intake form (faithful port of original FastAPI template)
 // ---------------------------------------------------------------------------
@@ -2472,6 +2493,15 @@ a { color: inherit; text-decoration: none; }
       </body>
     </html>
   );
+});
+
+// ---------------------------------------------------------------------------
+// GET /customer/api/context — Safe signed-context smoke + preset API
+// ---------------------------------------------------------------------------
+customer.get("/customer/api/context", async (c) => {
+  const customerCtx = await loadCustomerContext(c);
+  c.header("Cache-Control", "no-store");
+  return c.json(buildCustomerContextApiPayload(customerCtx));
 });
 
 // ---------------------------------------------------------------------------

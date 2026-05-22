@@ -75,6 +75,9 @@ Missing optional fields are signed as empty strings.
   take precedence over form-submitted values.
 - Anonymous intake never sets `account_person_id`, even if submitted email or
   phone matches a previous customer.
+- `/customer/api/context` is available as a no-store smoke/preset endpoint. It
+  returns `is_authenticated`, point balance, and previous-order preset fields
+  only; it does not return profile PII or the Account person id.
 - If Account headers and cookie are both present, Luggage validates the headers
   and does not fall back to the cookie. This prevents a browser-supplied invalid
   header from being hidden by a valid cookie.

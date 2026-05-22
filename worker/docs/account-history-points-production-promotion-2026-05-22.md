@@ -26,6 +26,9 @@ point usage promotion without deploying production behavior yet.
   staff status transitions can commit or release it later.
 - Previous-history selection records `source_preset_order_id` only after
   ownership is checked against the signed Account person.
+- `/customer/api/context` returns a no-store JSON smoke surface with only
+  authentication state, point balance, and previous-order preset fields. It does
+  not return profile PII or the Account person id.
 
 ## Branch Verification
 
@@ -67,8 +70,8 @@ Do not use real customer PII for smoke data.
 2. Anonymous `/customer/submit` creates an order with `account_person_id IS NULL`
    and no point ledger rows.
 3. Signed synthetic Account context renders `/customer` as authenticated.
-4. `/customer/api/context` returns only safe previous-order preset fields for
-   the signed synthetic person.
+4. `/customer/api/context` returns `is_authenticated = true`, point balance,
+   and only safe previous-order preset fields for the signed synthetic person.
 5. Selecting a previous-history preset fills the form only after customer action.
 6. Submitting with controlled point usage writes:
    - `luggage_orders.account_person_id`
