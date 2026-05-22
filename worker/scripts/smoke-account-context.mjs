@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Buffer } from "node:buffer";
 import { createHmac } from "node:crypto";
+import { readFile } from "node:fs/promises";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:8787";
 const DEFAULT_SECRET_ENV = "ACCOUNT_CONTEXT_SECRET";
@@ -52,6 +53,10 @@ async function main() {
   const validCookie = buildCookie(secret, context);
   const validHeaders = buildHeaders(secret, context);
   const staleContext = { ...context, timestamp: "2000-01-01T00:00:00.000Z" };
+  const externalCookie = options.contextCookieFile && !options.dryRun
+    ? cleanValue(await readFile(options.contextCookieFile, "utf8"), "contextCookieFile").trim()
+    : "";
+  const externalContext = externalCookie ? contextFromCookiePayload(externalCookie) : null;
 
   const checks = [
     {
@@ -66,6 +71,15 @@ async function main() {
       expectedStatus: 200,
       expectedAuthenticated: true,
     },
+    ...(externalCookie && externalContext
+      ? [{
+        label: "Account-minted signed cookie authenticates synthetic context",
+        headers: { Cookie: `${COOKIE_NAME}=${externalCookie}` },
+        expectedStatus: 200,
+        expectedAuthenticated: true,
+        context: externalContext,
+      }]
+      : []),
     {
       label: "signed headers authenticate synthetic context",
       headers: validHeaders,
@@ -96,7 +110,7 @@ async function main() {
   }
 
   for (const check of checks) {
-    await runCheck(baseUrl, check, context);
+    await runCheck(baseUrl, check, check.context ?? context);
     console.log(`ok: ${check.label}`);
   }
 }
@@ -162,6 +176,25 @@ function buildCookie(secret, context) {
   return base64Url(Buffer.from(JSON.stringify(payload), "utf8"));
 }
 
+function contextFromCookiePayload(cookieValue) {
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(cookieValue, "base64url").toString("utf8"));
+  } catch (error) {
+    throw new Error(`Unable to decode ${COOKIE_NAME}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  return {
+    personId: cleanValue(payload.person_id, "cookie person_id"),
+    provider: cleanOptional(payload.provider, "cookie provider") || "account",
+    email: cleanOptional(payload.email, "cookie email"),
+    displayName: cleanOptional(payload.display_name, "cookie display_name"),
+    phone: cleanOptional(payload.phone, "cookie phone"),
+    locale: cleanOptional(payload.locale, "cookie locale"),
+    timestamp: cleanValue(payload.timestamp, "cookie timestamp"),
+  };
+}
+
 function signContext(secret, context) {
   return createHmac("sha256", cleanValue(secret, "secret"))
     .update(canonicalize(context))
@@ -206,6 +239,7 @@ function parseArgs(argv) {
     phone: process.env.LUGGAGE_SMOKE_PHONE || "",
     provider: process.env.LUGGAGE_SMOKE_PROVIDER || "account",
     secretEnv: process.env.LUGGAGE_SMOKE_SECRET_ENV || DEFAULT_SECRET_ENV,
+    contextCookieFile: process.env.LUGGAGE_SMOKE_CONTEXT_COOKIE_FILE || "",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -215,6 +249,9 @@ function parseArgs(argv) {
         break;
       case "--base-url":
         options.baseUrl = requireValue(argv, ++index, arg);
+        break;
+      case "--context-cookie-file":
+        options.contextCookieFile = requireValue(argv, ++index, arg);
         break;
       case "--display-name":
         options.displayName = requireValue(argv, ++index, arg);
@@ -298,6 +335,8 @@ function printUsage() {
 Options:
   --base-url URL       Luggage origin or local Worker URL. Default: ${DEFAULT_BASE_URL}
   --secret-env NAME    Environment variable containing the shared secret. Default: ${DEFAULT_SECRET_ENV}
+  --context-cookie-file PATH
+                       Read a synthetic fj_account_context value minted by Account smoke
   --person-id VALUE    Synthetic Account person id. Default: ${DEFAULT_PERSON_ID}
   --email VALUE        Synthetic email. Default: ${DEFAULT_EMAIL}
   --display-name VALUE Synthetic display name. Default: ${DEFAULT_DISPLAY_NAME}

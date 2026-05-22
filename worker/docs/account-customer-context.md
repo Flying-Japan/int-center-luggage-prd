@@ -92,7 +92,7 @@ The matching Account production PR is
 `Flying-Japan/pub-account-prd#1`. The currently verified Account head is:
 
 ```txt
-72bd70ff9e1b2d1a73b0893e5deed3c29fe97201
+5966b6d0ab47d28f184cc9ecc13feb5573378fdd
 ```
 
 That Account head adds `pnpm run smoke:luggage-handoff`, a local-only synthetic
@@ -103,6 +103,8 @@ handoff smoke that:
 - requires a `303` redirect to the configured local Luggage URL.
 - decodes `fj_account_context`.
 - verifies the cookie HMAC with `ACCOUNT_LUGGAGE_CONTEXT_SECRET`.
+- can write the verified synthetic cookie to a temporary file for Luggage to
+  consume with `pnpm --dir worker run smoke:account-context -- --context-cookie-file <path>`.
 
 This proves Account can produce the same signed browser handoff cookie that
 Luggage validates here, without enabling public Account auth or touching

@@ -10,7 +10,7 @@ point usage promotion without deploying production behavior yet.
 - Account signed context is still blocked on the production Account login/signup
   source and shared secret rollout.
 - The matching Account PR is `Flying-Japan/pub-account-prd#1` at
-  `72bd70ff9e1b2d1a73b0893e5deed3c29fe97201`; its CI is green and its
+  `5966b6d0ab47d28f184cc9ecc13feb5573378fdd`; its CI is green and its
   synthetic local `/luggage/handoff` smoke verifies the `fj_account_context`
   cookie signature.
 - This branch must not be deployed until `ACCOUNT_CONTEXT_SECRET` is configured
@@ -57,7 +57,7 @@ Results:
 - `smoke:account-context -- --dry-run` passed locally without printing the
   shared secret or signed cookie value.
 - Account PR #1 local handoff smoke passed on the Account branch head
-  `72bd70ff9e1b2d1a73b0893e5deed3c29fe97201`, and Account CI passed
+  `5966b6d0ab47d28f184cc9ecc13feb5573378fdd`, and Account CI passed
   `build-and-test`, `e2e-canary`, and `gitleaks`.
 
 ## Required Verification Before Deployment
@@ -76,6 +76,20 @@ ACCOUNT_CONTEXT_SECRET=... pnpm --dir worker run smoke:account-context -- --base
 Use `--dry-run` before secrets are wired to verify the synthetic payload and
 check list without sending HTTP requests. The smoke script only calls
 `/customer/api/context`; it does not submit a customer intake form.
+
+For a cross-app local smoke, first ask Account to write its verified synthetic
+handoff cookie, then pass that cookie to Luggage:
+
+```sh
+ACCOUNT_LOCAL_V2_SESSION_SECRET=... \
+ACCOUNT_LUGGAGE_CONTEXT_SECRET=... \
+pnpm run smoke:luggage-handoff -- --write-context-cookie-file /tmp/fj-account-context.cookie
+
+ACCOUNT_CONTEXT_SECRET=... \
+pnpm --dir worker run smoke:account-context -- \
+  --base-url http://127.0.0.1:8787 \
+  --context-cookie-file /tmp/fj-account-context.cookie
+```
 
 ## Production Smoke Checklist
 
