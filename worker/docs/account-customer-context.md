@@ -78,6 +78,10 @@ Missing optional fields are signed as empty strings.
 - `/customer/api/context` is available as a no-store smoke/preset endpoint. It
   returns `is_authenticated`, point balance, and previous-order preset fields
   only; it does not return profile PII or the Account person id.
+- `pnpm --dir worker run smoke:account-context` signs the same cookie/header
+  contract with synthetic data and verifies anonymous, cookie, header, stale
+  timestamp, and invalid-header-over-cookie behavior against
+  `/customer/api/context`.
 - If Account headers and cookie are both present, Luggage validates the headers
   and does not fall back to the cookie. This prevents a browser-supplied invalid
   header from being hidden by a valid cookie.

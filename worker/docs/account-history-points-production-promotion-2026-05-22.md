@@ -40,15 +40,18 @@ pnpm --dir worker test
 pnpm --dir worker run check:schema-drift
 pnpm --dir worker run check:static-assets
 pnpm --dir worker run deploy:dry-run
+ACCOUNT_CONTEXT_SECRET=... pnpm --dir worker run smoke:account-context -- --base-url <luggage-base-url>
 ```
 
 Results:
 
 - Typecheck passed.
-- Vitest passed: 5 files, 44 tests.
+- Vitest passed: 6 files, 46 tests.
 - Schema drift passed for 3 tables, 7 columns, and 5 indexes.
 - Customer asset guard passed.
 - Wrangler dry run passed with no deployment.
+- `smoke:account-context -- --dry-run` passed locally without printing the
+  shared secret or signed cookie value.
 
 ## Required Verification Before Deployment
 
@@ -60,7 +63,12 @@ pnpm --dir worker test
 pnpm --dir worker run check:schema-drift
 pnpm --dir worker run check:static-assets
 pnpm --dir worker run deploy:dry-run
+ACCOUNT_CONTEXT_SECRET=... pnpm --dir worker run smoke:account-context -- --base-url <luggage-base-url>
 ```
+
+Use `--dry-run` before secrets are wired to verify the synthetic payload and
+check list without sending HTTP requests. The smoke script only calls
+`/customer/api/context`; it does not submit a customer intake form.
 
 ## Production Smoke Checklist
 
@@ -72,6 +80,8 @@ Do not use real customer PII for smoke data.
 3. Signed synthetic Account context renders `/customer` as authenticated.
 4. `/customer/api/context` returns `is_authenticated = true`, point balance,
    and only safe previous-order preset fields for the signed synthetic person.
+   Use `pnpm --dir worker run smoke:account-context` for this check after the
+   shared secret is configured.
 5. Selecting a previous-history preset fills the form only after customer action.
 6. Submitting with controlled point usage writes:
    - `luggage_orders.account_person_id`

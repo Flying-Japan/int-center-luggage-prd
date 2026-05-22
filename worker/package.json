@@ -15,6 +15,7 @@
     "check:customer-assets": "node scripts/check-customer-assets.mjs",
     "check:static-assets": "node scripts/check-customer-assets.mjs",
     "check:schema-drift": "node scripts/check-schema-drift.mjs",
+    "smoke:account-context": "node scripts/smoke-account-context.mjs",
     "test": "vitest run"
   },
   "dependencies": {
