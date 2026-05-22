@@ -86,5 +86,27 @@ Missing optional fields are signed as empty strings.
   and does not fall back to the cookie. This prevents a browser-supplied invalid
   header from being hidden by a valid cookie.
 
+## Account-Side Gate
+
+The matching Account production PR is
+`Flying-Japan/pub-account-prd#1`. The currently verified Account head is:
+
+```txt
+72bd70ff9e1b2d1a73b0893e5deed3c29fe97201
+```
+
+That Account head adds `pnpm run smoke:luggage-handoff`, a local-only synthetic
+handoff smoke that:
+
+- builds a `.invalid` local v2 session cookie.
+- calls Account `/luggage/handoff`.
+- requires a `303` redirect to the configured local Luggage URL.
+- decodes `fj_account_context`.
+- verifies the cookie HMAC with `ACCOUNT_LUGGAGE_CONTEXT_SECRET`.
+
+This proves Account can produce the same signed browser handoff cookie that
+Luggage validates here, without enabling public Account auth or touching
+production secrets.
+
 Production secrets must be configured in Cloudflare and must match the Account
 caller. Never commit real shared secrets.
