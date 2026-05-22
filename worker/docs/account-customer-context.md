@@ -92,7 +92,7 @@ The matching Account production PR is
 `Flying-Japan/pub-account-prd#1`. The currently verified Account head is:
 
 ```txt
-5966b6d0ab47d28f184cc9ecc13feb5573378fdd
+dfedee8dc58e205a2ad791fb9bc5e98282ebe211
 ```
 
 That Account head adds `pnpm run smoke:luggage-handoff`, a local-only synthetic

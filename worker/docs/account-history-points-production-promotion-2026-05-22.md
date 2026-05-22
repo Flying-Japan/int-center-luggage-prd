@@ -10,7 +10,7 @@ point usage promotion without deploying production behavior yet.
 - Account signed context is still blocked on the production Account login/signup
   source and shared secret rollout.
 - The matching Account PR is `Flying-Japan/pub-account-prd#1` at
-  `5966b6d0ab47d28f184cc9ecc13feb5573378fdd`; its CI is green and its
+  `dfedee8dc58e205a2ad791fb9bc5e98282ebe211`; its CI is green and its
   synthetic local `/luggage/handoff` smoke verifies the `fj_account_context`
   cookie signature.
 - This branch must not be deployed until `ACCOUNT_CONTEXT_SECRET` is configured
@@ -57,7 +57,7 @@ Results:
 - `smoke:account-context -- --dry-run` passed locally without printing the
   shared secret or signed cookie value.
 - Account PR #1 local handoff smoke passed on the Account branch head
-  `5966b6d0ab47d28f184cc9ecc13feb5573378fdd`, and Account CI passed
+  `dfedee8dc58e205a2ad791fb9bc5e98282ebe211`, and Account CI passed
   `build-and-test`, `e2e-canary`, and `gitleaks`.
 
 ## Required Verification Before Deployment
