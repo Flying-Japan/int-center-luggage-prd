@@ -47,6 +47,8 @@ pnpm --dir worker test
 pnpm --dir worker run check:schema-drift
 pnpm --dir worker run check:static-assets
 pnpm --dir worker run deploy:dry-run
+ACCOUNT_CONTEXT_SECRET=... ACCOUNT_LUGGAGE_CONTEXT_SECRET=... \
+  pnpm --dir worker run check:account-shared-secret
 ACCOUNT_CONTEXT_SECRET=... pnpm --dir worker run smoke:account-context -- \
   --dry-run \
   --include-page-checks \
@@ -65,6 +67,8 @@ Results:
 - Typecheck passed.
 - Vitest passed: 6 files, 46 tests.
 - Schema drift, customer asset guard, and Wrangler deploy dry-run passed.
+- `check:account-shared-secret` passed with a synthetic non-production value and
+  printed only a short SHA-256 fingerprint.
 - `smoke:account-context -- --dry-run --include-page-checks --include-price-preview-checks`
   passed locally without printing the shared secret or signed cookie value.
 - `smoke:cross-app-account-handoff -- --include-page-checks --include-price-preview-checks`
@@ -86,6 +90,8 @@ pnpm --dir worker test
 pnpm --dir worker run check:schema-drift
 pnpm --dir worker run check:static-assets
 pnpm --dir worker run deploy:dry-run
+ACCOUNT_CONTEXT_SECRET=... ACCOUNT_LUGGAGE_CONTEXT_SECRET=... \
+  pnpm --dir worker run check:account-shared-secret
 ACCOUNT_CONTEXT_SECRET=... pnpm --dir worker run smoke:account-context -- \
   --base-url <luggage-base-url> \
   --include-page-checks \
@@ -97,6 +103,11 @@ check list without sending HTTP requests. `--include-page-checks` adds GET-only
 checks for `/customer` and `/staff/login`; `--include-price-preview-checks`
 adds GET-only checks for `/api/price-preview`. The smoke script does not submit
 a customer intake form.
+
+`check:account-shared-secret` is a local preflight for the planned production
+secret values. It does not read Cloudflare and does not print the secret; it
+only verifies both env vars are identical and acceptable before an operator
+writes them to Account and Luggage production.
 
 For a cross-app local smoke, first ask Account to write its verified synthetic
 handoff cookie, then pass that cookie to Luggage:

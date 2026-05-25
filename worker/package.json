@@ -15,6 +15,7 @@
     "check:customer-assets": "node scripts/check-customer-assets.mjs",
     "check:static-assets": "node scripts/check-customer-assets.mjs",
     "check:schema-drift": "node scripts/check-schema-drift.mjs",
+    "check:account-shared-secret": "node scripts/check-account-shared-secret.mjs",
     "smoke:account-context": "node scripts/smoke-account-context.mjs",
     "smoke:cross-app-account-handoff": "node scripts/smoke-cross-app-account-handoff.mjs",
     "test": "vitest run"

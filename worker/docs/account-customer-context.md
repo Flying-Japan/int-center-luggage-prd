@@ -118,3 +118,15 @@ without enabling production secrets or deploying this Luggage branch.
 
 Production secrets must be configured in Cloudflare and must match the Account
 caller. Never commit real shared secrets.
+
+Before writing production secrets, verify the two intended values locally
+without printing the secret itself:
+
+```sh
+ACCOUNT_CONTEXT_SECRET=... \
+ACCOUNT_LUGGAGE_CONTEXT_SECRET=... \
+pnpm --dir worker run check:account-shared-secret
+```
+
+The preflight rejects empty, short, placeholder, whitespace-padded, multiline,
+or mismatched values and prints only a short SHA-256 fingerprint.
