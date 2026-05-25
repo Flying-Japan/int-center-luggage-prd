@@ -5,6 +5,9 @@ import { ACCOUNT_CONTEXT_COOKIE, optionalCustomerAuth, signAccountContext } from
 
 const SECRET = "account-context-test-secret";
 const BASE = "https://luggage.flyingjp.test/customer";
+const CONTRACT_SECRET = "dev-luggage-account-context-secret";
+const CONTRACT_TIMESTAMP = "2026-05-22T03:15:00.000Z";
+const CONTRACT_SIGNATURE = "Z3Wrapy8H99FCGPIW1uyLnpbz4yAdg39I5YsITzH4hU";
 
 function buildTestApp() {
   const app = new Hono<AppType>();
@@ -90,6 +93,50 @@ function toBase64Url(value: string): string {
 }
 
 describe("optionalCustomerAuth", () => {
+  it("signs the documented Account handoff sample the same way as pub-account", async () => {
+    await expect(
+      signAccountContext(CONTRACT_SECRET, {
+        timestamp: CONTRACT_TIMESTAMP,
+        personId: "person_123",
+        email: "customer@example.com",
+        provider: "account",
+        displayName: "Kim Customer",
+        phone: "010-1111-2222",
+        locale: "ko",
+      }),
+    ).resolves.toBe(CONTRACT_SIGNATURE);
+  });
+
+  it("accepts the documented Account handoff cookie fixture", async () => {
+    const cookie = `${ACCOUNT_CONTEXT_COOKIE}=${toBase64Url(JSON.stringify({
+      person_id: "person_123",
+      email: "customer@example.com",
+      provider: "account",
+      display_name: "Kim Customer",
+      phone: "010-1111-2222",
+      locale: "ko",
+      timestamp: CONTRACT_TIMESTAMP,
+      signature: CONTRACT_SIGNATURE,
+    }))}`;
+    const res = await dispatch({ cookie }, {
+      ACCOUNT_CONTEXT_MAX_AGE_SECONDS: "604800",
+      ACCOUNT_CONTEXT_SECRET: CONTRACT_SECRET,
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      customer: {
+        personId: "person_123",
+        email: "customer@example.com",
+        provider: "account",
+        displayName: "Kim Customer",
+        phone: "010-1111-2222",
+        locale: "ko",
+        issuedBy: "pub-account",
+      },
+    });
+  });
+
   it("keeps anonymous customer requests unchanged when no Account context exists", async () => {
     const res = await dispatch({}, {});
 
