@@ -292,6 +292,54 @@ afterEach(() => {
 });
 
 describe("customer order point usage", () => {
+  it("keeps anonymous submit anonymous and ignores preset ownership fields", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
+
+    const db = new FakeDb();
+    const { app, env } = buildApp(null, db);
+
+    const res = await postCustomerOrder(
+      app,
+      env,
+      customerOrderForm({
+        points_to_use: 0,
+        source_preset_order_id: "20260501-001",
+      }),
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toMatch(/^\/customer\/orders\/20260522-101\?lang=ko&token=/);
+    expect(db.insertedOrders).toHaveLength(1);
+    expect(db.insertedOrders[0]).toMatchObject({
+      account_person_id: null,
+      final_amount: 1200,
+      point_discount_amount: 0,
+      point_usage_status: "NONE",
+      points_earned: 0,
+      points_used: 0,
+      source_preset_order_id: null,
+    });
+    expect(db.pointTransactions).toHaveLength(0);
+  });
+
+  it("rejects anonymous point usage before order insert", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
+
+    const db = new FakeDb();
+    const { app, env } = buildApp(null, db);
+
+    const res = await postCustomerOrder(app, env, customerOrderForm({ points_to_use: 500 }));
+
+    expect(res.status).toBe(302);
+    expect(decodeURIComponent(res.headers.get("Location") || "")).toContain(
+      "포인트는 로그인한 고객만 사용할 수 있습니다.",
+    );
+    expect(db.insertedOrders).toHaveLength(0);
+    expect(db.pointTransactions).toHaveLength(0);
+  });
+
   it("stores server-recalculated point discounts after Flying Pass discounts", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
