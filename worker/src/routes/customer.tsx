@@ -414,7 +414,7 @@ customer.get("/customer", async (c) => {
   };
 
   const qtyOptions = Array.from({ length: 11 }, (_, i) => i);
-  const companionOptions = Array.from({ length: 10 }, (_, i) => i + 1);
+  const companionOptions = Array.from({ length: 11 }, (_, i) => i);
 
   const discountTable = [
     { days: "7 ~ 13", rate: "5%" },
@@ -1563,7 +1563,9 @@ form { margin-top: 16px; }
     if (!payload) return;
     var suit = Number(payload.suitcase_qty||0);
     var back = Number(payload.backpack_qty||0);
-    var comp = Number(payload.companion_count||1) || 1;
+    var hasCompanionCount = Object.prototype.hasOwnProperty.call(payload, "companion_count");
+    var comp = hasCompanionCount ? Number(payload.companion_count) : 1;
+    if (!Number.isFinite(comp) || comp < 0) comp = 1;
     setSelectOrCustomQty(suitcaseSelectEl, suitcaseCustomEl, suitcaseEl, suit);
     setSelectOrCustomQty(backpackSelectEl, backpackCustomEl, backpackEl, back);
     setSelectOrCustomQty(companionSelectEl, companionCustomEl, companionHiddenEl, comp);
