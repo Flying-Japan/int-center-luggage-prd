@@ -49,12 +49,14 @@ pnpm --dir worker run check:static-assets
 pnpm --dir worker run deploy:dry-run
 ACCOUNT_CONTEXT_SECRET=... pnpm --dir worker run smoke:account-context -- \
   --dry-run \
-  --include-page-checks
+  --include-page-checks \
+  --include-price-preview-checks
 pnpm --dir worker run smoke:cross-app-account-handoff -- \
   --account-dir /Users/sanghunbruceham/Documents/GitHub/pub-account-prd \
-  --account-port 13010 \
-  --luggage-port 18787 \
-  --include-page-checks
+  --account-port 13011 \
+  --luggage-port 18788 \
+  --include-page-checks \
+  --include-price-preview-checks
 ```
 
 Results:
@@ -62,13 +64,14 @@ Results:
 - Smoke script syntax checks passed.
 - Typecheck passed.
 - Vitest passed: 6 files, 46 tests.
-- `smoke:account-context -- --dry-run --include-page-checks` passed locally
-  without printing the shared secret or signed cookie value.
-- `smoke:cross-app-account-handoff -- --include-page-checks` passed on
-  non-default local ports. It verified anonymous `/customer`, signed
-  `/customer`, `/staff/login`, anonymous context, signed generated cookie,
-  Account-minted cookie, signed headers, stale timestamp rejection, and
-  invalid-header-over-cookie rejection.
+- Schema drift, customer asset guard, and Wrangler deploy dry-run passed.
+- `smoke:account-context -- --dry-run --include-page-checks --include-price-preview-checks`
+  passed locally without printing the shared secret or signed cookie value.
+- `smoke:cross-app-account-handoff -- --include-page-checks --include-price-preview-checks`
+  passed on non-default local ports. It verified anonymous `/customer`, signed
+  `/customer`, `/staff/login`, anonymous and signed `/api/price-preview`,
+  anonymous context, signed generated cookie, Account-minted cookie, signed
+  headers, stale timestamp rejection, and invalid-header-over-cookie rejection.
 - Account PR #1 local handoff smoke passed on the Account branch head
   `a12b739b1e421ba2ba70616b60a8df441889787a`, and Account CI passed
   `build-and-test`, `e2e-canary`, and `gitleaks`.
@@ -85,13 +88,15 @@ pnpm --dir worker run check:static-assets
 pnpm --dir worker run deploy:dry-run
 ACCOUNT_CONTEXT_SECRET=... pnpm --dir worker run smoke:account-context -- \
   --base-url <luggage-base-url> \
-  --include-page-checks
+  --include-page-checks \
+  --include-price-preview-checks
 ```
 
 Use `--dry-run` before secrets are wired to verify the synthetic payload and
 check list without sending HTTP requests. `--include-page-checks` adds GET-only
-checks for `/customer` and `/staff/login`; the smoke script does not submit a
-customer intake form.
+checks for `/customer` and `/staff/login`; `--include-price-preview-checks`
+adds GET-only checks for `/api/price-preview`. The smoke script does not submit
+a customer intake form.
 
 For a cross-app local smoke, first ask Account to write its verified synthetic
 handoff cookie, then pass that cookie to Luggage:
@@ -112,7 +117,8 @@ The same flow can be run as one command from this Luggage promotion worktree:
 ```sh
 pnpm --dir worker run smoke:cross-app-account-handoff -- \
   --account-dir /path/to/pub-account-prd \
-  --include-page-checks
+  --include-page-checks \
+  --include-price-preview-checks
 ```
 
 ## Production Smoke Checklist
@@ -125,7 +131,7 @@ Do not use real customer PII for smoke data.
 3. Signed synthetic Account context renders `/customer` as authenticated.
 4. `/customer/api/context` returns `is_authenticated = true`, point balance,
    and only safe previous-order preset fields for the signed synthetic person.
-   Use `pnpm --dir worker run smoke:account-context -- --include-page-checks`
+   Use `pnpm --dir worker run smoke:account-context -- --include-page-checks --include-price-preview-checks`
    for this check after the shared secret is configured.
 5. Selecting a previous-history preset fills the form only after customer action.
 6. Submitting with controlled point usage writes:

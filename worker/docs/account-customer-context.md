@@ -83,7 +83,9 @@ Missing optional fields are signed as empty strings.
   timestamp, and invalid-header-over-cookie behavior against
   `/customer/api/context`. Add `--include-page-checks` during release-window
   smoke to also GET anonymous `/customer`, signed `/customer`, and
-  `/staff/login` without submitting forms.
+  `/staff/login` without submitting forms. Add
+  `--include-price-preview-checks` to verify anonymous and signed
+  `/api/price-preview` behavior without writing data.
 - If Account headers and cookie are both present, Luggage validates the headers
   and does not fall back to the cookie. This prevents a browser-supplied invalid
   header from being hidden by a valid cookie.

@@ -11,6 +11,7 @@ const DEFAULT_DISPLAY_NAME = "Luggage Smoke";
 const DEFAULT_LOCALE = "ko";
 const CONTEXT_PATH = "/customer/api/context";
 const CUSTOMER_PATH = "/customer";
+const PRICE_PREVIEW_PATH = "/api/price-preview";
 const STAFF_LOGIN_PATH = "/staff/login";
 const COOKIE_NAME = "fj_account_context";
 
@@ -112,12 +113,19 @@ async function main() {
       console.log(`dry-run: signed ${CUSTOMER_PATH} renders`);
       console.log(`dry-run: ${STAFF_LOGIN_PATH} renders`);
     }
+    if (options.includePricePreviewChecks) {
+      console.log(`dry-run: anonymous ${PRICE_PREVIEW_PATH} ignores requested points`);
+      console.log(`dry-run: signed ${PRICE_PREVIEW_PATH} accepts synthetic context`);
+    }
     for (const check of checks) console.log(`dry-run: ${check.label}`);
     return;
   }
 
   if (options.includePageChecks) {
     await runPageChecks(baseUrl, validCookie, context);
+  }
+  if (options.includePricePreviewChecks) {
+    await runPricePreviewChecks(baseUrl, validCookie, context);
   }
 
   for (const check of checks) {
@@ -155,6 +163,74 @@ async function runPageChecks(baseUrl, validCookie, context) {
   console.log(`ok: ${STAFF_LOGIN_PATH} renders`);
 }
 
+async function runPricePreviewChecks(baseUrl, validCookie, context) {
+  await runPricePreviewCheck(baseUrl, {
+    label: "anonymous price preview ignores requested points",
+    headers: {},
+    expectAnonymous: true,
+    context,
+  });
+  console.log(`ok: anonymous ${PRICE_PREVIEW_PATH} ignores requested points`);
+
+  await runPricePreviewCheck(baseUrl, {
+    label: "signed price preview accepts synthetic context",
+    headers: { Cookie: `${COOKIE_NAME}=${validCookie}` },
+    expectAnonymous: false,
+    context,
+  });
+  console.log(`ok: signed ${PRICE_PREVIEW_PATH} accepts synthetic context`);
+}
+
+async function runPricePreviewCheck(baseUrl, check) {
+  const response = await fetch(pricePreviewUrl(baseUrl), {
+    headers: check.headers,
+    redirect: "manual",
+  });
+  const text = await response.text();
+  if (response.status !== 200) {
+    throw new Error(`${check.label}: expected HTTP 200, got ${response.status}. Body: ${summarize(text)}`);
+  }
+
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(`${check.label}: expected JSON response. Body: ${summarize(text)}`);
+  }
+
+  for (const field of [
+    "set_qty",
+    "price_per_day",
+    "expected_storage_days",
+    "prepaid_amount",
+    "final_amount",
+    "points_to_use",
+    "point_discount_amount",
+    "point_balance",
+  ]) {
+    if (typeof body[field] !== "number") {
+      throw new Error(`${check.label}: ${field} must be numeric`);
+    }
+  }
+
+  if (check.expectAnonymous) {
+    if (body.point_balance !== 0 || body.points_to_use !== 0 || body.point_discount_amount !== 0) {
+      throw new Error(`${check.label}: anonymous preview must ignore point usage`);
+    }
+  }
+
+  assertNoSyntheticLeak(text, check.context, check.label);
+}
+
+function pricePreviewUrl(baseUrl) {
+  const url = new URL(PRICE_PREVIEW_PATH, baseUrl);
+  url.searchParams.set("suitcase_qty", "1");
+  url.searchParams.set("backpack_qty", "1");
+  url.searchParams.set("expected_pickup_at", nextTokyoNoon());
+  url.searchParams.set("points_to_use", "1000");
+  return url;
+}
+
 async function runPageCheck(baseUrl, check) {
   const response = await fetch(new URL(check.path, baseUrl), {
     headers: check.headers,
@@ -169,6 +245,18 @@ async function runPageCheck(baseUrl, check) {
       throw new Error(`${check.label}: response leaked synthetic profile value "${value}"`);
     }
   }
+}
+
+function nextTokyoNoon() {
+  const future = new Date(Date.now() + 36 * 60 * 60 * 1000);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(future);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}T12:00:00+09:00`;
 }
 
 async function runCheck(baseUrl, check, context) {
@@ -297,6 +385,7 @@ function parseArgs(argv) {
     secretEnv: process.env.LUGGAGE_SMOKE_SECRET_ENV || DEFAULT_SECRET_ENV,
     contextCookieFile: process.env.LUGGAGE_SMOKE_CONTEXT_COOKIE_FILE || "",
     includePageChecks: process.env.LUGGAGE_SMOKE_INCLUDE_PAGE_CHECKS === "1",
+    includePricePreviewChecks: process.env.LUGGAGE_SMOKE_INCLUDE_PRICE_PREVIEW_CHECKS === "1",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -328,6 +417,9 @@ function parseArgs(argv) {
         break;
       case "--include-page-checks":
         options.includePageChecks = true;
+        break;
+      case "--include-price-preview-checks":
+        options.includePricePreviewChecks = true;
         break;
       case "--person-id":
         options.personId = requireValue(argv, ++index, arg);
@@ -407,6 +499,9 @@ Options:
                        Also GET /customer anonymously, /customer with a signed
                        synthetic cookie, and /staff/login. These checks do not
                        submit forms or write data.
+  --include-price-preview-checks
+                       Also GET /api/price-preview anonymously and with a signed
+                       synthetic cookie. This check does not write data.
   --dry-run            Build checks without sending HTTP requests
 `);
 }

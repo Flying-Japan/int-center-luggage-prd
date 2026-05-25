@@ -113,6 +113,7 @@ async function main() {
       "--context-cookie-file",
       cookieFile,
       ...(options.includePageChecks ? ["--include-page-checks"] : []),
+      ...(options.includePricePreviewChecks ? ["--include-price-preview-checks"] : []),
     ], {
       cwd: projectRoot,
       env: {
@@ -135,6 +136,7 @@ function parseArgs(argv) {
     contextSecret: process.env.ACCOUNT_HANDOFF_SMOKE_CONTEXT_SECRET || DEFAULT_CONTEXT_SECRET,
     help: false,
     includePageChecks: process.env.ACCOUNT_HANDOFF_SMOKE_INCLUDE_PAGE_CHECKS === "1",
+    includePricePreviewChecks: process.env.ACCOUNT_HANDOFF_SMOKE_INCLUDE_PRICE_PREVIEW_CHECKS === "1",
     keepCookieFile: false,
     luggagePort: numberOption(process.env.ACCOUNT_HANDOFF_SMOKE_LUGGAGE_PORT, DEFAULT_LUGGAGE_PORT),
     sessionSecret: process.env.ACCOUNT_HANDOFF_SMOKE_SESSION_SECRET || DEFAULT_SESSION_SECRET,
@@ -167,6 +169,9 @@ function parseArgs(argv) {
         break;
       case "--include-page-checks":
         options.includePageChecks = true;
+        break;
+      case "--include-price-preview-checks":
+        options.includePricePreviewChecks = true;
         break;
       case "--luggage-port":
         options.luggagePort = numberOption(requireValue(argv, ++index, arg), DEFAULT_LUGGAGE_PORT, arg);
@@ -306,6 +311,9 @@ Options:
                            Cookie handoff file path. Defaults to a temp file
   --include-page-checks    Also run Luggage GET-only /customer and /staff/login
                            page checks through smoke:account-context
+  --include-price-preview-checks
+                           Also run Luggage GET-only /api/price-preview checks
+                           through smoke:account-context
   --keep-cookie-file       Keep the generated synthetic cookie file
   --skip-migrate           Skip local D1 schema migration before starting Luggage
 `);
