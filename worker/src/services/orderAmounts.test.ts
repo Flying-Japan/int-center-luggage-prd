@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import adminSource from "../routes/admin.tsx?raw";
+import operationsSource from "../routes/operations.tsx?raw";
 import {
   calculateOrderCollectedAmount,
   orderCollectedAmountSql,
@@ -49,5 +51,14 @@ describe("order amount helpers", () => {
     expect(sql).not.toContain("points_used");
     expect(sql).not.toContain("point_discount_amount");
     expect(sql).toContain("flying_pass_discount_amount");
+  });
+
+  it("keeps live dashboard sales SQL on the shared collected amount helper", () => {
+    const legacyExpression = "COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount";
+
+    expect(adminSource).toContain('orderCollectedAmountSql("o")');
+    expect(operationsSource).toContain('orderCollectedAmountSql("o")');
+    expect(adminSource).not.toContain(legacyExpression);
+    expect(operationsSource).not.toContain(legacyExpression);
   });
 });

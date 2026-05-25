@@ -8,6 +8,7 @@ import { adminAuth, editorAuth, getStaff } from "../middleware/auth";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
+import { orderCollectedAmountSql } from "../services/orderAmounts";
 
 const admin = new Hono<AppType>();
 admin.use("/staff/admin/sales/*", editorAuth);
@@ -25,6 +26,7 @@ admin.get("/staff/admin/sales", async (c) => {
   const endDate = c.req.query("end_date") || new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const todayJST = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const STARTING_FLOAT = 40000;
+  const collectedAmountSql = orderCollectedAmountSql("o");
 
   const whereClause = " WHERE sale_date BETWEEN ? AND ?";
   const params: string[] = [startDate, endDate];
@@ -61,9 +63,9 @@ admin.get("/staff/admin/sales", async (c) => {
         SUM(1 + o.companion_count) as order_count,
         SUM(o.suitcase_qty) as suitcase_total,
         SUM(o.backpack_qty) as backpack_total,
-        SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN (o.payment_method = 'CASH' OR o.payment_method IS NULL) THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as cash,
-        SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as qr,
-        SUM(COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount) as luggage_total
+        SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN (o.payment_method = 'CASH' OR o.payment_method IS NULL) THEN ${collectedAmountSql} ELSE 0 END) as cash,
+        SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' THEN ${collectedAmountSql} ELSE 0 END) as qr,
+        SUM(${collectedAmountSql}) as luggage_total
       FROM luggage_orders o
       LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
       WHERE o.status IN ('PAID', 'PICKED_UP')${actualWhereClause.replaceAll("created_at", "o.created_at")}
@@ -196,9 +198,9 @@ admin.get("/staff/admin/sales", async (c) => {
        COUNT(*) as order_count,
        SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN 1 ELSE 0 END) as paid_count,
        SUM(CASE WHEN o.status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN o.status IN ('PAID','PICKED_UP') AND (o.payment_method = 'CASH' OR o.payment_method IS NULL) THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as cash_total,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.status IN ('PAID','PICKED_UP') AND o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as qr_total,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as revenue_total,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN o.status IN ('PAID','PICKED_UP') AND (o.payment_method = 'CASH' OR o.payment_method IS NULL) THEN ${collectedAmountSql} ELSE 0 END) as cash_total,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.status IN ('PAID','PICKED_UP') AND o.payment_method = 'PAY_QR' THEN ${collectedAmountSql} ELSE 0 END) as qr_total,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN ${collectedAmountSql} ELSE 0 END) as revenue_total,
        SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN o.suitcase_qty ELSE 0 END) as suitcase_total,
        SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN o.backpack_qty ELSE 0 END) as backpack_total
      FROM luggage_orders o
@@ -223,9 +225,9 @@ admin.get("/staff/admin/sales", async (c) => {
      )
      SELECT
        SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN 1 + o.companion_count ELSE 0 END) as people,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN (o.payment_method = 'CASH' OR o.payment_method IS NULL) AND o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as cash,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' AND o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as qr,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as luggage_total
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN (o.payment_method = 'CASH' OR o.payment_method IS NULL) AND o.status IN ('PAID','PICKED_UP') THEN ${collectedAmountSql} ELSE 0 END) as cash,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' AND o.status IN ('PAID','PICKED_UP') THEN ${collectedAmountSql} ELSE 0 END) as qr,
+       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN ${collectedAmountSql} ELSE 0 END) as luggage_total
      FROM luggage_orders o
      LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
      WHERE date(o.created_at, '+9 hours') = ? AND o.status != 'CANCELLED'`
