@@ -70,7 +70,8 @@ Results:
 - `check:account-shared-secret` passed with a synthetic non-production value and
   printed only a short SHA-256 fingerprint.
 - `smoke:account-context -- --dry-run --include-page-checks --include-price-preview-checks`
-  passed locally without printing the shared secret or signed cookie value.
+  passed locally without printing the shared secret or signed cookie value, and
+  the smoke now rejects real-looking identity values by default.
 - `smoke:cross-app-account-handoff -- --include-page-checks --include-price-preview-checks`
   passed on non-default local ports. It verified anonymous `/customer`, signed
   `/customer`, `/staff/login`, anonymous and signed `/api/price-preview`,
@@ -102,7 +103,9 @@ Use `--dry-run` before secrets are wired to verify the synthetic payload and
 check list without sending HTTP requests. `--include-page-checks` adds GET-only
 checks for `/customer` and `/staff/login`; `--include-price-preview-checks`
 adds GET-only checks for `/api/price-preview`. The smoke script does not submit
-a customer intake form.
+a customer intake form. Smoke identity values must remain synthetic: use a
+reserved `.invalid` email address, and leave optional name/phone values empty or
+clearly mark them as smoke/test values.
 
 `check:account-shared-secret` is a local preflight for the planned production
 secret values. It does not read Cloudflare and does not print the secret; it

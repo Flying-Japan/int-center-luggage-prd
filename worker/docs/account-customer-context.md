@@ -85,7 +85,10 @@ Missing optional fields are signed as empty strings.
   smoke to also GET anonymous `/customer`, signed `/customer`, and
   `/staff/login` without submitting forms. Add
   `--include-price-preview-checks` to verify anonymous and signed
-  `/api/price-preview` behavior without writing data.
+  `/api/price-preview` behavior without writing data. The smoke script rejects
+  real-looking identity values by default: email values must use the reserved
+  `.invalid` TLD, and optional name/phone values must be empty or clearly
+  synthetic.
 - If Account headers and cookie are both present, Luggage validates the headers
   and does not fall back to the cookie. This prevents a browser-supplied invalid
   header from being hidden by a valid cookie.

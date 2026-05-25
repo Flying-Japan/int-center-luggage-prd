@@ -14,6 +14,7 @@ const CUSTOMER_PATH = "/customer";
 const PRICE_PREVIEW_PATH = "/api/price-preview";
 const STAFF_LOGIN_PATH = "/staff/login";
 const COOKIE_NAME = "fj_account_context";
+const SYNTHETIC_MARKER_PATTERN = /(^local_|smoke|synthetic|test|example|dummy)/i;
 
 const HEADERS = {
   personId: "X-Flying-Account-Person-Id",
@@ -60,6 +61,10 @@ async function main() {
     ? cleanValue(await readFile(options.contextCookieFile, "utf8"), "contextCookieFile").trim()
     : "";
   const externalContext = externalCookie ? contextFromCookiePayload(externalCookie) : null;
+  assertSyntheticSmokeContext(context, "generated smoke context");
+  if (externalContext) {
+    assertSyntheticSmokeContext(externalContext, "Account-minted smoke context");
+  }
 
   const checks = [
     {
@@ -371,6 +376,33 @@ function assertNoSyntheticLeak(text, context, label) {
   }
 }
 
+function assertSyntheticSmokeContext(context, label) {
+  const email = context.email.toLowerCase();
+  const hasSyntheticEmail = email.endsWith(".invalid");
+  if (email && !hasSyntheticEmail) {
+    throw new Error(`${label}: email must use the reserved .invalid TLD for smoke data`);
+  }
+
+  if (!hasSyntheticEmail && !SYNTHETIC_MARKER_PATTERN.test(context.personId)) {
+    throw new Error(`${label}: use a .invalid email or an obvious synthetic person id`);
+  }
+
+  if (context.displayName && !SYNTHETIC_MARKER_PATTERN.test(context.displayName)) {
+    throw new Error(`${label}: display name must be empty or clearly synthetic`);
+  }
+
+  if (context.phone && !isSyntheticPhone(context.phone)) {
+    throw new Error(`${label}: phone must be empty or clearly synthetic`);
+  }
+}
+
+function isSyntheticPhone(value) {
+  if (SYNTHETIC_MARKER_PATTERN.test(value)) return true;
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return false;
+  return /^0+$/.test(digits) || /^1+$/.test(digits) || /^9+$/.test(digits) || digits === "1234567890";
+}
+
 function parseArgs(argv) {
   const options = {
     baseUrl: process.env.LUGGAGE_SMOKE_BASE_URL || DEFAULT_BASE_URL,
@@ -503,5 +535,9 @@ Options:
                        Also GET /api/price-preview anonymously and with a signed
                        synthetic cookie. This check does not write data.
   --dry-run            Build checks without sending HTTP requests
+
+Smoke identity values must be synthetic. Emails must use the reserved .invalid
+TLD; names and phone values must be empty or clearly synthetic. This prevents
+release-window smoke from accidentally using real customer PII.
 `);
 }
