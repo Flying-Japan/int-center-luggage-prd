@@ -88,6 +88,16 @@ function buildApp(session: CustomerSession | null, db: unknown) {
   };
 }
 
+function extractHistoryPayloads(html: string): Array<Record<string, unknown>> {
+  return [...html.matchAll(/data-history-payload="([^"]+)"/g)].map(([, raw]) => {
+    const decoded = raw
+      .replace(/&quot;/g, "\"")
+      .replace(/&#34;/g, "\"")
+      .replace(/&amp;/g, "&");
+    return JSON.parse(decoded) as Record<string, unknown>;
+  });
+}
+
 describe("GET /customer/api/context", () => {
   it("returns an anonymous no-store context without querying customer tables", async () => {
     const db = {
@@ -174,5 +184,62 @@ describe("GET /customer/api/context", () => {
     expect(serialized).not.toContain("010-1111-2222");
     expect(serialized).not.toContain("Kim Customer");
     expect(serialized).not.toContain("person-1");
+  });
+});
+
+describe("GET /customer", () => {
+  it("renders previous-history apply payloads without profile PII or Account identifiers", async () => {
+    const db = new FakeDb();
+    db.profile = {
+      account_person_id: "person-1",
+      display_name: "Kim Customer",
+      phone: "010-1111-2222",
+      email: "kim@example.com",
+      locale: "ko",
+      identity_verified_at: "2026-05-20T00:00:00.000Z",
+    };
+    db.pointBalance = 1200;
+    db.recentOrders = [{
+      order_id: "20260521-001",
+      created_at: "2026-05-21 09:00:00",
+      suitcase_qty: 1,
+      backpack_qty: 1,
+      companion_count: 2,
+      payment_method: "CASH",
+      gross_amount: 1200,
+      prepaid_amount: 1200,
+      point_discount_amount: 100,
+      final_amount: 1100,
+      status: "PAID",
+      name: "Kim Customer",
+      phone: "010-1111-2222",
+      email: "kim@example.com",
+    }];
+    const { app, env } = buildApp({
+      displayName: "Kim Customer",
+      email: "kim@example.com",
+      issuedBy: "pub-account",
+      personId: "person-1",
+      phone: "010-1111-2222",
+      provider: "account",
+    }, db);
+
+    const response = await app.fetch(new Request("https://luggage.test/customer?lang=ko"), env);
+    const html = await response.text();
+    const payloads = extractHistoryPayloads(html);
+
+    expect(response.status).toBe(200);
+    expect(payloads).toEqual([{
+      order_id: "20260521-001",
+      suitcase_qty: 1,
+      backpack_qty: 1,
+      companion_count: 2,
+      payment_method: "CASH",
+    }]);
+    const serializedPayloads = JSON.stringify(payloads);
+    expect(serializedPayloads).not.toContain("person-1");
+    expect(serializedPayloads).not.toContain("kim@example.com");
+    expect(serializedPayloads).not.toContain("010-1111-2222");
+    expect(serializedPayloads).not.toContain("Kim Customer");
   });
 });
