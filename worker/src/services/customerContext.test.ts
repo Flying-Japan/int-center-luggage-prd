@@ -7,6 +7,7 @@ import {
   loadCustomerProfile,
   loadPointBalance,
   loadRecentCustomerOrders,
+  verifyOwnedSourcePresetOrder,
 } from "./customerContext";
 
 type RawProfile = {
@@ -57,6 +58,18 @@ class FakePreparedStatement {
     if (this.sql.includes("FROM luggage_customer_point_accounts")) {
       const balance = this.db.pointBalances.get(personId);
       return (balance == null ? null : { balance_points: balance }) as T | null;
+    }
+
+    if (this.sql.includes("FROM luggage_orders")) {
+      const orderId = String(this.boundValues[0]);
+      const accountPersonId = String(this.boundValues[1]);
+      const order = this.db.orders.find((candidate) =>
+        candidate.order_id === orderId &&
+        candidate.account_person_id === accountPersonId &&
+        candidate.parent_order_id === null &&
+        ["PAID", "PICKED_UP", "PAYMENT_PENDING"].includes(candidate.status)
+      );
+      return (order ? { order_id: order.order_id } : null) as T | null;
     }
 
     throw new Error(`Unsupported first() SQL: ${this.sql}`);
@@ -236,5 +249,76 @@ describe("customer context service", () => {
       pointBalance: 300,
       isAuthenticated: true,
     });
+  });
+
+  it("verifies source preset orders with the same active root-order rules as recent presets", async () => {
+    const db = new FakeDb();
+    db.orders = [
+      {
+        order_id: "valid",
+        account_person_id: "person-1",
+        created_at: "2026-05-01 10:00:00",
+        suitcase_qty: 1,
+        backpack_qty: 1,
+        companion_count: 0,
+        payment_method: "CASH",
+        gross_amount: 1200,
+        prepaid_amount: 1200,
+        point_discount_amount: 0,
+        final_amount: 1200,
+        status: "PAID",
+        parent_order_id: null,
+      },
+      {
+        order_id: "cancelled",
+        account_person_id: "person-1",
+        created_at: "2026-05-02 10:00:00",
+        suitcase_qty: 1,
+        backpack_qty: 0,
+        companion_count: 0,
+        payment_method: "CASH",
+        gross_amount: 800,
+        prepaid_amount: 800,
+        point_discount_amount: 0,
+        final_amount: 800,
+        status: "CANCELLED",
+        parent_order_id: null,
+      },
+      {
+        order_id: "extension",
+        account_person_id: "person-1",
+        created_at: "2026-05-03 10:00:00",
+        suitcase_qty: 1,
+        backpack_qty: 0,
+        companion_count: 0,
+        payment_method: "CASH",
+        gross_amount: 800,
+        prepaid_amount: 800,
+        point_discount_amount: 0,
+        final_amount: 800,
+        status: "PAID",
+        parent_order_id: "valid",
+      },
+      {
+        order_id: "other",
+        account_person_id: "person-2",
+        created_at: "2026-05-04 10:00:00",
+        suitcase_qty: 1,
+        backpack_qty: 0,
+        companion_count: 0,
+        payment_method: "CASH",
+        gross_amount: 800,
+        prepaid_amount: 800,
+        point_discount_amount: 0,
+        final_amount: 800,
+        status: "PAID",
+        parent_order_id: null,
+      },
+    ];
+
+    await expect(verifyOwnedSourcePresetOrder(db as unknown as D1Database, "person-1", "valid")).resolves.toBe("valid");
+    await expect(verifyOwnedSourcePresetOrder(db as unknown as D1Database, "person-1", "cancelled")).resolves.toBeNull();
+    await expect(verifyOwnedSourcePresetOrder(db as unknown as D1Database, "person-1", "extension")).resolves.toBeNull();
+    await expect(verifyOwnedSourcePresetOrder(db as unknown as D1Database, "person-1", "other")).resolves.toBeNull();
   });
 });

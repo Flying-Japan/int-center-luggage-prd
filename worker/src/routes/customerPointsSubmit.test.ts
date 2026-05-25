@@ -35,6 +35,13 @@ type PointTransaction = {
   transaction_type: string;
 };
 
+type SourcePresetOrder = {
+  account_person_id: string;
+  order_id: string;
+  parent_order_id: string | null;
+  status: string;
+};
+
 type BatchResult = { meta: { changes: number }; rollback?: boolean };
 
 class FakePreparedStatement {
@@ -62,7 +69,15 @@ class FakePreparedStatement {
     }
 
     if (this.sql.includes("FROM luggage_orders") && this.sql.includes("account_person_id")) {
-      return null;
+      const orderId = String(this.boundValues[0]);
+      const accountPersonId = String(this.boundValues[1]);
+      const order = this.db.sourcePresetOrders.find((candidate) =>
+        candidate.order_id === orderId &&
+        candidate.account_person_id === accountPersonId &&
+        candidate.parent_order_id === null &&
+        ["PAID", "PICKED_UP", "PAYMENT_PENDING"].includes(candidate.status)
+      );
+      return (order ? { order_id: order.order_id } : null) as T | null;
     }
 
     throw new Error(`Unsupported first() SQL: ${this.sql}`);
@@ -116,6 +131,7 @@ class FakeDb {
   lastChanges = 0;
   pointBalances = new Map<string, number>();
   pointTransactions: PointTransaction[] = [];
+  sourcePresetOrders: SourcePresetOrder[] = [];
 
   prepare(sql: string) {
     return new FakePreparedStatement(this, sql);
@@ -128,6 +144,7 @@ class FakeDb {
       lastChanges: this.lastChanges,
       pointBalances: new Map(this.pointBalances),
       pointTransactions: this.pointTransactions.map((transaction) => ({ ...transaction })),
+      sourcePresetOrders: this.sourcePresetOrders.map((order) => ({ ...order })),
     };
     const results: BatchResult[] = [];
 
@@ -140,6 +157,7 @@ class FakeDb {
           this.lastChanges = 0;
           this.pointBalances = snapshot.pointBalances;
           this.pointTransactions = snapshot.pointTransactions;
+          this.sourcePresetOrders = snapshot.sourcePresetOrders;
           results.push({ meta: { changes: 0 } });
           return results;
         }
@@ -152,6 +170,7 @@ class FakeDb {
       this.lastChanges = snapshot.lastChanges;
       this.pointBalances = snapshot.pointBalances;
       this.pointTransactions = snapshot.pointTransactions;
+      this.sourcePresetOrders = snapshot.sourcePresetOrders;
       throw error;
     }
   }
@@ -381,6 +400,68 @@ describe("customer order point usage", () => {
         transaction_type: "USE",
       }),
     ]);
+  });
+
+  it("stores an owned active previous-history preset reference for signed customers", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
+
+    const db = new FakeDb();
+    db.sourcePresetOrders.push({
+      account_person_id: "person-1",
+      order_id: "20260501-001",
+      parent_order_id: null,
+      status: "PAID",
+    });
+    const { app, env } = buildApp({
+      email: "account@example.com",
+      issuedBy: "pub-account",
+      personId: "person-1",
+      provider: "account",
+    }, db);
+
+    const res = await postCustomerOrder(
+      app,
+      env,
+      customerOrderForm({ source_preset_order_id: "20260501-001" }),
+    );
+
+    expect(res.status).toBe(302);
+    expect(db.insertedOrders).toHaveLength(1);
+    expect(db.insertedOrders[0]).toMatchObject({
+      account_person_id: "person-1",
+      source_preset_order_id: "20260501-001",
+    });
+  });
+
+  it("rejects tampered previous-history preset references before order insert", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
+
+    const db = new FakeDb();
+    db.sourcePresetOrders.push({
+      account_person_id: "person-2",
+      order_id: "20260501-001",
+      parent_order_id: null,
+      status: "PAID",
+    });
+    const { app, env } = buildApp({
+      email: "account@example.com",
+      issuedBy: "pub-account",
+      personId: "person-1",
+      provider: "account",
+    }, db);
+
+    const res = await postCustomerOrder(
+      app,
+      env,
+      customerOrderForm({ source_preset_order_id: "20260501-001" }),
+    );
+
+    expect(res.status).toBe(302);
+    expect(decodeURIComponent(res.headers.get("Location") || "")).toContain("오류가 발생했습니다");
+    expect(db.insertedOrders).toHaveLength(0);
+    expect(db.pointTransactions).toHaveLength(0);
   });
 
   it("rejects point usage above the account balance before order insert", async () => {

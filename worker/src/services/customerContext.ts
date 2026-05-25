@@ -202,6 +202,7 @@ export async function verifyOwnedSourcePresetOrder(
      WHERE order_id = ?
        AND account_person_id = ?
        AND parent_order_id IS NULL
+       AND status IN ('PAID', 'PICKED_UP', 'PAYMENT_PENDING')
      LIMIT 1`
   ).bind(cleaned, accountPersonId).first<SourcePresetRow>();
 
