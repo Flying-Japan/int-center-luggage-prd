@@ -81,7 +81,9 @@ Missing optional fields are signed as empty strings.
 - `pnpm --dir worker run smoke:account-context` signs the same cookie/header
   contract with synthetic data and verifies anonymous, cookie, header, stale
   timestamp, and invalid-header-over-cookie behavior against
-  `/customer/api/context`.
+  `/customer/api/context`. Add `--include-page-checks` during release-window
+  smoke to also GET anonymous `/customer`, signed `/customer`, and
+  `/staff/login` without submitting forms.
 - If Account headers and cookie are both present, Luggage validates the headers
   and does not fall back to the cookie. This prevents a browser-supplied invalid
   header from being hidden by a valid cookie.
@@ -92,11 +94,13 @@ The matching Account production PR is
 `Flying-Japan/pub-account-prd#1`. The currently verified Account head is:
 
 ```txt
-dfedee8dc58e205a2ad791fb9bc5e98282ebe211
+a12b739b1e421ba2ba70616b60a8df441889787a
 ```
 
-That Account head adds `pnpm run smoke:luggage-handoff`, a local-only synthetic
-handoff smoke that:
+That Account head adds the production auth success hooks that call
+`provisionAccountCustomerIdentity()` for non-admin customers after Supabase Auth
+succeeds, plus `pnpm run smoke:luggage-handoff`, a local-only synthetic handoff
+smoke that:
 
 - builds a `.invalid` local v2 session cookie.
 - calls Account `/luggage/handoff`.
@@ -106,9 +110,9 @@ handoff smoke that:
 - can write the verified synthetic cookie to a temporary file for Luggage to
   consume with `pnpm --dir worker run smoke:account-context -- --context-cookie-file <path>`.
 
-This proves Account can produce the same signed browser handoff cookie that
-Luggage validates here, without enabling public Account auth or touching
-production secrets.
+This proves Account can provision customer identity after auth success and can
+produce the same signed browser handoff cookie that Luggage validates here,
+without enabling production secrets or deploying this Luggage branch.
 
 Production secrets must be configured in Cloudflare and must match the Account
 caller. Never commit real shared secrets.

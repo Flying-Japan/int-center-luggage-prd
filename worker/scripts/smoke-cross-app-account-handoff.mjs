@@ -48,7 +48,7 @@ async function main() {
       run("pnpm", ["run", "db:migrate:local"], { cwd: projectRoot });
     }
 
-    processes.push(startProcess("luggage", "pnpm", [
+    const luggageProcess = startProcess("luggage", "pnpm", [
       "exec",
       "wrangler",
       "dev",
@@ -58,9 +58,10 @@ async function main() {
       String(options.luggagePort),
       "--var",
       `ACCOUNT_CONTEXT_SECRET:${options.contextSecret}`,
-    ], { cwd: projectRoot }));
+    ], { cwd: projectRoot });
+    processes.push(luggageProcess);
 
-    processes.push(startProcess("account", "pnpm", [
+    const accountProcess = startProcess("account", "pnpm", [
       "exec",
       "next",
       "dev",
@@ -77,11 +78,12 @@ async function main() {
         ACCOUNT_LUGGAGE_CONTEXT_SECRET: options.contextSecret,
         ACCOUNT_LUGGAGE_CUSTOMER_URL: `${luggageBaseUrl}/customer`,
       },
-    }));
+    });
+    processes.push(accountProcess);
 
     await Promise.all([
-      waitForHttp(`${luggageBaseUrl}/customer/api/context`, "luggage"),
-      waitForHttp(`${accountBaseUrl}/luggage/handoff`, "account"),
+      waitForHttp(`${luggageBaseUrl}/customer/api/context`, "luggage", luggageProcess),
+      waitForHttp(`${accountBaseUrl}/luggage/handoff`, "account", accountProcess),
     ]);
 
     run("pnpm", [
@@ -110,6 +112,7 @@ async function main() {
       luggageBaseUrl,
       "--context-cookie-file",
       cookieFile,
+      ...(options.includePageChecks ? ["--include-page-checks"] : []),
     ], {
       cwd: projectRoot,
       env: {
@@ -131,6 +134,7 @@ function parseArgs(argv) {
     contextCookieFile: process.env.ACCOUNT_HANDOFF_SMOKE_CONTEXT_COOKIE_FILE || "",
     contextSecret: process.env.ACCOUNT_HANDOFF_SMOKE_CONTEXT_SECRET || DEFAULT_CONTEXT_SECRET,
     help: false,
+    includePageChecks: process.env.ACCOUNT_HANDOFF_SMOKE_INCLUDE_PAGE_CHECKS === "1",
     keepCookieFile: false,
     luggagePort: numberOption(process.env.ACCOUNT_HANDOFF_SMOKE_LUGGAGE_PORT, DEFAULT_LUGGAGE_PORT),
     sessionSecret: process.env.ACCOUNT_HANDOFF_SMOKE_SESSION_SECRET || DEFAULT_SESSION_SECRET,
@@ -160,6 +164,9 @@ function parseArgs(argv) {
         break;
       case "--keep-cookie-file":
         options.keepCookieFile = true;
+        break;
+      case "--include-page-checks":
+        options.includePageChecks = true;
         break;
       case "--luggage-port":
         options.luggagePort = numberOption(requireValue(argv, ++index, arg), DEFAULT_LUGGAGE_PORT, arg);
@@ -216,21 +223,34 @@ function startProcess(label, command, args, options = {}) {
     env: { ...process.env, ...(options.env ?? {}) },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  const processInfo = { child, label, exited: false, exitCode: null, signal: null };
+  child.on("exit", (code, signal) => {
+    processInfo.exited = true;
+    processInfo.exitCode = code;
+    processInfo.signal = signal;
+  });
   child.stdout.on("data", (chunk) => process.stdout.write(prefixLines(label, chunk)));
   child.stderr.on("data", (chunk) => process.stderr.write(prefixLines(label, chunk)));
-  return { child, label };
+  return processInfo;
 }
 
 function stopProcess(processInfo) {
-  if (!processInfo.child.killed) processInfo.child.kill("SIGTERM");
+  if (!processInfo.exited && !processInfo.child.killed) processInfo.child.kill("SIGTERM");
 }
 
-async function waitForHttp(url, label) {
+async function waitForHttp(url, label, processInfo) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < 30_000) {
+    if (processInfo?.exited) {
+      throw new Error(`${label} process exited before it was ready: ${formatExit(processInfo)}`);
+    }
     try {
       const response = await fetch(url, { redirect: "manual" });
       if (response.status > 0) {
+        await delay(250);
+        if (processInfo?.exited) {
+          throw new Error(`${label} process exited while starting: ${formatExit(processInfo)}`);
+        }
         console.log(`ok: ${label} responded with HTTP ${response.status}`);
         return;
       }
@@ -240,6 +260,11 @@ async function waitForHttp(url, label) {
     await delay(500);
   }
   throw new Error(`${label} did not respond within 30s: ${url}`);
+}
+
+function formatExit(processInfo) {
+  if (processInfo.signal) return `signal ${processInfo.signal}`;
+  return `exit code ${processInfo.exitCode ?? "unknown"}`;
 }
 
 function prefixLines(label, chunk) {
@@ -279,6 +304,8 @@ Options:
   --session-secret VALUE   Synthetic Account local session secret
   --context-cookie-file PATH
                            Cookie handoff file path. Defaults to a temp file
+  --include-page-checks    Also run Luggage GET-only /customer and /staff/login
+                           page checks through smoke:account-context
   --keep-cookie-file       Keep the generated synthetic cookie file
   --skip-migrate           Skip local D1 schema migration before starting Luggage
 `);

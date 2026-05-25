@@ -10,6 +10,8 @@ const DEFAULT_EMAIL = "luggage-smoke@example.invalid";
 const DEFAULT_DISPLAY_NAME = "Luggage Smoke";
 const DEFAULT_LOCALE = "ko";
 const CONTEXT_PATH = "/customer/api/context";
+const CUSTOMER_PATH = "/customer";
+const STAFF_LOGIN_PATH = "/staff/login";
 const COOKIE_NAME = "fj_account_context";
 
 const HEADERS = {
@@ -105,13 +107,67 @@ async function main() {
   console.log(`Account context smoke target: ${new URL(CONTEXT_PATH, baseUrl).toString()}`);
   console.log(`Synthetic person id: ${context.personId}`);
   if (options.dryRun) {
+    if (options.includePageChecks) {
+      console.log(`dry-run: anonymous ${CUSTOMER_PATH} renders`);
+      console.log(`dry-run: signed ${CUSTOMER_PATH} renders`);
+      console.log(`dry-run: ${STAFF_LOGIN_PATH} renders`);
+    }
     for (const check of checks) console.log(`dry-run: ${check.label}`);
     return;
+  }
+
+  if (options.includePageChecks) {
+    await runPageChecks(baseUrl, validCookie, context);
   }
 
   for (const check of checks) {
     await runCheck(baseUrl, check, check.context ?? context);
     console.log(`ok: ${check.label}`);
+  }
+}
+
+async function runPageChecks(baseUrl, validCookie, context) {
+  await runPageCheck(baseUrl, {
+    label: "anonymous customer page renders",
+    path: CUSTOMER_PATH,
+    headers: {},
+    forbiddenValues: [
+      context.personId,
+      context.email,
+      context.displayName,
+      context.phone,
+    ],
+  });
+  console.log(`ok: anonymous ${CUSTOMER_PATH} renders`);
+
+  await runPageCheck(baseUrl, {
+    label: "signed customer page renders",
+    path: CUSTOMER_PATH,
+    headers: { Cookie: `${COOKIE_NAME}=${validCookie}` },
+  });
+  console.log(`ok: signed ${CUSTOMER_PATH} renders`);
+
+  await runPageCheck(baseUrl, {
+    label: "staff login page renders",
+    path: STAFF_LOGIN_PATH,
+    headers: {},
+  });
+  console.log(`ok: ${STAFF_LOGIN_PATH} renders`);
+}
+
+async function runPageCheck(baseUrl, check) {
+  const response = await fetch(new URL(check.path, baseUrl), {
+    headers: check.headers,
+    redirect: "manual",
+  });
+  const text = await response.text();
+  if (response.status !== 200) {
+    throw new Error(`${check.label}: expected HTTP 200, got ${response.status}. Body: ${summarize(text)}`);
+  }
+  for (const value of (check.forbiddenValues ?? []).filter(Boolean)) {
+    if (text.includes(value)) {
+      throw new Error(`${check.label}: response leaked synthetic profile value "${value}"`);
+    }
   }
 }
 
@@ -240,6 +296,7 @@ function parseArgs(argv) {
     provider: process.env.LUGGAGE_SMOKE_PROVIDER || "account",
     secretEnv: process.env.LUGGAGE_SMOKE_SECRET_ENV || DEFAULT_SECRET_ENV,
     contextCookieFile: process.env.LUGGAGE_SMOKE_CONTEXT_COOKIE_FILE || "",
+    includePageChecks: process.env.LUGGAGE_SMOKE_INCLUDE_PAGE_CHECKS === "1",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -268,6 +325,9 @@ function parseArgs(argv) {
         break;
       case "--locale":
         options.locale = requireValue(argv, ++index, arg);
+        break;
+      case "--include-page-checks":
+        options.includePageChecks = true;
         break;
       case "--person-id":
         options.personId = requireValue(argv, ++index, arg);
@@ -343,6 +403,10 @@ Options:
   --phone VALUE        Synthetic phone. Default: empty
   --locale VALUE       Synthetic locale. Default: ${DEFAULT_LOCALE}
   --provider VALUE     Provider value. Default: account
+  --include-page-checks
+                       Also GET /customer anonymously, /customer with a signed
+                       synthetic cookie, and /staff/login. These checks do not
+                       submit forms or write data.
   --dry-run            Build checks without sending HTTP requests
 `);
 }

@@ -7,12 +7,13 @@ point usage promotion without deploying production behavior yet.
 
 - Production D1 schema migration `20260521_customer_history_points_prep` has
   been applied and audited separately.
-- Account signed context is still blocked on the production Account login/signup
-  source and shared secret rollout.
+- Account signed context is still blocked on coordinated shared secret rollout,
+  release-window smoke, and explicit production deployment approval.
 - The matching Account PR is `Flying-Japan/pub-account-prd#1` at
-  `dfedee8dc58e205a2ad791fb9bc5e98282ebe211`; its CI is green and its
-  synthetic local `/luggage/handoff` smoke verifies the `fj_account_context`
-  cookie signature.
+  `a12b739b1e421ba2ba70616b60a8df441889787a`; its CI is green, its production
+  auth success hooks call `provisionAccountCustomerIdentity()` for non-admin
+  customers, and its synthetic local `/luggage/handoff` smoke verifies the
+  `fj_account_context` cookie signature.
 - This branch must not be deployed until `ACCOUNT_CONTEXT_SECRET` is configured
   and the Account caller has passed a synthetic no-PII smoke.
 
@@ -36,28 +37,40 @@ point usage promotion without deploying production behavior yet.
 
 ## Branch Verification
 
-Last run on 2026-05-22 JST from `/private/tmp/luggage-prep`:
+Last run on 2026-05-25 JST from `/private/tmp/luggage-prep`:
 
 ```sh
+node --check worker/scripts/smoke-account-context.mjs
+node --check worker/scripts/smoke-cross-app-account-handoff.mjs
 pnpm --dir worker typecheck
 pnpm --dir worker test
 pnpm --dir worker run check:schema-drift
 pnpm --dir worker run check:static-assets
 pnpm --dir worker run deploy:dry-run
-ACCOUNT_CONTEXT_SECRET=... pnpm --dir worker run smoke:account-context -- --base-url <luggage-base-url>
+ACCOUNT_CONTEXT_SECRET=... pnpm --dir worker run smoke:account-context -- \
+  --dry-run \
+  --include-page-checks
+pnpm --dir worker run smoke:cross-app-account-handoff -- \
+  --account-dir /Users/sanghunbruceham/Documents/GitHub/pub-account-prd \
+  --account-port 13010 \
+  --luggage-port 18787 \
+  --include-page-checks
 ```
 
 Results:
 
+- Smoke script syntax checks passed.
 - Typecheck passed.
 - Vitest passed: 6 files, 46 tests.
-- Schema drift passed for 3 tables, 7 columns, and 5 indexes.
-- Customer asset guard passed.
-- Wrangler dry run passed with no deployment.
-- `smoke:account-context -- --dry-run` passed locally without printing the
-  shared secret or signed cookie value.
+- `smoke:account-context -- --dry-run --include-page-checks` passed locally
+  without printing the shared secret or signed cookie value.
+- `smoke:cross-app-account-handoff -- --include-page-checks` passed on
+  non-default local ports. It verified anonymous `/customer`, signed
+  `/customer`, `/staff/login`, anonymous context, signed generated cookie,
+  Account-minted cookie, signed headers, stale timestamp rejection, and
+  invalid-header-over-cookie rejection.
 - Account PR #1 local handoff smoke passed on the Account branch head
-  `dfedee8dc58e205a2ad791fb9bc5e98282ebe211`, and Account CI passed
+  `a12b739b1e421ba2ba70616b60a8df441889787a`, and Account CI passed
   `build-and-test`, `e2e-canary`, and `gitleaks`.
 
 ## Required Verification Before Deployment
@@ -70,12 +83,15 @@ pnpm --dir worker test
 pnpm --dir worker run check:schema-drift
 pnpm --dir worker run check:static-assets
 pnpm --dir worker run deploy:dry-run
-ACCOUNT_CONTEXT_SECRET=... pnpm --dir worker run smoke:account-context -- --base-url <luggage-base-url>
+ACCOUNT_CONTEXT_SECRET=... pnpm --dir worker run smoke:account-context -- \
+  --base-url <luggage-base-url> \
+  --include-page-checks
 ```
 
 Use `--dry-run` before secrets are wired to verify the synthetic payload and
-check list without sending HTTP requests. The smoke script only calls
-`/customer/api/context`; it does not submit a customer intake form.
+check list without sending HTTP requests. `--include-page-checks` adds GET-only
+checks for `/customer` and `/staff/login`; the smoke script does not submit a
+customer intake form.
 
 For a cross-app local smoke, first ask Account to write its verified synthetic
 handoff cookie, then pass that cookie to Luggage:
@@ -95,7 +111,8 @@ The same flow can be run as one command from this Luggage promotion worktree:
 
 ```sh
 pnpm --dir worker run smoke:cross-app-account-handoff -- \
-  --account-dir /path/to/pub-account-prd
+  --account-dir /path/to/pub-account-prd \
+  --include-page-checks
 ```
 
 ## Production Smoke Checklist
@@ -108,8 +125,8 @@ Do not use real customer PII for smoke data.
 3. Signed synthetic Account context renders `/customer` as authenticated.
 4. `/customer/api/context` returns `is_authenticated = true`, point balance,
    and only safe previous-order preset fields for the signed synthetic person.
-   Use `pnpm --dir worker run smoke:account-context` for this check after the
-   shared secret is configured.
+   Use `pnpm --dir worker run smoke:account-context -- --include-page-checks`
+   for this check after the shared secret is configured.
 5. Selecting a previous-history preset fills the form only after customer action.
 6. Submitting with controlled point usage writes:
    - `luggage_orders.account_person_id`
