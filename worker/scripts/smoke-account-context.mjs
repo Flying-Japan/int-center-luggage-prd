@@ -160,7 +160,7 @@ async function runPageChecks(baseUrl, validCookie, context, externalCookie = "",
     label: "signed customer page renders with identity prefill",
     path: CUSTOMER_PATH,
     headers: { Cookie: `${COOKIE_NAME}=${validCookie}` },
-    expectedValues: expectedPrefillValues(context),
+    expectedInputValues: expectedPrefillInputs(context),
   });
   console.log(`ok: signed ${CUSTOMER_PATH} renders with identity prefill`);
 
@@ -169,7 +169,7 @@ async function runPageChecks(baseUrl, validCookie, context, externalCookie = "",
       label: "Account-minted signed customer page renders with identity prefill",
       path: CUSTOMER_PATH,
       headers: { Cookie: `${COOKIE_NAME}=${externalCookie}` },
-      expectedValues: expectedPrefillValues(externalContext),
+      expectedInputValues: expectedPrefillInputs(externalContext),
     });
     console.log(`ok: Account-minted signed ${CUSTOMER_PATH} renders with identity prefill`);
   }
@@ -264,19 +264,37 @@ async function runPageCheck(baseUrl, check) {
       throw new Error(`${check.label}: response leaked synthetic profile value "${value}"`);
     }
   }
-  for (const value of (check.expectedValues ?? []).filter(Boolean)) {
-    if (!text.includes(value) && !text.includes(escapeHtml(value))) {
-      throw new Error(`${check.label}: response did not include expected prefilled value "${value}"`);
-    }
+  for (const [fieldName, expectedValue] of Object.entries(check.expectedInputValues ?? {})) {
+    assertInputValue(text, fieldName, expectedValue, check.label);
   }
 }
 
-function expectedPrefillValues(context) {
-  return [
-    context.displayName,
-    context.email,
-    context.phone,
-  ].filter(Boolean);
+function expectedPrefillInputs(context) {
+  return Object.fromEntries(Object.entries({
+    name: context.displayName,
+    email: context.email,
+    phone: context.phone,
+  }).filter(([, value]) => value));
+}
+
+function assertInputValue(html, fieldName, expectedValue, label) {
+  const expected = String(expectedValue);
+  for (const tag of html.match(/<input\b[^>]*>/gi) ?? []) {
+    const attrs = parseAttributes(tag);
+    if (attrs.name !== fieldName) continue;
+    const actual = attrs.value ?? "";
+    if (actual === expected || actual === escapeHtml(expected)) return;
+    throw new Error(`${label}: input "${fieldName}" value is "${actual}", expected "${expected}"`);
+  }
+  throw new Error(`${label}: response did not include input "${fieldName}" for expected prefill`);
+}
+
+function parseAttributes(tag) {
+  const attrs = {};
+  for (const match of tag.matchAll(/([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>=]+)))?/g)) {
+    attrs[match[1]] = match[2] ?? match[3] ?? match[4] ?? "";
+  }
+  return attrs;
 }
 
 function nextTokyoNoon() {
