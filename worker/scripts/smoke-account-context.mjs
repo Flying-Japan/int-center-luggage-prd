@@ -115,7 +115,10 @@ async function main() {
   if (options.dryRun) {
     if (options.includePageChecks) {
       console.log(`dry-run: anonymous ${CUSTOMER_PATH} renders`);
-      console.log(`dry-run: signed ${CUSTOMER_PATH} renders`);
+      console.log(`dry-run: signed ${CUSTOMER_PATH} renders with identity prefill`);
+      if (externalCookie && externalContext) {
+        console.log(`dry-run: Account-minted signed ${CUSTOMER_PATH} renders with identity prefill`);
+      }
       console.log(`dry-run: ${STAFF_LOGIN_PATH} renders`);
     }
     if (options.includePricePreviewChecks) {
@@ -127,7 +130,7 @@ async function main() {
   }
 
   if (options.includePageChecks) {
-    await runPageChecks(baseUrl, validCookie, context);
+    await runPageChecks(baseUrl, validCookie, context, externalCookie, externalContext);
   }
   if (options.includePricePreviewChecks) {
     await runPricePreviewChecks(baseUrl, validCookie, context);
@@ -139,7 +142,7 @@ async function main() {
   }
 }
 
-async function runPageChecks(baseUrl, validCookie, context) {
+async function runPageChecks(baseUrl, validCookie, context, externalCookie = "", externalContext = null) {
   await runPageCheck(baseUrl, {
     label: "anonymous customer page renders",
     path: CUSTOMER_PATH,
@@ -154,11 +157,22 @@ async function runPageChecks(baseUrl, validCookie, context) {
   console.log(`ok: anonymous ${CUSTOMER_PATH} renders`);
 
   await runPageCheck(baseUrl, {
-    label: "signed customer page renders",
+    label: "signed customer page renders with identity prefill",
     path: CUSTOMER_PATH,
     headers: { Cookie: `${COOKIE_NAME}=${validCookie}` },
+    expectedValues: expectedPrefillValues(context),
   });
-  console.log(`ok: signed ${CUSTOMER_PATH} renders`);
+  console.log(`ok: signed ${CUSTOMER_PATH} renders with identity prefill`);
+
+  if (externalCookie && externalContext) {
+    await runPageCheck(baseUrl, {
+      label: "Account-minted signed customer page renders with identity prefill",
+      path: CUSTOMER_PATH,
+      headers: { Cookie: `${COOKIE_NAME}=${externalCookie}` },
+      expectedValues: expectedPrefillValues(externalContext),
+    });
+    console.log(`ok: Account-minted signed ${CUSTOMER_PATH} renders with identity prefill`);
+  }
 
   await runPageCheck(baseUrl, {
     label: "staff login page renders",
@@ -250,6 +264,19 @@ async function runPageCheck(baseUrl, check) {
       throw new Error(`${check.label}: response leaked synthetic profile value "${value}"`);
     }
   }
+  for (const value of (check.expectedValues ?? []).filter(Boolean)) {
+    if (!text.includes(value) && !text.includes(escapeHtml(value))) {
+      throw new Error(`${check.label}: response did not include expected prefilled value "${value}"`);
+    }
+  }
+}
+
+function expectedPrefillValues(context) {
+  return [
+    context.displayName,
+    context.email,
+    context.phone,
+  ].filter(Boolean);
 }
 
 function nextTokyoNoon() {
@@ -510,6 +537,15 @@ function base64Url(buffer) {
 
 function summarize(text) {
   return text.length > 240 ? `${text.slice(0, 240)}...` : text;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function printUsage() {
