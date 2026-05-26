@@ -147,6 +147,7 @@ async function runPageChecks(baseUrl, validCookie, context, externalCookie = "",
     label: "anonymous customer page renders",
     path: CUSTOMER_PATH,
     headers: {},
+    expectedHtmlLang: "ko",
     forbiddenValues: [
       context.personId,
       context.email,
@@ -160,6 +161,7 @@ async function runPageChecks(baseUrl, validCookie, context, externalCookie = "",
     label: "signed customer page renders with identity prefill",
     path: CUSTOMER_PATH,
     headers: { Cookie: `${COOKIE_NAME}=${validCookie}` },
+    expectedHtmlLang: context.locale,
     expectedInputValues: expectedPrefillInputs(context),
   });
   console.log(`ok: signed ${CUSTOMER_PATH} renders with identity prefill`);
@@ -169,6 +171,7 @@ async function runPageChecks(baseUrl, validCookie, context, externalCookie = "",
       label: "Account-minted signed customer page renders with identity prefill",
       path: CUSTOMER_PATH,
       headers: { Cookie: `${COOKIE_NAME}=${externalCookie}` },
+      expectedHtmlLang: externalContext.locale,
       expectedInputValues: expectedPrefillInputs(externalContext),
     });
     console.log(`ok: Account-minted signed ${CUSTOMER_PATH} renders with identity prefill`);
@@ -267,6 +270,9 @@ async function runPageCheck(baseUrl, check) {
   for (const [fieldName, expectedValue] of Object.entries(check.expectedInputValues ?? {})) {
     assertInputValue(text, fieldName, expectedValue, check.label);
   }
+  if (check.expectedHtmlLang) {
+    assertHtmlLang(text, check.expectedHtmlLang, check.label);
+  }
 }
 
 function expectedPrefillInputs(context) {
@@ -287,6 +293,14 @@ function assertInputValue(html, fieldName, expectedValue, label) {
     throw new Error(`${label}: input "${fieldName}" value is "${actual}", expected "${expected}"`);
   }
   throw new Error(`${label}: response did not include input "${fieldName}" for expected prefill`);
+}
+
+function assertHtmlLang(html, expectedLang, label) {
+  const expected = String(expectedLang).trim().toLowerCase();
+  const tag = html.match(/<html\b[^>]*>/i)?.[0] ?? "";
+  const attrs = parseAttributes(tag);
+  if (attrs.lang === expected) return;
+  throw new Error(`${label}: html lang is "${attrs.lang ?? ""}", expected "${expected}"`);
 }
 
 function parseAttributes(tag) {

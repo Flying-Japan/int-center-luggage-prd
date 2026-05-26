@@ -224,6 +224,48 @@ describe("GET /customer", () => {
     expect(extractInputValue(html, "email")).toBe("session@example.com");
   });
 
+  it("uses signed customer session locale as the default form language", async () => {
+    const db = new FakeDb();
+    const { app, env } = buildApp({
+      displayName: "Session Customer",
+      email: "session@example.com",
+      issuedBy: "pub-account",
+      locale: "ja",
+      personId: "person-1",
+      phone: "+81-90-1111-2222",
+      provider: "account",
+    }, db);
+
+    const response = await app.fetch(new Request("https://luggage.test/customer"), env);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("<html lang=\"ja\">");
+    expect(html).toContain("荷物預かり受付");
+    expect(extractInputValue(html, "lang")).toBe("ja");
+  });
+
+  it("lets explicit lang query override signed customer locale", async () => {
+    const db = new FakeDb();
+    const { app, env } = buildApp({
+      displayName: "Session Customer",
+      email: "session@example.com",
+      issuedBy: "pub-account",
+      locale: "ja",
+      personId: "person-1",
+      phone: "+81-90-1111-2222",
+      provider: "account",
+    }, db);
+
+    const response = await app.fetch(new Request("https://luggage.test/customer?lang=en"), env);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("<html lang=\"en\">");
+    expect(html).toContain("Luggage Storage Check-in");
+    expect(extractInputValue(html, "lang")).toBe("en");
+  });
+
   it("prefills signed customer identity fields from verified cached profile before session values", async () => {
     const db = new FakeDb();
     db.profile = {
@@ -250,6 +292,35 @@ describe("GET /customer", () => {
     expect(extractInputValue(html, "name")).toBe("Profile Customer");
     expect(extractInputValue(html, "phone")).toBe("010-2222-3333");
     expect(extractInputValue(html, "email")).toBe("profile@example.com");
+  });
+
+  it("uses verified cached profile locale before session locale", async () => {
+    const db = new FakeDb();
+    db.profile = {
+      account_person_id: "person-1",
+      display_name: "Profile Customer",
+      phone: "010-2222-3333",
+      email: "profile@example.com",
+      locale: "en",
+      identity_verified_at: "2026-05-20T00:00:00.000Z",
+    };
+    const { app, env } = buildApp({
+      displayName: "Session Customer",
+      email: "session@example.com",
+      issuedBy: "pub-account",
+      locale: "ja",
+      personId: "person-1",
+      phone: "+81-90-1111-2222",
+      provider: "account",
+    }, db);
+
+    const response = await app.fetch(new Request("https://luggage.test/customer"), env);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("<html lang=\"en\">");
+    expect(html).toContain("Luggage Storage Check-in");
+    expect(extractInputValue(html, "lang")).toBe("en");
   });
 
   it("renders previous-history apply payloads without profile PII or Account identifiers", async () => {

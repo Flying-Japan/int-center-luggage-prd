@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppType, Env } from "../types";
-import { t, normalizeLang } from "../lib/i18n";
+import { DEFAULT_LANG, SUPPORTED_LANGS, t, normalizeLang, type Lang } from "../lib/i18n";
 import { FLYING_PASS_TIERS, type FlyingPassTier } from "../services/pricing";
 import { loadCompletionMessages, applyAmountTemplate } from "../services/completionMessages";
 import { uploadImage, buildImageKey, extFromContentType, validateImageUpload } from "../lib/r2";
@@ -248,9 +248,9 @@ function buildCustomerContextApiPayload(ctx: CustomerContext) {
 // GET /customer — Intake form (faithful port of original FastAPI template)
 // ---------------------------------------------------------------------------
 customer.get("/customer", async (c) => {
-  const lang = normalizeLang(c.req.query("lang"));
   const error = c.req.query("error") || "";
   const customerCtx = await loadCustomerContext(c);
+  const lang = resolveCustomerPageLang(c.req.query("lang"), customerCtx);
   const customerIdentityDefaults = {
     email: cleanIdentityValue(customerCtx.profile?.email) || cleanIdentityValue(customerCtx.session?.email),
     name: cleanIdentityValue(customerCtx.profile?.displayName) || cleanIdentityValue(customerCtx.session?.displayName),
@@ -1765,6 +1765,19 @@ form { margin-top: 16px; }
     </html>
   );
 });
+
+function resolveCustomerPageLang(rawQueryLang: string | null | undefined, customerCtx: CustomerContext): Lang {
+  return normalizeOptionalCustomerLang(rawQueryLang)
+    ?? normalizeOptionalCustomerLang(customerCtx.profile?.locale)
+    ?? normalizeOptionalCustomerLang(customerCtx.session?.locale)
+    ?? DEFAULT_LANG;
+}
+
+function normalizeOptionalCustomerLang(raw: string | null | undefined): Lang | null {
+  if (!raw) return null;
+  const language = raw.trim().toLowerCase().replace("_", "-").split("-")[0];
+  return SUPPORTED_LANGS.includes(language as Lang) ? language as Lang : null;
+}
 
 // ---------------------------------------------------------------------------
 // POST /customer/submit — Process form
