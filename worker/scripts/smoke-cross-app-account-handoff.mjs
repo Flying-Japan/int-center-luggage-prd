@@ -14,6 +14,10 @@ const DEFAULT_ACCOUNT_PORT = 3010;
 const DEFAULT_LUGGAGE_PORT = 8787;
 const DEFAULT_CONTEXT_SECRET = "dev-luggage-account-context-secret";
 const DEFAULT_SESSION_SECRET = "dev-local-session-secret";
+const DEFAULT_SMOKE_EMAIL = "luggage-smoke@example.invalid";
+const DEFAULT_SMOKE_DISPLAY_NAME = "Luggage Smoke";
+const DEFAULT_SMOKE_PHONE = "000-0000-0000";
+const DEFAULT_SMOKE_LOCALE = "ko";
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
@@ -94,6 +98,14 @@ async function main() {
       accountBaseUrl,
       "--expected-luggage-url",
       `${luggageBaseUrl}/customer`,
+      "--email",
+      options.smokeEmail,
+      "--display-name",
+      options.smokeDisplayName,
+      "--phone",
+      options.smokePhone,
+      "--locale",
+      options.smokeLocale,
       "--write-context-cookie-file",
       cookieFile,
     ], {
@@ -141,6 +153,10 @@ function parseArgs(argv) {
     luggagePort: numberOption(process.env.ACCOUNT_HANDOFF_SMOKE_LUGGAGE_PORT, DEFAULT_LUGGAGE_PORT),
     sessionSecret: process.env.ACCOUNT_HANDOFF_SMOKE_SESSION_SECRET || DEFAULT_SESSION_SECRET,
     skipMigrate: false,
+    smokeDisplayName: process.env.ACCOUNT_HANDOFF_SMOKE_DISPLAY_NAME || DEFAULT_SMOKE_DISPLAY_NAME,
+    smokeEmail: process.env.ACCOUNT_HANDOFF_SMOKE_EMAIL || DEFAULT_SMOKE_EMAIL,
+    smokeLocale: process.env.ACCOUNT_HANDOFF_SMOKE_LOCALE || DEFAULT_SMOKE_LOCALE,
+    smokePhone: process.env.ACCOUNT_HANDOFF_SMOKE_PHONE || DEFAULT_SMOKE_PHONE,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -178,6 +194,18 @@ function parseArgs(argv) {
         break;
       case "--session-secret":
         options.sessionSecret = requireValue(argv, ++index, arg);
+        break;
+      case "--smoke-display-name":
+        options.smokeDisplayName = requireValue(argv, ++index, arg);
+        break;
+      case "--smoke-email":
+        options.smokeEmail = requireValue(argv, ++index, arg);
+        break;
+      case "--smoke-locale":
+        options.smokeLocale = requireValue(argv, ++index, arg);
+        break;
+      case "--smoke-phone":
+        options.smokePhone = requireValue(argv, ++index, arg);
         break;
       case "--skip-migrate":
         options.skipMigrate = true;
@@ -307,6 +335,11 @@ Options:
   --luggage-port PORT      Local Luggage Worker port. Default: ${DEFAULT_LUGGAGE_PORT}
   --context-secret VALUE   Synthetic shared Account/Luggage context secret
   --session-secret VALUE   Synthetic Account local session secret
+  --smoke-email VALUE      Synthetic Account smoke email. Default: ${DEFAULT_SMOKE_EMAIL}
+  --smoke-display-name VALUE
+                           Synthetic Account smoke display name. Default: ${DEFAULT_SMOKE_DISPLAY_NAME}
+  --smoke-phone VALUE      Synthetic Account smoke phone. Default: ${DEFAULT_SMOKE_PHONE}
+  --smoke-locale VALUE     Synthetic Account smoke locale. Default: ${DEFAULT_SMOKE_LOCALE}
   --context-cookie-file PATH
                            Cookie handoff file path. Defaults to a temp file
   --include-page-checks    Also run Luggage GET-only /customer and /staff/login
