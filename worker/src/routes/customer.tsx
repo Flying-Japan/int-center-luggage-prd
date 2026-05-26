@@ -40,6 +40,10 @@ function cleanPublicConfig(value?: string) {
   return value?.trim() || "";
 }
 
+function cleanIdentityValue(value?: string | null) {
+  return value?.trim() || "";
+}
+
 function clarityProjectId(value?: string) {
   const id = cleanPublicConfig(value);
   return /^[a-z0-9]+$/i.test(id) ? id : "";
@@ -247,6 +251,11 @@ customer.get("/customer", async (c) => {
   const lang = normalizeLang(c.req.query("lang"));
   const error = c.req.query("error") || "";
   const customerCtx = await loadCustomerContext(c);
+  const customerIdentityDefaults = {
+    email: cleanIdentityValue(customerCtx.profile?.email) || cleanIdentityValue(customerCtx.session?.email),
+    name: cleanIdentityValue(customerCtx.profile?.displayName) || cleanIdentityValue(customerCtx.session?.displayName),
+    phone: cleanIdentityValue(customerCtx.profile?.phone) || cleanIdentityValue(customerCtx.session?.phone),
+  };
 
   const MAX_BAG_QTY = 99;
   const MAX_COMPANION_COUNT = 99;
@@ -888,21 +897,21 @@ form { margin-top: 16px; }
               {/* name */}
               <label class="field">
                 <span class="field-label">{t("name", lang)} <span style="color:#dc2626">*</span></span>
-                <input class="control" type="text" name="name" required maxlength={120} autocomplete="off" placeholder={lang === "ja" ? "例: 田中太郎" : lang === "en" ? "e.g. John Smith" : "예: 홍길동"} />
+                <input class="control" type="text" name="name" value={customerIdentityDefaults.name} required maxlength={120} autocomplete="off" placeholder={lang === "ja" ? "例: 田中太郎" : lang === "en" ? "e.g. John Smith" : "예: 홍길동"} />
                 <span class="field-hint">{lang === "ja" ? "本名をフルネームで入力してください" : lang === "en" ? "Please enter your full name" : "한글 이름을 입력해주세요 (예: 홍길동)"}</span>
               </label>
 
               {/* phone */}
               <label class="field">
                 <span class="field-label">{lang === "ja" ? "電話番号" : lang === "en" ? "Phone Number" : "전화번호"} <span style="color:#dc2626">*</span></span>
-                <input class="control" type="tel" id="phone-input" name="phone" required maxlength={40} autocomplete="off" placeholder={lang === "ja" ? "例: 090-1234-5678" : lang === "en" ? "e.g. +1 234-567-8901" : "예: 010-1234-5678"} />
+                <input class="control" type="tel" id="phone-input" name="phone" value={customerIdentityDefaults.phone} required maxlength={40} autocomplete="off" placeholder={lang === "ja" ? "例: 090-1234-5678" : lang === "en" ? "e.g. +1 234-567-8901" : "예: 010-1234-5678"} />
                 <span class="field-hint">{lang === "ja" ? "日本国外の電話番号もOK（国番号付き）- が自動入力されます" : lang === "en" ? "International numbers OK — dashes added automatically" : "한국 전화번호도 괜찮아요 — 자동으로 - 가 입력됩니다"}</span>
               </label>
 
               {/* email */}
               <label class="field">
                 <span class="field-label">{lang === "ja" ? "メールアドレス" : lang === "en" ? "Email" : "이메일"} <span style="color:#dc2626">*</span></span>
-                <input class="control" type="email" name="email" required maxlength={120} autocomplete="email" placeholder="example@email.com" />
+                <input class="control" type="email" name="email" value={customerIdentityDefaults.email} required maxlength={120} autocomplete="email" placeholder="example@email.com" />
                 <span class="field-hint" style="color:#dc2626;font-weight:600">{lang === "ja" ? "⚠️ 受付完了メールが届きます — 正確に入力してください" : lang === "en" ? "⚠️ Confirmation email will be sent — please double-check" : "⚠️ 접수 완료 이메일이 발송됩니다 — 정확하게 입력해주세요"}</span>
               </label>
 

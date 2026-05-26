@@ -98,6 +98,22 @@ function extractHistoryPayloads(html: string): Array<Record<string, unknown>> {
   });
 }
 
+function decodeHtmlAttribute(raw: string): string {
+  return raw
+    .replace(/&quot;/g, "\"")
+    .replace(/&#34;/g, "\"")
+    .replace(/&#x27;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function extractInputValue(html: string, name: string): string {
+  const input = html.match(new RegExp(`<input[^>]*name="${name}"[^>]*>`))?.[0] ?? "";
+  const value = input.match(/\svalue="([^"]*)"/)?.[1] ?? "";
+  return decodeHtmlAttribute(value);
+}
+
 describe("GET /customer/api/context", () => {
   it("returns an anonymous no-store context without querying customer tables", async () => {
     const db = {
@@ -188,6 +204,54 @@ describe("GET /customer/api/context", () => {
 });
 
 describe("GET /customer", () => {
+  it("prefills signed customer identity fields from Account session values", async () => {
+    const db = new FakeDb();
+    const { app, env } = buildApp({
+      displayName: "Session Customer",
+      email: "session@example.com",
+      issuedBy: "pub-account",
+      personId: "person-1",
+      phone: "+81-90-1111-2222",
+      provider: "account",
+    }, db);
+
+    const response = await app.fetch(new Request("https://luggage.test/customer?lang=ko"), env);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(extractInputValue(html, "name")).toBe("Session Customer");
+    expect(extractInputValue(html, "phone")).toBe("+81-90-1111-2222");
+    expect(extractInputValue(html, "email")).toBe("session@example.com");
+  });
+
+  it("prefills signed customer identity fields from verified cached profile before session values", async () => {
+    const db = new FakeDb();
+    db.profile = {
+      account_person_id: "person-1",
+      display_name: "Profile Customer",
+      phone: "010-2222-3333",
+      email: "profile@example.com",
+      locale: "ko",
+      identity_verified_at: "2026-05-20T00:00:00.000Z",
+    };
+    const { app, env } = buildApp({
+      displayName: "Session Customer",
+      email: "session@example.com",
+      issuedBy: "pub-account",
+      personId: "person-1",
+      phone: "+81-90-1111-2222",
+      provider: "account",
+    }, db);
+
+    const response = await app.fetch(new Request("https://luggage.test/customer?lang=ko"), env);
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(extractInputValue(html, "name")).toBe("Profile Customer");
+    expect(extractInputValue(html, "phone")).toBe("010-2222-3333");
+    expect(extractInputValue(html, "email")).toBe("profile@example.com");
+  });
+
   it("renders previous-history apply payloads without profile PII or Account identifiers", async () => {
     const db = new FakeDb();
     db.profile = {
