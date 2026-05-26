@@ -497,6 +497,45 @@ describe("customer order point usage", () => {
     ]);
   });
 
+  it("rounds signed point usage down before inserting the order and point ledger", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
+
+    const db = new FakeDb();
+    db.pointBalances.set("person-1", 1000);
+    const { app, env } = buildApp({
+      email: "account@example.com",
+      issuedBy: "pub-account",
+      personId: "person-1",
+      provider: "account",
+    }, db);
+
+    const res = await postCustomerOrder(app, env, customerOrderForm({ points_to_use: 999 }));
+
+    expect(res.status).toBe(302);
+    expect(db.insertedOrders).toHaveLength(1);
+    expect(db.insertedOrders[0]).toMatchObject({
+      account_person_id: "person-1",
+      final_amount: 300,
+      point_discount_amount: 900,
+      point_usage_status: "RESERVED",
+      points_used: 900,
+      prepaid_amount: 1200,
+    });
+    expect(db.pointBalances.get("person-1")).toBe(100);
+    expect(db.pointTransactions).toEqual([
+      expect.objectContaining({
+        account_person_id: "person-1",
+        balance_after: 100,
+        idempotency_key: "point:reserve:20260522-101",
+        order_id: "20260522-101",
+        points_delta: -900,
+        status: "RESERVED",
+        transaction_type: "USE",
+      }),
+    ]);
+  });
+
   it("stores an owned active previous-history preset reference for signed customers", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
