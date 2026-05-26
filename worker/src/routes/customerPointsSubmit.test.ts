@@ -12,10 +12,13 @@ import customerRoutes from "./customer";
 
 type InsertedCustomerOrder = {
   account_person_id: string | null;
+  email: string;
   final_amount: number;
   flying_pass_discount_amount: number;
   gross_amount: number;
+  name: string;
   order_id: string;
+  phone: string;
   point_discount_amount: number;
   point_usage_status: string;
   points_earned: number;
@@ -33,6 +36,15 @@ type PointTransaction = {
   points_delta: number;
   status: string;
   transaction_type: string;
+};
+
+type ProfileRow = {
+  account_person_id: string;
+  display_name: string | null;
+  email: string | null;
+  identity_verified_at: string | null;
+  locale: string | null;
+  phone: string | null;
 };
 
 type SourcePresetOrder = {
@@ -59,7 +71,7 @@ class FakePreparedStatement {
 
   async first<T>(): Promise<T | null> {
     if (this.sql.includes("FROM luggage_customer_profiles")) {
-      return null;
+      return this.db.profile as T | null;
     }
 
     if (this.sql.includes("FROM luggage_customer_point_accounts")) {
@@ -110,10 +122,13 @@ class FakePreparedStatement {
   private insertCustomerOrder(): InsertedCustomerOrder {
     return {
       account_person_id: this.boundValues[25] == null ? null : String(this.boundValues[25]),
+      email: String(this.boundValues[4]),
       final_amount: Number(this.boundValues[22]),
       flying_pass_discount_amount: Number(this.boundValues[17]),
       gross_amount: Number(this.boundValues[14]),
+      name: String(this.boundValues[2]),
       order_id: String(this.boundValues[0]),
+      phone: String(this.boundValues[3]),
       point_discount_amount: Number(this.boundValues[18]),
       point_usage_status: String(this.boundValues[21]),
       points_earned: Number(this.boundValues[20]),
@@ -131,6 +146,7 @@ class FakeDb {
   lastChanges = 0;
   pointBalances = new Map<string, number>();
   pointTransactions: PointTransaction[] = [];
+  profile: ProfileRow | null = null;
   sourcePresetOrders: SourcePresetOrder[] = [];
 
   prepare(sql: string) {
@@ -144,6 +160,7 @@ class FakeDb {
       lastChanges: this.lastChanges,
       pointBalances: new Map(this.pointBalances),
       pointTransactions: this.pointTransactions.map((transaction) => ({ ...transaction })),
+      profile: this.profile ? { ...this.profile } : null,
       sourcePresetOrders: this.sourcePresetOrders.map((order) => ({ ...order })),
     };
     const results: BatchResult[] = [];
@@ -157,6 +174,7 @@ class FakeDb {
           this.lastChanges = 0;
           this.pointBalances = snapshot.pointBalances;
           this.pointTransactions = snapshot.pointTransactions;
+          this.profile = snapshot.profile;
           this.sourcePresetOrders = snapshot.sourcePresetOrders;
           results.push({ meta: { changes: 0 } });
           return results;
@@ -170,6 +188,7 @@ class FakeDb {
       this.lastChanges = snapshot.lastChanges;
       this.pointBalances = snapshot.pointBalances;
       this.pointTransactions = snapshot.pointTransactions;
+      this.profile = snapshot.profile;
       this.sourcePresetOrders = snapshot.sourcePresetOrders;
       throw error;
     }
@@ -357,6 +376,82 @@ describe("customer order point usage", () => {
     );
     expect(db.insertedOrders).toHaveLength(0);
     expect(db.pointTransactions).toHaveLength(0);
+  });
+
+  it("uses signed Account session identity instead of editable form identity fields", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
+
+    const db = new FakeDb();
+    const { app, env } = buildApp({
+      displayName: "Account Name",
+      email: "account@example.com",
+      issuedBy: "pub-account",
+      personId: "person-1",
+      phone: "+81-90-1111-2222",
+      provider: "account",
+    }, db);
+
+    const res = await postCustomerOrder(
+      app,
+      env,
+      customerOrderForm({
+        email: "edited@example.com",
+        name: "Edited Form Name",
+        phone: "010-9999-9999",
+      }),
+    );
+
+    expect(res.status).toBe(302);
+    expect(db.insertedOrders).toHaveLength(1);
+    expect(db.insertedOrders[0]).toMatchObject({
+      account_person_id: "person-1",
+      email: "account@example.com",
+      name: "Account Name",
+      phone: "+81-90-1111-2222",
+    });
+  });
+
+  it("uses verified cached customer profile identity ahead of signed Account session fields", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
+
+    const db = new FakeDb();
+    db.profile = {
+      account_person_id: "person-1",
+      display_name: "Verified Profile Name",
+      email: "verified@example.com",
+      identity_verified_at: "2026-05-21T00:00:00.000Z",
+      locale: "ko",
+      phone: "010-2222-3333",
+    };
+    const { app, env } = buildApp({
+      displayName: "Session Name",
+      email: "session@example.com",
+      issuedBy: "pub-account",
+      personId: "person-1",
+      phone: "010-1111-2222",
+      provider: "account",
+    }, db);
+
+    const res = await postCustomerOrder(
+      app,
+      env,
+      customerOrderForm({
+        email: "edited@example.com",
+        name: "Edited Form Name",
+        phone: "010-9999-9999",
+      }),
+    );
+
+    expect(res.status).toBe(302);
+    expect(db.insertedOrders).toHaveLength(1);
+    expect(db.insertedOrders[0]).toMatchObject({
+      account_person_id: "person-1",
+      email: "verified@example.com",
+      name: "Verified Profile Name",
+      phone: "010-2222-3333",
+    });
   });
 
   it("stores server-recalculated point discounts after Flying Pass discounts", async () => {
