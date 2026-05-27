@@ -14,7 +14,7 @@ point usage promotion without deploying production behavior yet.
   copy this branch's moving head SHA into this document; each docs-only commit
   would immediately make that value stale.
 - The matching Account PR is `Flying-Japan/pub-account-prd#1` at
-  `477b8b6e6966da9628760943ac35a79676411ebd`; its CI is green, its production
+  `2993bb8e3accffde6ea83910a937f313dfdca51f`; its CI is green, its production
   auth success hooks call `provisionAccountCustomerIdentity()` for non-admin
   customers, its production-host route test covers the secure
   `.flyingjp.com` handoff cookie, and its synthetic local `/luggage/handoff`
@@ -91,7 +91,7 @@ Results:
   the smoke now rejects real-looking identity values by default.
 - `smoke:cross-app-account-handoff -- --include-page-checks --include-price-preview-checks`
   passed against the Luggage PR runtime code and Account head
-  `477b8b6e6966da9628760943ac35a79676411ebd` with
+  `2993bb8e3accffde6ea83910a937f313dfdca51f` with
   `--include-local-submit-checks`. This verified
   anonymous `/customer`, signed `/customer`, `/staff/login`, anonymous and
   signed `/api/price-preview`, anonymous context, signed generated cookie,
@@ -102,8 +102,8 @@ Results:
   submitted order appears in `/customer/api/context` as a safe previous-history
   preset without profile PII or Account identifiers.
 - Account PR #1 local handoff smoke passed on the Account branch head
-  `477b8b6e6966da9628760943ac35a79676411ebd`, and Account CI
-  #26487155958 passed `build-and-test`, `e2e-canary`, and `gitleaks`.
+  `2993bb8e3accffde6ea83910a937f313dfdca51f`, and Account CI
+  #26491551536 passed `build-and-test`, `e2e-canary`, and `gitleaks`.
 
 ## Required Verification Before Deployment
 

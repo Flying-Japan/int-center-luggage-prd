@@ -104,7 +104,7 @@ The matching Account production PR is
 `Flying-Japan/pub-account-prd#1`. The currently verified Account head is:
 
 ```txt
-477b8b6e6966da9628760943ac35a79676411ebd
+2993bb8e3accffde6ea83910a937f313dfdca51f
 ```
 
 That Account head adds the production auth success hooks that call
