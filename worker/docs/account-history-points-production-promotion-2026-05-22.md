@@ -83,7 +83,9 @@ Results:
   Account-minted cookie, signed headers, stale timestamp rejection,
   invalid-header-over-cookie rejection, and Account-minted signed
   `/customer/submit` writing the profile-cache locale that the next signed
-  `/customer` render reuses.
+  `/customer` render reuses. The same submit smoke now also verifies the
+  submitted order appears in `/customer/api/context` as a safe previous-history
+  preset without profile PII or Account identifiers.
 - Account PR #1 local handoff smoke passed on the Account branch head
   `9495e2fb0a46c35cfb8f4df96dec8a7bbb29cb1b`, and Account CI passed
   `build-and-test`, `e2e-canary`, and `gitleaks`.
@@ -113,9 +115,10 @@ adds GET-only checks for `/api/price-preview`. The smoke script does not submit
 a customer intake form unless `--include-local-submit-checks` is explicitly
 added. That submit option is for loopback/local smoke only and refuses
 non-loopback base URLs; use it before release to prove the profile-cache write
-and locale reuse path without touching production data. Smoke identity values
-must remain synthetic: use a reserved `.invalid` email address, and leave
-optional name/phone values empty or clearly mark them as smoke/test values.
+and locale reuse path plus safe previous-history preset output without touching
+production data. Smoke identity values must remain synthetic: use a reserved
+`.invalid` email address, and leave optional name/phone values empty or clearly
+mark them as smoke/test values.
 
 `check:account-shared-secret` is a local preflight for the planned production
 secret values. It does not read Cloudflare and does not print the secret; it

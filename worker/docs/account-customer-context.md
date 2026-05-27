@@ -88,10 +88,12 @@ Missing optional fields are signed as empty strings.
   `/api/price-preview` behavior without writing data. For local-only
   verification, add `--include-local-submit-checks` to POST a synthetic signed
   `/customer/submit`, then confirm the submitted language is reused from the
-  local profile cache on the next signed `/customer` render. This option
-  refuses non-loopback base URLs. The smoke script rejects real-looking
-  identity values by default: email values must use the reserved `.invalid`
-  TLD, and optional name/phone values must be empty or clearly synthetic.
+  local profile cache on the next signed `/customer` render and that the same
+  order appears in `/customer/api/context` as a safe previous-history preset
+  without profile PII or Account identifiers. This option refuses non-loopback
+  base URLs. The smoke script rejects real-looking identity values by default:
+  email values must use the reserved `.invalid` TLD, and optional name/phone
+  values must be empty or clearly synthetic.
 - If Account headers and cookie are both present, Luggage validates the headers
   and does not fall back to the cookie. This prevents a browser-supplied invalid
   header from being hidden by a valid cookie.

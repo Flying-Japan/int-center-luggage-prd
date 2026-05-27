@@ -357,6 +357,7 @@ async function runLocalSubmitProfileCacheCheck(baseUrl, cookieValue, context, la
   if (!location.startsWith("/customer/orders/")) {
     throw new Error(`${label}: expected redirect to /customer/orders/, got "${location}"`);
   }
+  const orderId = submittedOrderId(location, baseUrl, label);
 
   await runPageCheck(baseUrl, {
     label,
@@ -365,6 +366,70 @@ async function runLocalSubmitProfileCacheCheck(baseUrl, cookieValue, context, la
     expectedHtmlLang: submittedLang,
     expectedInputValues: expectedPrefillInputs(context),
   });
+
+  await runRecentOrderPresetCheck(baseUrl, cookieValue, context, orderId, label);
+}
+
+function submittedOrderId(location, baseUrl, label) {
+  const url = new URL(location, baseUrl);
+  const match = url.pathname.match(/^\/customer\/orders\/([^/]+)$/);
+  if (!match) {
+    throw new Error(`${label}: could not parse submitted order id from redirect "${location}"`);
+  }
+  return match[1];
+}
+
+async function runRecentOrderPresetCheck(baseUrl, cookieValue, context, orderId, label) {
+  const response = await fetch(new URL(CONTEXT_PATH, baseUrl), {
+    headers: { Cookie: `${COOKIE_NAME}=${cookieValue}` },
+    redirect: "manual",
+  });
+  const text = await response.text();
+  if (response.status !== 200) {
+    throw new Error(`${label}: expected context HTTP 200 after submit, got ${response.status}. Body: ${summarize(text)}`);
+  }
+  assertNoSyntheticLeak(text, context, label);
+
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(`${label}: expected JSON context after submit. Body: ${summarize(text)}`);
+  }
+
+  if (body.is_authenticated !== true) {
+    throw new Error(`${label}: expected authenticated context after submit`);
+  }
+  if (!Array.isArray(body.recent_orders)) {
+    throw new Error(`${label}: recent_orders must be an array after submit`);
+  }
+
+  const order = body.recent_orders.find((candidate) => candidate.order_id === orderId);
+  if (!order) {
+    throw new Error(`${label}: submitted order ${orderId} was not present in recent_orders`);
+  }
+  assertRecentOrderPreset(order, label);
+}
+
+function assertRecentOrderPreset(order, label) {
+  const expected = {
+    backpack_qty: 1,
+    companion_count: 1,
+    payment_method: "CASH",
+    status: "PAYMENT_PENDING",
+    suitcase_qty: 1,
+  };
+  for (const [field, expectedValue] of Object.entries(expected)) {
+    if (order[field] !== expectedValue) {
+      throw new Error(`${label}: recent order ${field} is ${JSON.stringify(order[field])}, expected ${JSON.stringify(expectedValue)}`);
+    }
+  }
+
+  for (const forbiddenField of ["account_person_id", "display_name", "email", "name", "phone"]) {
+    if (Object.prototype.hasOwnProperty.call(order, forbiddenField)) {
+      throw new Error(`${label}: recent order payload exposed forbidden field ${forbiddenField}`);
+    }
+  }
 }
 
 function signedSubmitForm(context, lang) {
