@@ -15,6 +15,7 @@ import {
 import { calculateStorageDays } from "../services/storage";
 import { buildOrderId, buildSameDayTag, buildOvernightTag } from "../services/orderNumber";
 import { escapeHtml } from "../lib/escapeHtml";
+import { captureOperationalError } from "../lib/observability";
 
 const customer = new Hono<AppType>();
 const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
@@ -79,6 +80,32 @@ function customerObservabilityScripts(env: Env, pageName: string) {
       return event;
     }
   });
+  window.addEventListener("error", function(event) {
+    var target = event && event.target;
+    if (!target || target === window) return;
+    var url = target.src || target.href || "";
+    if (!url) return;
+    var pathname = "";
+    try { pathname = new URL(url, window.location.href).pathname; } catch (_) { pathname = String(url).slice(0, 200); }
+    var tagName = String(target.tagName || "resource").toLowerCase();
+    var isRequiredCustomerAsset =
+      tagName === "script" ||
+      tagName === "link" ||
+      pathname.indexOf("/static/") === 0 ||
+      pathname.indexOf("/customer") === 0;
+    if (!isRequiredCustomerAsset) return;
+    window.Sentry.withScope(function(scope) {
+      scope.setLevel("warning");
+      scope.setTag("operation", "customer.asset_load");
+      scope.setTag("asset_type", tagName);
+      scope.setContext("asset", {
+        path: pathname,
+        page: ${JSON.stringify(pageName)},
+        release: ${JSON.stringify(sentryRelease)}
+      });
+      window.Sentry.captureMessage("customer_required_asset_load_failed", "warning");
+    });
+  }, true);
 })();
           `}} />
         </>
@@ -1596,6 +1623,19 @@ customer.post("/customer/submit", async (c) => {
     luggageImageUrl = luggageKey;
   } catch (e) {
     console.error("Image upload failed:", e);
+    captureOperationalError(e, {
+      operation: "customer.submit.upload_image",
+      tags: { phase: "image_upload", lang },
+      context: {
+        idImageType: idImageFile.type,
+        idImageSize: idImageFile.size,
+        luggageImageType: luggageImageFile.type,
+        luggageImageSize: luggageImageFile.size,
+        suitcaseQty,
+        backpackQty,
+      },
+      fingerprint: ["customer.submit.upload_image"],
+    });
     return redirect(t("upload_error", lang));
   }
 
@@ -1667,6 +1707,22 @@ customer.post("/customer/submit", async (c) => {
     if (idImageUrl) try { await c.env.IMAGES.delete(idImageUrl); } catch { /* best-effort */ }
     if (luggageImageUrl) try { await c.env.IMAGES.delete(luggageImageUrl); } catch { /* best-effort */ }
     console.error("Order insert failed:", e);
+    captureOperationalError(e, {
+      operation: "customer.submit.insert_order",
+      tags: { phase: "order_insert", lang },
+      context: {
+        orderId,
+        tagNo,
+        suitcaseQty,
+        backpackQty,
+        setQty,
+        storageDays,
+        isOvernight,
+        finalPrepaid,
+        flyingPassTier,
+      },
+      fingerprint: ["customer.submit.insert_order", orderId],
+    });
     return redirect(t("upload_error", lang));
   }
 
@@ -1678,7 +1734,16 @@ customer.post("/customer/submit", async (c) => {
         suitcaseQty, backpackQty,
         expectedPickupAt, expectedStorageDays: storageDays,
         finalAmount: finalPrepaid, lang,
-      }).catch((err) => console.error("Email send failed:", err))
+      }).catch((err) => {
+        console.error("Email send failed:", err);
+        captureOperationalError(err, {
+          level: "warning",
+          operation: "customer.submit.send_confirmation_email",
+          tags: { external_service: "brevo", lang },
+          context: { orderId, tagNo, finalPrepaid },
+          fingerprint: ["customer.submit.send_confirmation_email"],
+        });
+      })
     );
   }
 

@@ -11,6 +11,7 @@ import { calculatePricePerDay, calculatePrepaidAmount, normalizeFlyingPassTier, 
 import { calculateStorageDays, calculateExtraDays } from "../services/storage";
 import { createBugTask } from "../lib/asana";
 import { createSupabaseAdmin } from "../lib/supabase";
+import { captureOperationalError } from "../lib/observability";
 import { displayOrderStatus, displayPaymentMethod, displayFlyingPassTier } from "../lib/display";
 import { fmtJST } from "../lib/dateFormat";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
@@ -516,6 +517,12 @@ staffOrders.post("/staff/orders/:id/create-extension", editorAuth, async (c) => 
       .run();
   } catch (e) {
     console.error("Extension order insert failed:", e);
+    captureOperationalError(e, {
+      operation: "staff.orders.create_extension",
+      tags: { phase: "order_insert" },
+      context: { parentOrderId, newOrderId, staffId: staff.id, rootId },
+      fingerprint: ["staff.orders.create_extension", parentOrderId],
+    });
     return c.redirect(`/staff/orders/${parentOrderId}?error=연장접수 실패`);
   }
 
@@ -600,6 +607,20 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
       .run();
   } catch (e) {
     console.error("Manual order insert failed:", e);
+    captureOperationalError(e, {
+      operation: "staff.orders.manual_create",
+      tags: { phase: "order_insert" },
+      context: {
+        orderId,
+        tagNo,
+        staffId: staff.id,
+        suitcaseQty,
+        backpackQty,
+        isOvernight,
+        isFree,
+      },
+      fingerprint: ["staff.orders.manual_create", orderId],
+    });
     return c.redirect("/staff/dashboard?error=수동등록 실패");
   }
 
