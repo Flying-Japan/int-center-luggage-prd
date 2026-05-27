@@ -1992,6 +1992,16 @@ customer.post("/customer/submit", async (c) => {
     return redirect(t("upload_error", lang));
   }
 
+  if (accountPersonId) {
+    await cacheSignedCustomerProfile(c.env.DB, {
+      accountPersonId,
+      displayName: name,
+      email,
+      locale: lang,
+      phone,
+    }).catch((err) => console.error("Customer profile cache update failed:", err));
+  }
+
   // Send confirmation email (best-effort, keep worker alive via waitUntil)
   if (email && c.env.BREVO_API_KEY) {
     c.executionCtx.waitUntil(
@@ -2011,6 +2021,36 @@ customer.post("/customer/submit", async (c) => {
 
   return c.redirect(`/customer/orders/${orderId}?lang=${lang}&token=${viewToken}`);
 });
+
+async function cacheSignedCustomerProfile(
+  db: D1Database,
+  input: {
+    accountPersonId: string;
+    displayName: string;
+    phone: string;
+    email: string;
+    locale: Lang;
+  },
+): Promise<void> {
+  await db.prepare(
+    `INSERT INTO luggage_customer_profiles (
+       account_person_id, display_name, phone, email, locale, identity_verified_at, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
+     ON CONFLICT(account_person_id) DO UPDATE SET
+       display_name = excluded.display_name,
+       phone = excluded.phone,
+       email = excluded.email,
+       locale = excluded.locale,
+       identity_verified_at = excluded.identity_verified_at,
+       updated_at = datetime('now')`
+  ).bind(
+    input.accountPersonId,
+    input.displayName,
+    input.phone,
+    input.email,
+    input.locale,
+  ).run();
+}
 
 // ---------------------------------------------------------------------------
 // GET /customer/orders/:id — Success / order summary page

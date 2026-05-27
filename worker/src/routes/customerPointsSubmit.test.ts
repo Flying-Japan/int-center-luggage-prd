@@ -104,6 +104,19 @@ class FakePreparedStatement {
   }
 
   async run() {
+    if (this.sql.includes("INSERT INTO luggage_customer_profiles")) {
+      if (this.db.failProfileUpsert) throw new Error("profile cache failed");
+      this.db.profile = {
+        account_person_id: String(this.boundValues[0]),
+        display_name: this.boundValues[1] == null ? null : String(this.boundValues[1]),
+        phone: this.boundValues[2] == null ? null : String(this.boundValues[2]),
+        email: this.boundValues[3] == null ? null : String(this.boundValues[3]),
+        locale: this.boundValues[4] == null ? null : String(this.boundValues[4]),
+        identity_verified_at: "now",
+      };
+      return { meta: { changes: 1 } };
+    }
+
     if (this.sql.includes("UPDATE luggage_orders SET view_token")) {
       const token = String(this.boundValues[0]);
       const orderId = String(this.boundValues[1]);
@@ -142,6 +155,7 @@ class FakePreparedStatement {
 
 class FakeDb {
   failOrderInsert = false;
+  failProfileUpsert = false;
   insertedOrders: InsertedCustomerOrder[] = [];
   lastChanges = 0;
   pointBalances = new Map<string, number>();
@@ -359,6 +373,7 @@ describe("customer order point usage", () => {
       source_preset_order_id: null,
     });
     expect(db.pointTransactions).toHaveLength(0);
+    expect(db.profile).toBeNull();
   });
 
   it("rejects anonymous point usage before order insert", async () => {
@@ -410,6 +425,64 @@ describe("customer order point usage", () => {
       name: "Account Name",
       phone: "+81-90-1111-2222",
     });
+  });
+
+  it("updates the signed customer profile cache after a successful submit", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
+
+    const db = new FakeDb();
+    const { app, env } = buildApp({
+      displayName: "Account Name",
+      email: "account@example.com",
+      issuedBy: "pub-account",
+      locale: "ja",
+      personId: "person-1",
+      phone: "+81-90-1111-2222",
+      provider: "account",
+    }, db);
+
+    const res = await postCustomerOrder(app, env, customerOrderForm({ lang: "en" }));
+
+    expect(res.status).toBe(302);
+    expect(db.insertedOrders).toHaveLength(1);
+    expect(db.profile).toMatchObject({
+      account_person_id: "person-1",
+      display_name: "Account Name",
+      email: "account@example.com",
+      locale: "en",
+      phone: "+81-90-1111-2222",
+    });
+    expect(db.profile?.identity_verified_at).toBeTruthy();
+  });
+
+  it("keeps order completion successful when the profile cache update fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-22T00:00:00Z"));
+
+    const db = new FakeDb();
+    db.failProfileUpsert = true;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { app, env } = buildApp({
+      displayName: "Account Name",
+      email: "account@example.com",
+      issuedBy: "pub-account",
+      personId: "person-1",
+      phone: "+81-90-1111-2222",
+      provider: "account",
+    }, db);
+
+    const res = await postCustomerOrder(app, env, customerOrderForm());
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toMatch(/^\/customer\/orders\/20260522-101\?lang=ko&token=/);
+    expect(db.insertedOrders).toHaveLength(1);
+    expect(db.profile).toBeNull();
+    expect(consoleError).toHaveBeenCalledWith(
+      "Customer profile cache update failed:",
+      expect.any(Error),
+    );
+    consoleError.mockRestore();
   });
 
   it("uses verified cached customer profile identity ahead of signed Account session fields", async () => {
@@ -661,5 +734,6 @@ describe("customer order point usage", () => {
     expect(db.insertedOrders).toHaveLength(0);
     expect(db.pointTransactions).toHaveLength(0);
     expect(db.pointBalances.get("person-1")).toBe(1000);
+    expect(db.profile).toBeNull();
   });
 });
