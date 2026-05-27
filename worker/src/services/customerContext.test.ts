@@ -234,6 +234,44 @@ describe("customer context service", () => {
     ]);
   });
 
+  it("normalizes corrupt negative customer context numbers before exposing recent presets", async () => {
+    const db = new FakeDb();
+    db.pointBalances.set("person-1", -500);
+    db.orders = [
+      {
+        order_id: "corrupt",
+        account_person_id: "person-1",
+        created_at: "2026-05-05 10:00:00",
+        suitcase_qty: -2,
+        backpack_qty: -1,
+        companion_count: -3,
+        payment_method: "CASH",
+        gross_amount: -1600,
+        prepaid_amount: 1600,
+        point_discount_amount: -200,
+        final_amount: -100,
+        status: "PAID",
+        parent_order_id: null,
+      },
+    ];
+
+    await expect(loadPointBalance(db as unknown as D1Database, "person-1")).resolves.toBe(0);
+    await expect(loadRecentCustomerOrders(db as unknown as D1Database, "person-1", 1)).resolves.toEqual([
+      {
+        orderId: "corrupt",
+        createdAt: "2026-05-05 10:00:00",
+        suitcaseQty: 0,
+        backpackQty: 0,
+        companionCount: 0,
+        paymentMethod: "CASH",
+        grossAmount: 1600,
+        pointDiscountAmount: 0,
+        finalAmount: 0,
+        status: "PAID",
+      },
+    ]);
+  });
+
   it("loads the combined authenticated context", async () => {
     const db = new FakeDb();
     const session: CustomerSession = {

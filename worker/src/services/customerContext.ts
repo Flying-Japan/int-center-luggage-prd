@@ -161,17 +161,17 @@ export async function loadRecentCustomerOrders(
   ).bind(accountPersonId, safeLimit).all<RecentOrderRow>();
 
   return rows.results.map((row) => {
-    const grossAmount = numberOrZero(row.gross_amount) || numberOrZero(row.prepaid_amount);
+    const grossAmount = nonNegativeNumberOrZero(row.gross_amount) || nonNegativeNumberOrZero(row.prepaid_amount);
     return {
       orderId: row.order_id,
       createdAt: row.created_at,
-      suitcaseQty: numberOrZero(row.suitcase_qty),
-      backpackQty: numberOrZero(row.backpack_qty),
-      companionCount: numberOrZero(row.companion_count),
+      suitcaseQty: nonNegativeIntegerOrZero(row.suitcase_qty),
+      backpackQty: nonNegativeIntegerOrZero(row.backpack_qty),
+      companionCount: nonNegativeIntegerOrZero(row.companion_count),
       paymentMethod: row.payment_method ?? null,
       grossAmount,
-      pointDiscountAmount: numberOrZero(row.point_discount_amount),
-      finalAmount: numberOrZero(row.final_amount),
+      pointDiscountAmount: nonNegativeNumberOrZero(row.point_discount_amount),
+      finalAmount: nonNegativeNumberOrZero(row.final_amount),
       status: row.status,
     };
   });
@@ -185,7 +185,7 @@ export async function loadPointBalance(db: D1Database, accountPersonId: string):
      LIMIT 1`
   ).bind(accountPersonId).first<PointAccountRow>();
 
-  return numberOrZero(row?.balance_points);
+  return nonNegativeIntegerOrZero(row?.balance_points);
 }
 
 export async function verifyOwnedSourcePresetOrder(
@@ -217,6 +217,14 @@ function clampLimit(limit: number): number {
 function numberOrZero(value: number | null | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;
   return value;
+}
+
+function nonNegativeNumberOrZero(value: number | null | undefined): number {
+  return Math.max(0, numberOrZero(value));
+}
+
+function nonNegativeIntegerOrZero(value: number | null | undefined): number {
+  return Math.floor(nonNegativeNumberOrZero(value));
 }
 
 function firstNonBlank(...values: Array<string | undefined>): string {
