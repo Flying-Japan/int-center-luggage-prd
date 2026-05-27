@@ -6,6 +6,8 @@
  * Revenue: unit_price (KRW) * quantity / 9.5 → JPY
  */
 
+import { captureOperationalMessage } from "../lib/observability";
+
 const KRW_TO_JPY_RATE = 9.5;
 
 interface ProductOrderRow {
@@ -42,7 +44,15 @@ export async function syncRentalRevenue(
   });
 
   if (!resp.ok) {
-    console.error(`Supabase rental sync failed: ${resp.status} ${await resp.text()}`);
+    const body = await resp.text();
+    console.error(`Supabase rental sync failed: ${resp.status} ${body}`);
+    captureOperationalMessage("Supabase rental sync failed", {
+      level: "error",
+      operation: "scheduled.rental_revenue_sync",
+      tags: { external_service: "supabase", status: resp.status },
+      context: { syncDays, fromUtc, toUtc, responseBody: body.slice(0, 500) },
+      fingerprint: ["scheduled.rental_revenue_sync", String(resp.status)],
+    });
     return { synced: 0 };
   }
 

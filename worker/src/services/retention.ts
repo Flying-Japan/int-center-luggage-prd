@@ -6,6 +6,8 @@
  * - Customer order data is kept permanently for service and marketing purposes
  */
 
+import { captureOperationalError } from "../lib/observability";
+
 const ID_IMAGE_RETENTION_DAYS = 14;
 
 export type RetentionResult = {
@@ -47,6 +49,13 @@ export async function runRetentionCleanup(
         await images.delete(key);
       } catch (e) {
         console.error(`Failed to delete R2 object ${key}:`, e);
+        captureOperationalError(e, {
+          level: "warning",
+          operation: "scheduled.retention.delete_image",
+          tags: { storage: "r2" },
+          context: { orderId: order.order_id, key },
+          fingerprint: ["scheduled.retention.delete_image"],
+        });
         allDeleted = false;
       }
     }

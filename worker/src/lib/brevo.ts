@@ -1,6 +1,7 @@
 /** Brevo (Sendinblue) transactional email client */
 
 import { RENTAL_PROMO_LINKS } from "./rentalLinks";
+import { captureOperationalError, captureOperationalMessage } from "./observability";
 
 const BREVO_API = "https://api.brevo.com/v3/smtp/email";
 const STATIC_ASSET_VERSION = "20260505-rental-hq";
@@ -195,11 +196,25 @@ export async function sendOrderConfirmation(
 
     if (!resp.ok) {
       console.error(`Brevo error: ${resp.status} ${resp.statusText}`);
+      captureOperationalMessage("Brevo order confirmation email failed", {
+        level: "warning",
+        operation: "external.brevo.send_order_confirmation",
+        tags: { external_service: "brevo", status: resp.status },
+        context: { orderId, lang },
+        fingerprint: ["external.brevo.send_order_confirmation", String(resp.status)],
+      });
       return false;
     }
     return true;
   } catch (err) {
     console.error("Failed to send email via Brevo", err);
+    captureOperationalError(err, {
+      level: "warning",
+      operation: "external.brevo.send_order_confirmation",
+      tags: { external_service: "brevo" },
+      context: { orderId, lang },
+      fingerprint: ["external.brevo.send_order_confirmation"],
+    });
     return false;
   }
 }
@@ -252,10 +267,27 @@ export async function sendExtensionNotification(
         htmlContent: html,
       }),
     });
-    if (!resp.ok) { console.error(`Brevo extension email error: ${resp.status}`); return false; }
+    if (!resp.ok) {
+      console.error(`Brevo extension email error: ${resp.status}`);
+      captureOperationalMessage("Brevo extension email failed", {
+        level: "warning",
+        operation: "external.brevo.send_extension_notification",
+        tags: { external_service: "brevo", status: resp.status },
+        context: { tagNo: data.tagNo, amount: data.amount },
+        fingerprint: ["external.brevo.send_extension_notification", String(resp.status)],
+      });
+      return false;
+    }
     return true;
   } catch (err) {
     console.error("Failed to send extension email", err);
+    captureOperationalError(err, {
+      level: "warning",
+      operation: "external.brevo.send_extension_notification",
+      tags: { external_service: "brevo" },
+      context: { tagNo: data.tagNo, amount: data.amount },
+      fingerprint: ["external.brevo.send_extension_notification"],
+    });
     return false;
   }
 }

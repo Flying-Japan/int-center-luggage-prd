@@ -5,6 +5,7 @@
  *   - Full backfill: syncs all months from start to current
  */
 import { fetchSheetData } from "../lib/googleSheets";
+import { captureOperationalError } from "../lib/observability";
 
 const SPREADSHEET_ID = "10mn-Eg0YMk6tKOYfebtjP-mWMGQiaKhmNpLLA04YhoA";
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -33,7 +34,16 @@ async function syncMonth(
   let dailyRows: string[][];
   try {
     dailyRows = await fetchSheetData(credentials, SPREADSHEET_ID, `'${sheetName}'!A:K`);
-  } catch {
+  } catch (error) {
+    if (cutoffDate) {
+      captureOperationalError(error, {
+        level: "warning",
+        operation: "scheduled.daily_sales_sync.fetch_sheet",
+        tags: { external_service: "google_sheets" },
+        context: { sheetName, year, month: month + 1, cutoffDate },
+        fingerprint: ["scheduled.daily_sales_sync.fetch_sheet", sheetName],
+      });
+    }
     return 0; // Sheet doesn't exist for this month
   }
 

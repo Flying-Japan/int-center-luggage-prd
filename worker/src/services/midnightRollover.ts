@@ -6,6 +6,8 @@
  * freeing the old same-day tag for recycling.
  */
 
+import { captureOperationalError } from "../lib/observability";
+
 // Overnight tags allocated in bulk via direct counter manipulation (no per-order buildOvernightTag call)
 
 interface RolloverResult {
@@ -80,6 +82,12 @@ export async function runMidnightRollover(db: D1Database): Promise<RolloverResul
     await db.batch(stmts);
   } catch (e) {
     console.error("Midnight rollover batch failed:", e);
+    captureOperationalError(e, {
+      operation: "scheduled.midnight_rollover",
+      tags: { job: "midnight_rollover" },
+      context: { count, statementCount: stmts.length },
+      fingerprint: ["scheduled.midnight_rollover"],
+    });
     return { transitioned: 0, errors: count };
   }
 
