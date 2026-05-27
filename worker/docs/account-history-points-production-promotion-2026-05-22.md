@@ -12,9 +12,7 @@ point usage promotion without deploying production behavior yet.
 - Track the live Luggage PR head and check status in
   `Flying-Japan/int-center-luggage-prd#7` and the dev promotion gate. Do not
   copy this branch's moving head SHA into this document; each docs-only commit
-  would immediately make that value stale. The latest runtime verification
-  listed below ran on Luggage code head
-  `2599bb2ca95bfec6f3469839173d2c24627b03cc`.
+  would immediately make that value stale.
 - The matching Account PR is `Flying-Japan/pub-account-prd#1` at
   `477b8b6e6966da9628760943ac35a79676411ebd`; its CI is green, its production
   auth success hooks call `provisionAccountCustomerIdentity()` for non-admin
@@ -92,11 +90,9 @@ Results:
   passed locally without printing the shared secret or signed cookie value, and
   the smoke now rejects real-looking identity values by default.
 - `smoke:cross-app-account-handoff -- --include-page-checks --include-price-preview-checks`
-  passed against Luggage runtime code head
-  `2599bb2ca95bfec6f3469839173d2c24627b03cc` and Account head
+  passed against the Luggage PR runtime code and Account head
   `477b8b6e6966da9628760943ac35a79676411ebd` with
-  `--include-local-submit-checks`. Later docs-only commits on this PR do not
-  change that runtime smoke surface. This verified
+  `--include-local-submit-checks`. This verified
   anonymous `/customer`, signed `/customer`, `/staff/login`, anonymous and
   signed `/api/price-preview`, anonymous context, signed generated cookie,
   Account-minted cookie, signed headers, stale timestamp rejection,
