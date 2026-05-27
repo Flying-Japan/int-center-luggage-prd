@@ -1,19 +1,12 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-
-const DEFAULT_LUGGAGE_ENV = "ACCOUNT_CONTEXT_SECRET";
-const DEFAULT_ACCOUNT_ENV = "ACCOUNT_LUGGAGE_CONTEXT_SECRET";
-const DEFAULT_MIN_LENGTH = 32;
-
-const FORBIDDEN_VALUES = new Set([
-  "dev-luggage-account-context-secret",
-  "dev-account-context-secret-for-smoke",
-  "account-context-test-secret",
-  "changeme",
-  "change-me",
-  "secret",
-  "password",
-]);
+import {
+  DEFAULT_ACCOUNT_ENV,
+  DEFAULT_LUGGAGE_ENV,
+  DEFAULT_MIN_LENGTH,
+  FORBIDDEN_VALUES,
+  validateSharedSecretPair,
+} from "./shared-secret-preflight.mjs";
 
 main().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
@@ -29,14 +22,13 @@ async function main() {
 
   const luggage = readSecret(options.luggageEnv);
   const account = readSecret(options.accountEnv);
-  const failures = [
-    ...validateSecret(luggage, options.luggageEnv, options.minLength),
-    ...validateSecret(account, options.accountEnv, options.minLength),
-  ];
-
-  if (luggage !== account) {
-    failures.push(`${options.luggageEnv} and ${options.accountEnv} must be identical`);
-  }
+  const failures = validateSharedSecretPair({
+    account,
+    accountEnv: options.accountEnv,
+    luggage,
+    luggageEnv: options.luggageEnv,
+    minLength: options.minLength,
+  });
 
   if (failures.length > 0) {
     console.error("Account/Luggage shared secret preflight failed:");
@@ -52,31 +44,6 @@ async function main() {
 
 function readSecret(envName) {
   return process.env[envName] ?? "";
-}
-
-function validateSecret(value, envName, minLength) {
-  const failures = [];
-  if (!value) {
-    failures.push(`${envName} is required`);
-    return failures;
-  }
-
-  if (value !== value.trim()) {
-    failures.push(`${envName} must not have leading or trailing whitespace`);
-  }
-  if (/[\r\n]/.test(value)) {
-    failures.push(`${envName} must not contain line breaks`);
-  }
-  if (value.length < minLength) {
-    failures.push(`${envName} must be at least ${minLength} characters`);
-  }
-  if (FORBIDDEN_VALUES.has(value.toLowerCase())) {
-    failures.push(`${envName} is a known development placeholder`);
-  }
-  if (/^(.)\1+$/.test(value)) {
-    failures.push(`${envName} must not be a repeated single character`);
-  }
-  return failures;
 }
 
 function parseArgs(argv) {
