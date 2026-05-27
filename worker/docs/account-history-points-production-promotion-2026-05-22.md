@@ -9,9 +9,12 @@ point usage promotion without deploying production behavior yet.
   been applied and audited separately.
 - Account signed context is still blocked on coordinated shared secret rollout,
   release-window smoke, and explicit production deployment approval.
-- This Luggage PR is `Flying-Japan/int-center-luggage-prd#7` at
-  `2599bb2ca95bfec6f3469839173d2c24627b03cc`; its Cloudflare Workers Build
-  check is green.
+- Track the live Luggage PR head and check status in
+  `Flying-Japan/int-center-luggage-prd#7` and the dev promotion gate. Do not
+  copy this branch's moving head SHA into this document; each docs-only commit
+  would immediately make that value stale. The latest runtime verification
+  listed below ran on Luggage code head
+  `2599bb2ca95bfec6f3469839173d2c24627b03cc`.
 - The matching Account PR is `Flying-Japan/pub-account-prd#1` at
   `477b8b6e6966da9628760943ac35a79676411ebd`; its CI is green, its production
   auth success hooks call `provisionAccountCustomerIdentity()` for non-admin
@@ -89,9 +92,11 @@ Results:
   passed locally without printing the shared secret or signed cookie value, and
   the smoke now rejects real-looking identity values by default.
 - `smoke:cross-app-account-handoff -- --include-page-checks --include-price-preview-checks`
-  passed against Luggage head `2599bb2ca95bfec6f3469839173d2c24627b03cc` and
-  Account head `477b8b6e6966da9628760943ac35a79676411ebd` with
-  `--include-local-submit-checks`. This verified
+  passed against Luggage runtime code head
+  `2599bb2ca95bfec6f3469839173d2c24627b03cc` and Account head
+  `477b8b6e6966da9628760943ac35a79676411ebd` with
+  `--include-local-submit-checks`. Later docs-only commits on this PR do not
+  change that runtime smoke surface. This verified
   anonymous `/customer`, signed `/customer`, `/staff/login`, anonymous and
   signed `/api/price-preview`, anonymous context, signed generated cookie,
   Account-minted cookie, signed headers, stale timestamp rejection,
