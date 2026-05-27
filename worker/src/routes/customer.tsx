@@ -20,7 +20,7 @@ const customer = new Hono<AppType>();
 const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
 const STATIC_ASSET_VERSION = "20260505-rental-hq";
 const SENTRY_BROWSER_SDK_URL = "https://browser.sentry-cdn.com/8.51.0/bundle.tracing.min.js";
-const DEFAULT_SENTRY_RELEASE = "int-center-luggage-prd@2026-05-05";
+const DEFAULT_SENTRY_RELEASE = "int-center-luggage-prd@unversioned";
 const SUPPRESSED_RESOURCE_FAILURE_MESSAGE = "customer_required_resource_load_failed";
 
 function cleanPublicConfig(value?: string) {

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import * as Sentry from "@sentry/cloudflare";
 import type { AppType, Env } from "./types";
 import authRoutes from "./routes/auth";
 import customerRoutes from "./routes/customer";
@@ -1145,50 +1146,77 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   );
 });
 
-// Scheduled event handler (retention cleanup)
-export default {
+const worker = {
   fetch: app.fetch,
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(
       (async () => {
-        console.log(`Scheduled tasks triggered: ${event.cron}`);
+        try {
+          console.log(`Scheduled tasks triggered: ${event.cron}`);
 
-        // Midnight JST rollover (0 15 * * * = 00:00 JST)
-        // Transition uncollected same-day orders to overnight with new 91+ tags
-        if (event.cron === "0 15 * * *") {
-          const rolloverResult = await runMidnightRollover(env.DB);
-          console.log(`Midnight rollover complete: ${JSON.stringify(rolloverResult)}`);
-          return;
-        }
+          // Midnight JST rollover (0 15 * * * = 00:00 JST)
+          // Transition uncollected same-day orders to overnight with new 91+ tags
+          if (event.cron === "0 15 * * *") {
+            const rolloverResult = await runMidnightRollover(env.DB);
+            console.log(`Midnight rollover complete: ${JSON.stringify(rolloverResult)}`);
+            return;
+          }
 
-        // Daily maintenance (0 18 * * * = 03:00 JST)
-        const result = await runRetentionCleanup(env.DB, env.IMAGES);
-        console.log(`Retention cleanup complete: ${JSON.stringify(result)}`);
-        if (env.GOOGLE_SHEETS_CREDENTIALS) {
-          const syncResult = await syncDailySales(env.DB, env.GOOGLE_SHEETS_CREDENTIALS);
-          console.log(`Daily sales sync complete: ${JSON.stringify(syncResult)}`);
-        }
-        if (env.NAVER_ORDERS_SUPABASE_URL && env.NAVER_ORDERS_SUPABASE_KEY) {
-          const rentalResult = await syncRentalRevenue(env.DB, env.NAVER_ORDERS_SUPABASE_URL, env.NAVER_ORDERS_SUPABASE_KEY);
-          console.log(`Rental revenue sync complete: ${JSON.stringify(rentalResult)}`);
-        }
-        if (env.AUTO_EXTENSION_ENABLED === "true") {
-          // Auto-extend overdue orders + email + handover note
-          const { generateExtensionOrders } = await import("./services/extension");
-          const { sendExtensionNotification } = await import("./lib/brevo");
-          const extResult = await generateExtensionOrders(env.DB);
-          console.log(`Extension orders: created=${extResult.created}, skipped=${extResult.skippedDup}`);
-          if (env.BREVO_API_KEY) {
-            for (const ext of extResult.extendedOrders) {
-              if (ext.email) {
-                await sendExtensionNotification(env.BREVO_API_KEY, { name: ext.name, email: ext.email, tagNo: ext.tagNo, amount: ext.amount }).catch(e => console.error("Extension email failed:", e));
+          // Daily maintenance (0 18 * * * = 03:00 JST)
+          const result = await runRetentionCleanup(env.DB, env.IMAGES);
+          console.log(`Retention cleanup complete: ${JSON.stringify(result)}`);
+          if (env.GOOGLE_SHEETS_CREDENTIALS) {
+            const syncResult = await syncDailySales(env.DB, env.GOOGLE_SHEETS_CREDENTIALS);
+            console.log(`Daily sales sync complete: ${JSON.stringify(syncResult)}`);
+          }
+          if (env.NAVER_ORDERS_SUPABASE_URL && env.NAVER_ORDERS_SUPABASE_KEY) {
+            const rentalResult = await syncRentalRevenue(env.DB, env.NAVER_ORDERS_SUPABASE_URL, env.NAVER_ORDERS_SUPABASE_KEY);
+            console.log(`Rental revenue sync complete: ${JSON.stringify(rentalResult)}`);
+          }
+          if (env.AUTO_EXTENSION_ENABLED === "true") {
+            // Auto-extend overdue orders + email + handover note
+            const { generateExtensionOrders } = await import("./services/extension");
+            const { sendExtensionNotification } = await import("./lib/brevo");
+            const extResult = await generateExtensionOrders(env.DB);
+            console.log(`Extension orders: created=${extResult.created}, skipped=${extResult.skippedDup}`);
+            if (env.BREVO_API_KEY) {
+              for (const ext of extResult.extendedOrders) {
+                if (ext.email) {
+                  await sendExtensionNotification(env.BREVO_API_KEY, { name: ext.name, email: ext.email, tagNo: ext.tagNo, amount: ext.amount }).catch(e => console.error("Extension email failed:", e));
+                }
               }
             }
+          } else {
+            console.log("Extension orders skipped: AUTO_EXTENSION_ENABLED is not true");
           }
-        } else {
-          console.log("Extension orders skipped: AUTO_EXTENSION_ENABLED is not true");
+        } catch (error) {
+          Sentry.captureException(error, {
+            tags: {
+              app: "int-center-luggage-prd",
+              job: "scheduled",
+              cron: event.cron,
+            },
+          });
+          console.error("Scheduled task failed:", error);
+          throw error;
         }
       })()
     );
   },
 };
+
+export default Sentry.withSentry(
+  (env: Env) => ({
+    dsn: env.SENTRY_DSN,
+    environment: env.APP_ENV || "production",
+    release: env.SENTRY_RELEASE,
+    tracesSampleRate: 0.1,
+    initialScope: {
+      tags: {
+        app: "int-center-luggage-prd",
+        worker: "luggage-api",
+      },
+    },
+  }),
+  worker,
+);

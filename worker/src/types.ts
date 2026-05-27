@@ -29,6 +29,7 @@ export type Env = {
 
   // Browser observability for customer pages
   SENTRY_BROWSER_DSN?: string;
+  SENTRY_DSN?: string;
   SENTRY_RELEASE?: string;
   CLARITY_PROJECT_ID?: string;
 

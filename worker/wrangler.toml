@@ -10,6 +10,8 @@ BUSINESS_OPEN_HOUR = "9"
 BUSINESS_CLOSE_HOUR = "21"
 # Browser observability for customer pages:
 # - SENTRY_BROWSER_DSN
+# Server observability for Worker errors:
+# - SENTRY_DSN
 # - SENTRY_RELEASE
 # - CLARITY_PROJECT_ID
 # Internal reviewer -> luggage auth:

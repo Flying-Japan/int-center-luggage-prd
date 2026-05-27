@@ -1,4 +1,5 @@
 import { type Context, type Next } from "hono";
+import * as Sentry from "@sentry/cloudflare";
 
 const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
 const LUGGAGE_GA4_SNIPPET =
@@ -60,6 +61,14 @@ export async function securityHeaders(c: Context, next: Next) {
  * Error handler (onError): logs full error server-side, returns generic 500.
  */
 export function errorHandler(err: Error, c: Context) {
+  const url = new URL(c.req.url);
+  Sentry.captureException(err, {
+    tags: {
+      app: "int-center-luggage-prd",
+      path: url.pathname,
+      method: c.req.method,
+    },
+  });
   console.error("[error]", err.stack ?? err.message);
   return c.json({ error: "Internal server error" }, 500);
 }
