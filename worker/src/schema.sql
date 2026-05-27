@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS luggage_orders (
   staff_id TEXT,
   parent_order_id TEXT,
   source_preset_order_id TEXT,
+  view_token TEXT,
   in_warehouse INTEGER NOT NULL DEFAULT 0
 );
 

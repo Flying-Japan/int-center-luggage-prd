@@ -13,6 +13,7 @@ const CONTEXT_PATH = "/customer/api/context";
 const CUSTOMER_PATH = "/customer";
 const PRICE_PREVIEW_PATH = "/api/price-preview";
 const STAFF_LOGIN_PATH = "/staff/login";
+const SUBMIT_PATH = "/customer/submit";
 const COOKIE_NAME = "fj_account_context";
 const SYNTHETIC_MARKER_PATTERN = /(^local_|smoke|synthetic|test|example|dummy)/i;
 
@@ -54,6 +55,9 @@ async function main() {
     timestamp: new Date().toISOString(),
   };
   const baseUrl = resolveBaseUrl(options.baseUrl);
+  if (options.includeLocalSubmitChecks) {
+    assertLocalSubmitTarget(baseUrl);
+  }
   const validCookie = buildCookie(secret, context);
   const validHeaders = buildHeaders(secret, context);
   const staleContext = { ...context, timestamp: "2000-01-01T00:00:00.000Z" };
@@ -125,6 +129,9 @@ async function main() {
       console.log(`dry-run: anonymous ${PRICE_PREVIEW_PATH} ignores requested points`);
       console.log(`dry-run: signed ${PRICE_PREVIEW_PATH} accepts synthetic context`);
     }
+    if (options.includeLocalSubmitChecks) {
+      console.log(`dry-run: signed local ${SUBMIT_PATH} writes profile-cache locale`);
+    }
     for (const check of checks) console.log(`dry-run: ${check.label}`);
     return;
   }
@@ -139,6 +146,16 @@ async function main() {
   for (const check of checks) {
     await runCheck(baseUrl, check, check.context ?? context);
     console.log(`ok: ${check.label}`);
+  }
+
+  if (options.includeLocalSubmitChecks) {
+    const submitCookie = externalCookie || validCookie;
+    const submitContext = externalContext || context;
+    const submitLabel = externalCookie
+      ? "Account-minted signed local submit writes profile-cache locale"
+      : "signed local submit writes profile-cache locale";
+    await runLocalSubmitProfileCacheCheck(baseUrl, submitCookie, submitContext, submitLabel);
+    console.log(`ok: ${submitLabel}`);
   }
 }
 
@@ -323,6 +340,74 @@ function nextTokyoNoon() {
   return `${values.year}-${values.month}-${values.day}T12:00:00+09:00`;
 }
 
+async function runLocalSubmitProfileCacheCheck(baseUrl, cookieValue, context, label) {
+  assertLocalSubmitTarget(baseUrl);
+  const submittedLang = alternateSupportedLang(context.locale);
+  const response = await fetch(new URL(SUBMIT_PATH, baseUrl), {
+    body: signedSubmitForm(context, submittedLang),
+    headers: { Cookie: `${COOKIE_NAME}=${cookieValue}` },
+    method: "POST",
+    redirect: "manual",
+  });
+  const text = await response.text();
+  if (response.status !== 302) {
+    throw new Error(`${label}: expected HTTP 302, got ${response.status}. Body: ${summarize(text)}`);
+  }
+  const location = response.headers.get("Location") || "";
+  if (!location.startsWith("/customer/orders/")) {
+    throw new Error(`${label}: expected redirect to /customer/orders/, got "${location}"`);
+  }
+
+  await runPageCheck(baseUrl, {
+    label,
+    path: CUSTOMER_PATH,
+    headers: { Cookie: `${COOKIE_NAME}=${cookieValue}` },
+    expectedHtmlLang: submittedLang,
+    expectedInputValues: expectedPrefillInputs(context),
+  });
+}
+
+function signedSubmitForm(context, lang) {
+  const form = new FormData();
+  const fields = {
+    backpack_qty: "1",
+    companion_count: "1",
+    consent_checked: "1",
+    email: context.email || DEFAULT_EMAIL,
+    expected_pickup_at: nextTokyoNoon(),
+    lang,
+    name: context.displayName || DEFAULT_DISPLAY_NAME,
+    payment_method: "CASH",
+    phone: context.phone || "000-0000-0000",
+    points_to_use: "0",
+    suitcase_qty: "1",
+  };
+
+  for (const [key, value] of Object.entries(fields)) {
+    form.set(key, value);
+  }
+  form.set("id_image", syntheticImageBlob("synthetic id image"), "id.jpg");
+  form.set("luggage_image", syntheticImageBlob("synthetic luggage image"), "luggage.jpg");
+  return form;
+}
+
+function syntheticImageBlob(value) {
+  return new Blob([value], { type: "image/jpeg" });
+}
+
+function alternateSupportedLang(value) {
+  const current = String(value || DEFAULT_LOCALE).trim().toLowerCase().replace("_", "-").split("-")[0];
+  return current === "en" ? "ja" : "en";
+}
+
+function assertLocalSubmitTarget(baseUrl) {
+  const hostname = baseUrl.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]") {
+    return;
+  }
+  throw new Error("--include-local-submit-checks can only submit to localhost or loopback URLs");
+}
+
 async function runCheck(baseUrl, check, context) {
   const response = await fetch(new URL(CONTEXT_PATH, baseUrl), {
     headers: check.headers,
@@ -477,6 +562,7 @@ function parseArgs(argv) {
     contextCookieFile: process.env.LUGGAGE_SMOKE_CONTEXT_COOKIE_FILE || "",
     includePageChecks: process.env.LUGGAGE_SMOKE_INCLUDE_PAGE_CHECKS === "1",
     includePricePreviewChecks: process.env.LUGGAGE_SMOKE_INCLUDE_PRICE_PREVIEW_CHECKS === "1",
+    includeLocalSubmitChecks: process.env.LUGGAGE_SMOKE_INCLUDE_LOCAL_SUBMIT_CHECKS === "1",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -511,6 +597,9 @@ function parseArgs(argv) {
         break;
       case "--include-price-preview-checks":
         options.includePricePreviewChecks = true;
+        break;
+      case "--include-local-submit-checks":
+        options.includeLocalSubmitChecks = true;
         break;
       case "--person-id":
         options.personId = requireValue(argv, ++index, arg);
@@ -602,6 +691,10 @@ Options:
   --include-price-preview-checks
                        Also GET /api/price-preview anonymously and with a signed
                        synthetic cookie. This check does not write data.
+  --include-local-submit-checks
+                       Local-only POST /customer/submit with a signed synthetic
+                       cookie, then verify the submitted locale is reused from
+                       the profile cache. Refuses non-loopback base URLs.
   --dry-run            Build checks without sending HTTP requests
 
 Smoke identity values must be synthetic. Emails must use the reserved .invalid

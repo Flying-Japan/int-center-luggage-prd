@@ -10,7 +10,7 @@ point usage promotion without deploying production behavior yet.
 - Account signed context is still blocked on coordinated shared secret rollout,
   release-window smoke, and explicit production deployment approval.
 - The matching Account PR is `Flying-Japan/pub-account-prd#1` at
-  `a12b739b1e421ba2ba70616b60a8df441889787a`; its CI is green, its production
+  `9495e2fb0a46c35cfb8f4df96dec8a7bbb29cb1b`; its CI is green, its production
   auth success hooks call `provisionAccountCustomerIdentity()` for non-admin
   customers, and its synthetic local `/luggage/handoff` smoke verifies the
   `fj_account_context` cookie signature.
@@ -37,7 +37,7 @@ point usage promotion without deploying production behavior yet.
 
 ## Branch Verification
 
-Last run on 2026-05-25 JST from `/private/tmp/luggage-prep`:
+Last run on 2026-05-27 JST from `/private/tmp/luggage-pr7-next`:
 
 ```sh
 node --check worker/scripts/smoke-account-context.mjs
@@ -58,27 +58,34 @@ pnpm --dir worker run smoke:cross-app-account-handoff -- \
   --account-port 13011 \
   --luggage-port 18788 \
   --include-page-checks \
-  --include-price-preview-checks
+  --include-price-preview-checks \
+  --include-local-submit-checks
 ```
 
 Results:
 
 - Smoke script syntax checks passed.
 - Typecheck passed.
-- Vitest passed: 6 files, 46 tests.
-- Schema drift, customer asset guard, and Wrangler deploy dry-run passed.
+- Vitest passed: 8 files, 70 tests.
+- Schema drift passed for 3 customer history/points tables, 8 required
+  `luggage_orders` columns including `view_token`, and 5 indexes; customer
+  asset guard and Wrangler deploy dry-run passed.
 - `check:account-shared-secret` passed with a synthetic non-production value and
   printed only a short SHA-256 fingerprint.
 - `smoke:account-context -- --dry-run --include-page-checks --include-price-preview-checks`
   passed locally without printing the shared secret or signed cookie value, and
   the smoke now rejects real-looking identity values by default.
 - `smoke:cross-app-account-handoff -- --include-page-checks --include-price-preview-checks`
-  passed on non-default local ports. It verified anonymous `/customer`, signed
-  `/customer`, `/staff/login`, anonymous and signed `/api/price-preview`,
-  anonymous context, signed generated cookie, Account-minted cookie, signed
-  headers, stale timestamp rejection, and invalid-header-over-cookie rejection.
+  passed on non-default local ports. The later local-only submit run also
+  passed with `--include-local-submit-checks`. Together these verified
+  anonymous `/customer`, signed `/customer`, `/staff/login`, anonymous and
+  signed `/api/price-preview`, anonymous context, signed generated cookie,
+  Account-minted cookie, signed headers, stale timestamp rejection,
+  invalid-header-over-cookie rejection, and Account-minted signed
+  `/customer/submit` writing the profile-cache locale that the next signed
+  `/customer` render reuses.
 - Account PR #1 local handoff smoke passed on the Account branch head
-  `a12b739b1e421ba2ba70616b60a8df441889787a`, and Account CI passed
+  `9495e2fb0a46c35cfb8f4df96dec8a7bbb29cb1b`, and Account CI passed
   `build-and-test`, `e2e-canary`, and `gitleaks`.
 
 ## Required Verification Before Deployment
@@ -103,9 +110,12 @@ Use `--dry-run` before secrets are wired to verify the synthetic payload and
 check list without sending HTTP requests. `--include-page-checks` adds GET-only
 checks for `/customer` and `/staff/login`; `--include-price-preview-checks`
 adds GET-only checks for `/api/price-preview`. The smoke script does not submit
-a customer intake form. Smoke identity values must remain synthetic: use a
-reserved `.invalid` email address, and leave optional name/phone values empty or
-clearly mark them as smoke/test values.
+a customer intake form unless `--include-local-submit-checks` is explicitly
+added. That submit option is for loopback/local smoke only and refuses
+non-loopback base URLs; use it before release to prove the profile-cache write
+and locale reuse path without touching production data. Smoke identity values
+must remain synthetic: use a reserved `.invalid` email address, and leave
+optional name/phone values empty or clearly mark them as smoke/test values.
 
 `check:account-shared-secret` is a local preflight for the planned production
 secret values. It does not read Cloudflare and does not print the secret; it
@@ -132,7 +142,8 @@ The same flow can be run as one command from this Luggage promotion worktree:
 pnpm --dir worker run smoke:cross-app-account-handoff -- \
   --account-dir /path/to/pub-account-prd \
   --include-page-checks \
-  --include-price-preview-checks
+  --include-price-preview-checks \
+  --include-local-submit-checks
 ```
 
 ## Production Smoke Checklist

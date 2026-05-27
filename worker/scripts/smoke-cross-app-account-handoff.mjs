@@ -50,6 +50,9 @@ async function main() {
   try {
     if (!options.skipMigrate) {
       run("pnpm", ["run", "db:migrate:local"], { cwd: projectRoot });
+      if (options.includeLocalSubmitChecks) {
+        ensureLocalSubmitSchema();
+      }
     }
 
     const luggageProcess = startProcess("luggage", "pnpm", [
@@ -126,6 +129,7 @@ async function main() {
       cookieFile,
       ...(options.includePageChecks ? ["--include-page-checks"] : []),
       ...(options.includePricePreviewChecks ? ["--include-price-preview-checks"] : []),
+      ...(options.includeLocalSubmitChecks ? ["--include-local-submit-checks"] : []),
     ], {
       cwd: projectRoot,
       env: {
@@ -149,6 +153,7 @@ function parseArgs(argv) {
     help: false,
     includePageChecks: process.env.ACCOUNT_HANDOFF_SMOKE_INCLUDE_PAGE_CHECKS === "1",
     includePricePreviewChecks: process.env.ACCOUNT_HANDOFF_SMOKE_INCLUDE_PRICE_PREVIEW_CHECKS === "1",
+    includeLocalSubmitChecks: process.env.ACCOUNT_HANDOFF_SMOKE_INCLUDE_LOCAL_SUBMIT_CHECKS === "1",
     keepCookieFile: false,
     luggagePort: numberOption(process.env.ACCOUNT_HANDOFF_SMOKE_LUGGAGE_PORT, DEFAULT_LUGGAGE_PORT),
     sessionSecret: process.env.ACCOUNT_HANDOFF_SMOKE_SESSION_SECRET || DEFAULT_SESSION_SECRET,
@@ -188,6 +193,9 @@ function parseArgs(argv) {
         break;
       case "--include-price-preview-checks":
         options.includePricePreviewChecks = true;
+        break;
+      case "--include-local-submit-checks":
+        options.includeLocalSubmitChecks = true;
         break;
       case "--luggage-port":
         options.luggagePort = numberOption(requireValue(argv, ++index, arg), DEFAULT_LUGGAGE_PORT, arg);
@@ -247,6 +255,50 @@ function run(command, args, options = {}) {
   if (result.status !== 0) {
     throw new Error(`Command failed: ${command} ${args.join(" ")}`);
   }
+}
+
+function runCapture(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd,
+    encoding: "utf8",
+    env: { ...process.env, ...(options.env ?? {}) },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || "").trim();
+    throw new Error(`Command failed: ${command} ${args.join(" ")}${detail ? `\n${detail}` : ""}`);
+  }
+  return result.stdout.trim();
+}
+
+function ensureLocalSubmitSchema() {
+  const output = runCapture("pnpm", [
+    "exec",
+    "wrangler",
+    "d1",
+    "execute",
+    "center-luggage-db",
+    "--local",
+    "--json",
+    "--command",
+    "SELECT name FROM pragma_table_info('luggage_orders') WHERE name = 'view_token';",
+  ], { cwd: projectRoot });
+  const response = JSON.parse(output);
+  const rows = Array.isArray(response) ? response[0]?.results ?? [] : [];
+  if (rows.some((row) => row.name === "view_token")) return;
+
+  run("pnpm", [
+    "exec",
+    "wrangler",
+    "d1",
+    "execute",
+    "center-luggage-db",
+    "--local",
+    "--command",
+    "ALTER TABLE luggage_orders ADD COLUMN view_token TEXT;",
+  ], { cwd: projectRoot });
 }
 
 function startProcess(label, command, args, options = {}) {
@@ -347,6 +399,10 @@ Options:
   --include-price-preview-checks
                            Also run Luggage GET-only /api/price-preview checks
                            through smoke:account-context
+  --include-local-submit-checks
+                           Also run local-only signed /customer/submit and
+                           profile-cache locale reuse checks through
+                           smoke:account-context
   --keep-cookie-file       Keep the generated synthetic cookie file
   --skip-migrate           Skip local D1 schema migration before starting Luggage
 `);

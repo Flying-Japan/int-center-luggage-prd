@@ -85,10 +85,13 @@ Missing optional fields are signed as empty strings.
   smoke to also GET anonymous `/customer`, signed `/customer`, and
   `/staff/login` without submitting forms. Add
   `--include-price-preview-checks` to verify anonymous and signed
-  `/api/price-preview` behavior without writing data. The smoke script rejects
-  real-looking identity values by default: email values must use the reserved
-  `.invalid` TLD, and optional name/phone values must be empty or clearly
-  synthetic.
+  `/api/price-preview` behavior without writing data. For local-only
+  verification, add `--include-local-submit-checks` to POST a synthetic signed
+  `/customer/submit`, then confirm the submitted language is reused from the
+  local profile cache on the next signed `/customer` render. This option
+  refuses non-loopback base URLs. The smoke script rejects real-looking
+  identity values by default: email values must use the reserved `.invalid`
+  TLD, and optional name/phone values must be empty or clearly synthetic.
 - If Account headers and cookie are both present, Luggage validates the headers
   and does not fall back to the cookie. This prevents a browser-supplied invalid
   header from being hidden by a valid cookie.
@@ -99,7 +102,7 @@ The matching Account production PR is
 `Flying-Japan/pub-account-prd#1`. The currently verified Account head is:
 
 ```txt
-a12b739b1e421ba2ba70616b60a8df441889787a
+9495e2fb0a46c35cfb8f4df96dec8a7bbb29cb1b
 ```
 
 That Account head adds the production auth success hooks that call

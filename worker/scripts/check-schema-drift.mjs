@@ -59,6 +59,11 @@ const requiredColumns = [
     column: "source_preset_order_id",
     reason: "audit previous-history preset selection",
   },
+  {
+    table: "luggage_orders",
+    column: "view_token",
+    reason: "customer order completion page updates and validates view_token",
+  },
 ];
 
 const requiredIndexes = [
