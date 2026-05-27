@@ -339,6 +339,12 @@ async function postCustomerOrder(
   );
 }
 
+function expectNoStoreRedirect(response: Response) {
+  expect(response.headers.get("Cache-Control")).toBe("no-store");
+  expect(response.headers.get("Pragma")).toBe("no-cache");
+  expect(response.headers.get("Expires")).toBe("0");
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -361,6 +367,7 @@ describe("customer order point usage", () => {
     );
 
     expect(res.status).toBe(302);
+    expectNoStoreRedirect(res);
     expect(res.headers.get("Location")).toMatch(/^\/customer\/orders\/20260522-101\?lang=ko&token=/);
     expect(db.insertedOrders).toHaveLength(1);
     expect(db.insertedOrders[0]).toMatchObject({
@@ -386,6 +393,7 @@ describe("customer order point usage", () => {
     const res = await postCustomerOrder(app, env, customerOrderForm({ points_to_use: 500 }));
 
     expect(res.status).toBe(302);
+    expectNoStoreRedirect(res);
     expect(decodeURIComponent(res.headers.get("Location") || "")).toContain(
       "포인트는 로그인한 고객만 사용할 수 있습니다.",
     );
@@ -475,6 +483,7 @@ describe("customer order point usage", () => {
     const res = await postCustomerOrder(app, env, customerOrderForm());
 
     expect(res.status).toBe(302);
+    expectNoStoreRedirect(res);
     expect(res.headers.get("Location")).toMatch(/^\/customer\/orders\/20260522-101\?lang=ko&token=/);
     expect(db.insertedOrders).toHaveLength(1);
     expect(db.profile).toBeNull();

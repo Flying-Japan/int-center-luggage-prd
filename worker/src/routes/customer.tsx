@@ -1786,8 +1786,14 @@ customer.post("/customer/submit", async (c) => {
   const body = await c.req.parseBody();
   const lang = normalizeLang(String(body.lang || ""));
 
+  const noStoreRedirect = (location: string) => {
+    c.header("Cache-Control", "no-store");
+    c.header("Pragma", "no-cache");
+    c.header("Expires", "0");
+    return c.redirect(location);
+  };
   const redirect = (msg: string) =>
-    c.redirect(`/customer?error=${encodeURIComponent(msg)}&lang=${lang}`);
+    noStoreRedirect(`/customer?error=${encodeURIComponent(msg)}&lang=${lang}`);
 
   // --- Load authenticated customer context (null for guests) ---
   const customerCtx = await loadCustomerContext(c);
@@ -2019,7 +2025,7 @@ customer.post("/customer/submit", async (c) => {
   const viewToken = btoa(String.fromCharCode(...rawToken)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
   await c.env.DB.prepare("UPDATE luggage_orders SET view_token = ?, updated_at = datetime('now') WHERE order_id = ?").bind(viewToken, orderId).run();
 
-  return c.redirect(`/customer/orders/${orderId}?lang=${lang}&token=${viewToken}`);
+  return noStoreRedirect(`/customer/orders/${orderId}?lang=${lang}&token=${viewToken}`);
 });
 
 async function cacheSignedCustomerProfile(

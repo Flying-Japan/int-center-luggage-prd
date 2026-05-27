@@ -34,6 +34,9 @@ point usage promotion without deploying production behavior yet.
 - Customer submit now reserves point usage and inserts the order in a single D1
   `batch()` transaction. The intake transaction stays `RESERVED` so existing
   staff status transitions can commit or release it later.
+- Customer submit redirects now send `Cache-Control: no-store`, `Pragma:
+  no-cache`, and `Expires: 0` so completion-token and validation-error
+  redirects are not cached.
 - Previous-history selection records `source_preset_order_id` only after
   ownership is checked against the signed Account person.
 - `/customer/api/context` returns a no-store JSON smoke surface with only
@@ -98,9 +101,11 @@ Results:
   Account-minted cookie, signed headers, stale timestamp rejection,
   invalid-header-over-cookie rejection, and Account-minted signed
   `/customer/submit` writing the profile-cache locale that the next signed
-  `/customer` render reuses. The same submit smoke now also verifies the
-  submitted order appears in `/customer/api/context` as a safe previous-history
-  preset without profile PII or Account identifiers.
+  `/customer` render reuses. Focused submit tests now verify both successful
+  completion redirects and validation-error redirects are no-store. The same
+  submit smoke now also verifies the submitted order appears in
+  `/customer/api/context` as a safe previous-history preset without profile PII
+  or Account identifiers.
 - Account PR #1 local handoff smoke passed on the Account branch head
   `2993bb8e3accffde6ea83910a937f313dfdca51f`, and Account CI
   #26491551536 passed `build-and-test`, `e2e-canary`, and `gitleaks`.
@@ -173,7 +178,7 @@ Do not use real customer PII for smoke data.
 
 1. Anonymous `/customer` render has no Account context and no points UI.
 2. Anonymous `/customer/submit` creates an order with `account_person_id IS NULL`
-   and no point ledger rows.
+   and no point ledger rows, and the success redirect is no-store.
 3. Signed synthetic Account context renders `/customer` as authenticated.
 4. `/customer/api/context` returns `is_authenticated = true`, point balance,
    and only safe previous-order preset fields for the signed synthetic person.
