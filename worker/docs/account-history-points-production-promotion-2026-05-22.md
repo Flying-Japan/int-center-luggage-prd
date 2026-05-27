@@ -9,11 +9,15 @@ point usage promotion without deploying production behavior yet.
   been applied and audited separately.
 - Account signed context is still blocked on coordinated shared secret rollout,
   release-window smoke, and explicit production deployment approval.
+- This Luggage PR is `Flying-Japan/int-center-luggage-prd#7` at
+  `2599bb2ca95bfec6f3469839173d2c24627b03cc`; its Cloudflare Workers Build
+  check is green.
 - The matching Account PR is `Flying-Japan/pub-account-prd#1` at
-  `9495e2fb0a46c35cfb8f4df96dec8a7bbb29cb1b`; its CI is green, its production
+  `477b8b6e6966da9628760943ac35a79676411ebd`; its CI is green, its production
   auth success hooks call `provisionAccountCustomerIdentity()` for non-admin
-  customers, and its synthetic local `/luggage/handoff` smoke verifies the
-  `fj_account_context` cookie signature.
+  customers, its production-host route test covers the secure
+  `.flyingjp.com` handoff cookie, and its synthetic local `/luggage/handoff`
+  smoke verifies the `fj_account_context` cookie signature.
 - This branch must not be deployed until `ACCOUNT_CONTEXT_SECRET` is configured
   and the Account caller has passed a synthetic no-PII smoke.
 
@@ -42,7 +46,10 @@ Last run on 2026-05-27 JST from `/private/tmp/luggage-pr7-next`:
 ```sh
 node --check worker/scripts/smoke-account-context.mjs
 node --check worker/scripts/smoke-cross-app-account-handoff.mjs
+node --check worker/scripts/check-account-shared-secret.mjs
+node --check worker/scripts/shared-secret-preflight.mjs
 pnpm --dir worker typecheck
+pnpm --dir worker test src/scripts/checkAccountSharedSecret.test.ts
 pnpm --dir worker test
 pnpm --dir worker run check:schema-drift
 pnpm --dir worker run check:static-assets
@@ -66,18 +73,25 @@ Results:
 
 - Smoke script syntax checks passed.
 - Typecheck passed.
-- Vitest passed: 8 files, 70 tests.
+- Shared-secret preflight tests passed: 4 tests.
+- Vitest passed: 9 files, 74 tests.
 - Schema drift passed for 3 customer history/points tables, 8 required
   `luggage_orders` columns including `view_token`, and 5 indexes; customer
   asset guard and Wrangler deploy dry-run passed.
 - `check:account-shared-secret` passed with a synthetic non-production value and
-  printed only a short SHA-256 fingerprint.
+  printed only a short SHA-256 fingerprint. It also rejected known development
+  placeholders and mismatched Account/Luggage values without printing either
+  secret value.
+- The Luggage preflight validation helper is covered by Worker-pool-compatible
+  Vitest tests for matching values, placeholder rejection, mismatch rejection,
+  custom env names, and no secret-value echoing in failure text.
 - `smoke:account-context -- --dry-run --include-page-checks --include-price-preview-checks`
   passed locally without printing the shared secret or signed cookie value, and
   the smoke now rejects real-looking identity values by default.
 - `smoke:cross-app-account-handoff -- --include-page-checks --include-price-preview-checks`
-  passed on non-default local ports. The later local-only submit run also
-  passed with `--include-local-submit-checks`. Together these verified
+  passed against Luggage head `2599bb2ca95bfec6f3469839173d2c24627b03cc` and
+  Account head `477b8b6e6966da9628760943ac35a79676411ebd` with
+  `--include-local-submit-checks`. This verified
   anonymous `/customer`, signed `/customer`, `/staff/login`, anonymous and
   signed `/api/price-preview`, anonymous context, signed generated cookie,
   Account-minted cookie, signed headers, stale timestamp rejection,
@@ -87,8 +101,8 @@ Results:
   submitted order appears in `/customer/api/context` as a safe previous-history
   preset without profile PII or Account identifiers.
 - Account PR #1 local handoff smoke passed on the Account branch head
-  `9495e2fb0a46c35cfb8f4df96dec8a7bbb29cb1b`, and Account CI passed
-  `build-and-test`, `e2e-canary`, and `gitleaks`.
+  `477b8b6e6966da9628760943ac35a79676411ebd`, and Account CI
+  #26487155958 passed `build-and-test`, `e2e-canary`, and `gitleaks`.
 
 ## Required Verification Before Deployment
 
@@ -96,6 +110,7 @@ Run from the repository root:
 
 ```sh
 pnpm --dir worker typecheck
+pnpm --dir worker test src/scripts/checkAccountSharedSecret.test.ts
 pnpm --dir worker test
 pnpm --dir worker run check:schema-drift
 pnpm --dir worker run check:static-assets
@@ -123,7 +138,9 @@ mark them as smoke/test values.
 `check:account-shared-secret` is a local preflight for the planned production
 secret values. It does not read Cloudflare and does not print the secret; it
 only verifies both env vars are identical and acceptable before an operator
-writes them to Account and Luggage production.
+writes them to Account and Luggage production. The validation helper is tested
+so placeholder, mismatch, custom env-name, and no-secret-output behavior are
+guarded in CI.
 
 For a cross-app local smoke, first ask Account to write its verified synthetic
 handoff cookie, then pass that cookie to Luggage:

@@ -104,7 +104,7 @@ The matching Account production PR is
 `Flying-Japan/pub-account-prd#1`. The currently verified Account head is:
 
 ```txt
-9495e2fb0a46c35cfb8f4df96dec8a7bbb29cb1b
+477b8b6e6966da9628760943ac35a79676411ebd
 ```
 
 That Account head adds the production auth success hooks that call
@@ -119,6 +119,13 @@ smoke that:
 - verifies the cookie HMAC with `ACCOUNT_LUGGAGE_CONTEXT_SECRET`.
 - can write the verified synthetic cookie to a temporary file for Luggage to
   consume with `pnpm --dir worker run smoke:account-context -- --context-cookie-file <path>`.
+- includes a production-host route test proving `account.flyingjp.com` redirects
+  to `https://luggage.flyingjp.com/customer` with a short-lived
+  `Domain=.flyingjp.com`, `HttpOnly`, `Secure` context cookie.
+- includes `check:luggage-shared-secret` and Vitest coverage proving matching
+  planned Account/Luggage secret values pass, known development placeholders
+  fail, mismatches fail, custom env names work, and the secret value is not
+  printed.
 
 This proves Account can provision customer identity after auth success and can
 produce the same signed browser handoff cookie that Luggage validates here,
