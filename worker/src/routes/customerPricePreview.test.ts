@@ -81,6 +81,7 @@ describe("GET /api/price-preview point handling", () => {
     const body = await response.json() as Record<string, unknown>;
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(body).toMatchObject({
       final_amount: 1200,
       final_prepaid: 1200,
@@ -107,6 +108,7 @@ describe("GET /api/price-preview point handling", () => {
     const body = await response.json() as Record<string, unknown>;
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(body).toMatchObject({
       final_amount: 700,
       final_prepaid: 1200,

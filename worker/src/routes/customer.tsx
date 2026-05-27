@@ -2572,6 +2572,7 @@ customer.get("/customer/api/context", async (c) => {
 // GET /api/price-preview — Public JSON pricing API
 // ---------------------------------------------------------------------------
 customer.get("/api/price-preview", async (c) => {
+  c.header("Cache-Control", "no-store");
   const suitcaseQty = parseInt(c.req.query("suitcase_qty") || "0", 10) || 0;
   const backpackQty = parseInt(c.req.query("backpack_qty") || "0", 10) || 0;
   const expectedPickupAtRaw = c.req.query("expected_pickup_at") || "";
