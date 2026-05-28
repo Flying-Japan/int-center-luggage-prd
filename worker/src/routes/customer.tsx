@@ -86,11 +86,18 @@ function customerObservabilityScripts(env: Env, pageName: string) {
     var url = target.src || target.href || "";
     if (!url) return;
     var pathname = "";
-    try { pathname = new URL(url, window.location.href).pathname; } catch (_) { pathname = String(url).slice(0, 200); }
+    var isSameOrigin = false;
+    try {
+      var parsed = new URL(url, window.location.href);
+      pathname = parsed.pathname;
+      isSameOrigin = parsed.origin === window.location.origin;
+    } catch (_) { pathname = String(url).slice(0, 200); }
     var tagName = String(target.tagName || "resource").toLowerCase();
+    // Required = critical tag from our own origin, OR any tag pointing at our
+    // critical paths. Cross-origin CDN flakes (pretendard, gtag, clarity,
+    // sentry-cdn) no longer count as "required" — they degrade gracefully.
     var isRequiredCustomerAsset =
-      tagName === "script" ||
-      tagName === "link" ||
+      ((tagName === "script" || tagName === "link") && isSameOrigin) ||
       pathname.indexOf("/static/") === 0 ||
       pathname.indexOf("/customer") === 0;
     if (!isRequiredCustomerAsset) return;
