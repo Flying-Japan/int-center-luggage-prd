@@ -5,6 +5,7 @@ import {
   calculatePointUsage,
   commitReservedPointUseForOrder,
   postEarnedPointsForPaidOrder,
+  refundCommittedPointUseForOrder,
   releaseReservedPointUseForOrder,
   reservePointUseForOrder,
   voidEarnedPointsForOrder,
@@ -316,6 +317,46 @@ describe("releaseReservedPointUseForOrder", () => {
   });
 });
 
+describe("refundCommittedPointUseForOrder", () => {
+  it("restores the balance for use that was already committed (POSTED)", async () => {
+    const db = new FakeD1();
+    db.seedAccount("person-1", 1500);
+    await reservePointUseForOrder(asDb(db), { accountPersonId: "person-1", orderId: "ord-1", pointsToUse: 500 });
+    await commitReservedPointUseForOrder(asDb(db), "ord-1");
+    expect(db.accounts.get("person-1")?.balance_points).toBe(1000);
+
+    const result = await refundCommittedPointUseForOrder(asDb(db), "ord-1");
+
+    expect(result.applied).toBe(true);
+    expect(result.pointsDelta).toBe(500);
+    expect(db.accounts.get("person-1")?.balance_points).toBe(1500);
+    expect(db.transactions.find((t) => t.idempotency_key === "point:reserve:ord-1")?.status).toBe("REFUNDED");
+    expect(db.transactions.find((t) => t.idempotency_key === "point:refund:ord-1")?.points_delta).toBe(500);
+  });
+
+  it("is idempotent and does not double-restore the balance", async () => {
+    const db = new FakeD1();
+    db.seedAccount("person-1", 1500);
+    await reservePointUseForOrder(asDb(db), { accountPersonId: "person-1", orderId: "ord-1", pointsToUse: 500 });
+    await commitReservedPointUseForOrder(asDb(db), "ord-1");
+    await refundCommittedPointUseForOrder(asDb(db), "ord-1");
+    const second = await refundCommittedPointUseForOrder(asDb(db), "ord-1");
+
+    expect(second.idempotent).toBe(true);
+    expect(db.accounts.get("person-1")?.balance_points).toBe(1500);
+  });
+
+  it("does nothing while the use is still RESERVED (release() owns that case)", async () => {
+    const db = new FakeD1();
+    db.seedAccount("person-1", 1500);
+    await reservePointUseForOrder(asDb(db), { accountPersonId: "person-1", orderId: "ord-1", pointsToUse: 500 });
+
+    const result = await refundCommittedPointUseForOrder(asDb(db), "ord-1");
+    expect(result.applied).toBe(false);
+    expect(db.accounts.get("person-1")?.balance_points).toBe(1000);
+  });
+});
+
 describe("postEarnedPointsForPaidOrder", () => {
   it("creates the account if missing and posts the earned points", async () => {
     const db = new FakeD1();
@@ -426,8 +467,29 @@ describe("applyPointEffectsForStatusChange", () => {
     });
 
     expect(db.transactions.find((t) => t.idempotency_key === "point:earn:ord-1")?.status).toBe("VOIDED");
-    // Reservation was already committed (POSTED), so it stays POSTED and the release is a no-op
-    expect(db.transactions.find((t) => t.idempotency_key === "point:reserve:ord-1")?.status).toBe("POSTED");
-    expect(db.accounts.get("person-1")?.balance_points).toBe(1000);
+    // Reservation was committed (POSTED) at PAID; cancelling refunds the spent
+    // points via refundCommittedPointUseForOrder, so it ends REFUNDED and the
+    // 500 used points are returned. Earned points (10) are voided.
+    expect(db.transactions.find((t) => t.idempotency_key === "point:reserve:ord-1")?.status).toBe("REFUNDED");
+    expect(db.transactions.find((t) => t.idempotency_key === "point:refund:ord-1")?.points_delta).toBe(500);
+    expect(db.accounts.get("person-1")?.balance_points).toBe(1500);
+  });
+
+  it("refunds still-reserved use on cancellation before payment", async () => {
+    const db = new FakeD1();
+    db.seedAccount("person-1", 1500);
+    await reservePointUseForOrder(asDb(db), { accountPersonId: "person-1", orderId: "ord-1", pointsToUse: 500 });
+
+    await applyPointEffectsForStatusChange(asDb(db), {
+      accountPersonId: "person-1",
+      orderId: "ord-1",
+      fromStatus: "PAYMENT_PENDING",
+      toStatus: "CANCELLED",
+      paidAmount: 0,
+    });
+
+    // Never paid → reservation was RESERVED → released (not refunded), balance restored.
+    expect(db.transactions.find((t) => t.idempotency_key === "point:reserve:ord-1")?.status).toBe("RELEASED");
+    expect(db.accounts.get("person-1")?.balance_points).toBe(1500);
   });
 });

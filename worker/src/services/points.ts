@@ -160,16 +160,19 @@ const RESERVE_KEY = (orderId: string) => `point:reserve:${orderId}`;
 const RELEASE_KEY = (orderId: string) => `point:release:${orderId}`;
 const EARN_KEY = (orderId: string) => `point:earn:${orderId}`;
 const VOID_KEY = (orderId: string) => `point:void:${orderId}`;
+const REFUND_KEY = (orderId: string) => `point:refund:${orderId}`;
 
 const TX_TYPE_USE = "USE";
 const TX_TYPE_RELEASE = "RELEASE";
 const TX_TYPE_EARN = "EARN";
 const TX_TYPE_VOID = "VOID";
+const TX_TYPE_REFUND = "REFUND";
 
 const STATUS_RESERVED = "RESERVED";
 const STATUS_POSTED = "POSTED";
 const STATUS_RELEASED = "RELEASED";
 const STATUS_VOIDED = "VOIDED";
+const STATUS_REFUNDED = "REFUNDED";
 
 type ExistingTransaction = {
   transaction_id: number;
@@ -398,6 +401,106 @@ export async function releaseReservedPointUseForOrder(
   };
 }
 
+export async function refundCommittedPointUseForOrder(
+  db: D1Database,
+  orderId: string
+): Promise<PointMutationResult> {
+  // Mirror of releaseReservedPointUseForOrder, but for use that was already
+  // COMMITTED (POSTED) at PAID. Cancelling a paid order must return the points
+  // the customer spent — releaseReservedPointUseForOrder no-ops once committed,
+  // so without this the spent points would be lost on PAID -> CANCELLED.
+  const orderIdStr = String(orderId);
+  const reserveKey = RESERVE_KEY(orderIdStr);
+  const refundKey = REFUND_KEY(orderIdStr);
+
+  const existingRefund = await findTransactionByKey(db, refundKey);
+  if (existingRefund) {
+    return {
+      applied: false,
+      idempotent: true,
+      pointsDelta: existingRefund.points_delta,
+      balanceAfter: existingRefund.balance_after,
+      transactionId: existingRefund.transaction_id,
+    };
+  }
+
+  const reserveRow = await findTransactionByKey(db, reserveKey);
+  if (!reserveRow) {
+    return { applied: false, idempotent: false, pointsDelta: 0, balanceAfter: 0, transactionId: null };
+  }
+
+  // Only committed use is refundable here. RESERVED is handled by release();
+  // already RELEASED/REFUNDED is an idempotent no-op.
+  if (reserveRow.status !== STATUS_POSTED) {
+    return {
+      applied: false,
+      idempotent: true,
+      pointsDelta: 0,
+      balanceAfter: reserveRow.balance_after,
+      transactionId: reserveRow.transaction_id,
+    };
+  }
+
+  const pointsToReturn = Math.abs(reserveRow.points_delta);
+  if (pointsToReturn === 0) {
+    return {
+      applied: false,
+      idempotent: false,
+      pointsDelta: 0,
+      balanceAfter: reserveRow.balance_after,
+      transactionId: reserveRow.transaction_id,
+    };
+  }
+
+  await db
+    .prepare(
+      `UPDATE luggage_customer_point_accounts
+       SET balance_points = balance_points + ?,
+           lifetime_used_points = MAX(0, lifetime_used_points - ?),
+           updated_at = datetime('now')
+       WHERE account_person_id = ?`
+    )
+    .bind(pointsToReturn, pointsToReturn, reserveRow.account_person_id)
+    .run();
+
+  await db
+    .prepare(
+      `UPDATE luggage_customer_point_transactions
+       SET status = ?, updated_at = datetime('now')
+       WHERE transaction_id = ? AND status = ?`
+    )
+    .bind(STATUS_REFUNDED, reserveRow.transaction_id, STATUS_POSTED)
+    .run();
+
+  const balanceAfter = await readAccountBalance(db, reserveRow.account_person_id);
+
+  const insertRes = await db
+    .prepare(
+      `INSERT INTO luggage_customer_point_transactions
+         (account_person_id, order_id, transaction_type, points_delta, status, balance_after, idempotency_key, reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      reserveRow.account_person_id,
+      orderIdStr,
+      TX_TYPE_REFUND,
+      pointsToReturn,
+      STATUS_POSTED,
+      balanceAfter,
+      refundKey,
+      "refund committed use on cancel"
+    )
+    .run();
+
+  return {
+    applied: true,
+    idempotent: false,
+    pointsDelta: pointsToReturn,
+    balanceAfter,
+    transactionId: Number(insertRes.meta?.last_row_id ?? 0),
+  };
+}
+
 export async function postEarnedPointsForPaidOrder(
   db: D1Database,
   input: { accountPersonId: string; orderId: string; paidAmount: number; earnRate?: number }
@@ -566,7 +669,11 @@ export async function applyPointEffectsForStatusChange(
   }
 
   if (input.toStatus === "CANCELLED") {
+    // Return the points the customer spent, whether the use was still RESERVED
+    // (not yet paid) or already COMMITTED at PAID. Both helpers are status-
+    // guarded and idempotent, so exactly one applies for a given order.
     await releaseReservedPointUseForOrder(db, input.orderId);
+    await refundCommittedPointUseForOrder(db, input.orderId);
     if (input.fromStatus === "PAID" || input.fromStatus === "PICKED_UP") {
       await voidEarnedPointsForOrder(db, input.orderId);
     }
