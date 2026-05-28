@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "deploy:dry-run": "wrangler deploy --dry-run",
     "db:migrate:local": "wrangler d1 execute center-luggage-db --local --file=src/schema.sql",
     "db:migrate:prod": "wrangler d1 execute center-luggage-db --remote --file=src/schema.sql",
     "backfill:cash-closing": "node scripts/backfill-cash-closings-from-check-sheet.mjs",
@@ -11,7 +12,13 @@
     "backfill:daily-sales": "node scripts/backfill-daily-sales-from-sheet.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit && node scripts/check-customer-assets.mjs",
-    "check:customer-assets": "node scripts/check-customer-assets.mjs"
+    "check:customer-assets": "node scripts/check-customer-assets.mjs",
+    "check:static-assets": "node scripts/check-customer-assets.mjs",
+    "check:schema-drift": "node scripts/check-schema-drift.mjs",
+    "check:account-shared-secret": "node scripts/check-account-shared-secret.mjs",
+    "smoke:account-context": "node scripts/smoke-account-context.mjs",
+    "smoke:cross-app-account-handoff": "node scripts/smoke-cross-app-account-handoff.mjs",
+    "test": "vitest run"
   },
   "dependencies": {
     "@sentry/cloudflare": "^10.54.0",
@@ -19,8 +26,10 @@
     "hono": "^4.12.18"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.14.9",
     "@cloudflare/workers-types": "^4.20250305.0",
     "typescript": "^5.7.0",
+    "vitest": "^4.1.7",
     "wrangler": "^4.0.0"
   },
   "pnpm": {

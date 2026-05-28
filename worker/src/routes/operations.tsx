@@ -9,6 +9,7 @@ import { formatDateJST } from "../services/storage";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { fetchStaffNamesByIds, fetchStaffProfilesByIds } from "../lib/staffProfiles";
 import { createSupabaseAdmin } from "../lib/supabase";
+import { orderCollectedAmountSql } from "../services/orderAmounts";
 
 const ops = new Hono<AppType>();
 ops.use("/*", staffAuth);
@@ -124,6 +125,7 @@ async function fetchDailySalesSummariesByDate(db: D1Database, businessDates: str
 async function fetchLiveOrderSalesSummariesByDate(db: D1Database, businessDates: string[]): Promise<Map<string, AutoSalesSummary>> {
   const dateRange = buildDateRange(businessDates);
   if (!dateRange) return new Map();
+  const collectedAmountSql = orderCollectedAmountSql("o");
 
   const rows = await db.prepare(
     `WITH payment_allocations AS (
@@ -136,9 +138,9 @@ async function fetchLiveOrderSalesSummariesByDate(db: D1Database, businessDates:
      )
      SELECT
        date(o.created_at, '+9 hours') as business_date,
-       SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as qr_amount,
-       SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN o.payment_method = 'CASH' OR o.payment_method IS NULL THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as cash_amount,
-       SUM(COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount) as total_amount,
+       SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' THEN ${collectedAmountSql} ELSE 0 END) as qr_amount,
+       SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN o.payment_method = 'CASH' OR o.payment_method IS NULL THEN ${collectedAmountSql} ELSE 0 END) as cash_amount,
+       SUM(${collectedAmountSql}) as total_amount,
        COUNT(*) as order_count
      FROM luggage_orders o
      LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id

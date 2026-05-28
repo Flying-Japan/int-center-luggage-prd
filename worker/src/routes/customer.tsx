@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppType, Env } from "../types";
-import { t, normalizeLang } from "../lib/i18n";
+import { DEFAULT_LANG, SUPPORTED_LANGS, t, normalizeLang, type Lang } from "../lib/i18n";
 import { FLYING_PASS_TIERS, type FlyingPassTier } from "../services/pricing";
 import { loadCompletionMessages, applyAmountTemplate } from "../services/completionMessages";
 import { uploadImage, buildImageKey, extFromContentType, validateImageUpload } from "../lib/r2";
@@ -16,6 +16,19 @@ import { calculateStorageDays } from "../services/storage";
 import { buildOrderId, buildSameDayTag, buildOvernightTag } from "../services/orderNumber";
 import { escapeHtml } from "../lib/escapeHtml";
 import { captureOperationalError } from "../lib/observability";
+import {
+  loadCustomerContext,
+  resolveCustomerIntakeIdentity,
+  verifyOwnedSourcePresetOrder,
+  type CustomerContext,
+} from "../services/customerContext";
+import {
+  buildPointUsageLedgerStatements,
+  POINT_MINIMUM_USE_UNIT,
+  calculatePointUsage,
+  resolvePointUsage,
+  type PointUsageValidationError,
+} from "../services/points";
 
 const customer = new Hono<AppType>();
 const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
@@ -28,9 +41,35 @@ function cleanPublicConfig(value?: string) {
   return value?.trim() || "";
 }
 
+function cleanIdentityValue(value?: string | null) {
+  return value?.trim() || "";
+}
+
 function clarityProjectId(value?: string) {
   const id = cleanPublicConfig(value);
   return /^[a-z0-9]+$/i.test(id) ? id : "";
+}
+
+function pointUsageErrorMessage(error: PointUsageValidationError | undefined, lang: string): string {
+  const messages: Record<PointUsageValidationError, Record<string, string>> = {
+    POINTS_REQUIRE_AUTH: {
+      ko: "포인트는 로그인한 고객만 사용할 수 있습니다.",
+      en: "Points can only be used by signed-in customers.",
+      ja: "ポイントはログイン済みのお客様のみ利用できます。",
+    },
+    POINTS_EXCEED_BALANCE: {
+      ko: "사용 가능한 포인트를 초과했습니다.",
+      en: "Point use exceeds the available balance.",
+      ja: "利用可能なポイントを超えています。",
+    },
+    POINTS_EXCEED_PAYABLE: {
+      ko: "포인트는 결제 예정 금액을 초과해 사용할 수 없습니다.",
+      en: "Points cannot exceed the payable amount.",
+      ja: "ポイントはお支払い予定金額を超えて利用できません。",
+    },
+  };
+  if (!error) return messages.POINTS_EXCEED_BALANCE[lang] || messages.POINTS_EXCEED_BALANCE.ko;
+  return messages[error][lang] || messages[error].ko;
 }
 
 function isWithinCustomerPickupWindow(pickupDate: Date) {
@@ -132,12 +171,125 @@ window.clarity && window.clarity("set", "page", ${JSON.stringify(pageName)});
   );
 }
 
+function renderCustomerContextSection(ctx: CustomerContext, lang: string) {
+  if (!ctx.isAuthenticated) return null;
+  const profile = ctx.profile;
+  const labels = {
+    title: lang === "en" ? "Welcome back" : lang === "ja" ? "おかえりなさい" : "다시 오신 것을 환영해요",
+    pointsLabel: lang === "en" ? "Available points" : lang === "ja" ? "保有ポイント" : "보유 포인트",
+    recentTitle: lang === "en" ? "Recent check-ins" : lang === "ja" ? "最近のご利用" : "최근 이용 이력",
+    applyBtn: lang === "en" ? "Apply to this check-in" : lang === "ja" ? "今回の受付に反映" : "이번 접수에 적용",
+    suitcase: lang === "en" ? "Suitcase" : lang === "ja" ? "スーツケース" : "캐리어",
+    backpack: lang === "en" ? "Bag" : lang === "ja" ? "バッグ" : "가방",
+    companion: lang === "en" ? "Party" : lang === "ja" ? "ご一行" : "일행",
+    payment: lang === "en" ? "Payment" : lang === "ja" ? "お支払い" : "결제",
+  };
+  return (
+    <section class="card" style="display:grid;gap:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <h3 class="card-title" style="margin:0">{labels.title}{profile?.displayName ? `, ${profile.displayName}` : ""}</h3>
+        <span style="font-size:14px;color:var(--primary-strong);font-weight:700">{labels.pointsLabel}: {ctx.pointBalance.toLocaleString()}P</span>
+      </div>
+      {ctx.recentOrders.length > 0 && (
+        <>
+          <h4 style="margin:0;font-size:14px;color:var(--subtext)">{labels.recentTitle}</h4>
+          <div style="display:grid;gap:8px">
+            {ctx.recentOrders.map((o) => (
+              <article
+                class="recent-history-card"
+                data-history-payload={JSON.stringify({
+                  order_id: o.orderId,
+                  suitcase_qty: o.suitcaseQty,
+                  backpack_qty: o.backpackQty,
+                  companion_count: o.companionCount,
+                  payment_method: o.paymentMethod,
+                })}
+                style="border:1px solid var(--line);border-radius:var(--radius-md);padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"
+              >
+                <div style="font-size:13px;line-height:1.5;color:var(--subtext)">
+                  <div style="font-weight:600;color:var(--text)">#{o.orderId}</div>
+                  <div>
+                    {labels.suitcase} {o.suitcaseQty} · {labels.backpack} {o.backpackQty} · {labels.companion} {o.companionCount}
+                    {o.paymentMethod ? ` · ${labels.payment} ${o.paymentMethod}` : ""}
+                  </div>
+                </div>
+                <button type="button" class="btn btn-secondary" data-apply-history style="font-size:12px;min-height:32px;padding:6px 12px">{labels.applyBtn}</button>
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function renderPointsField(ctx: CustomerContext, lang: string) {
+  if (!ctx.isAuthenticated || ctx.pointBalance <= 0) return null;
+  const labels = {
+    label: lang === "en" ? "Use points" : lang === "ja" ? "ポイント利用" : "포인트 사용",
+    held: lang === "en" ? "Held" : lang === "ja" ? "保有" : "보유",
+    useAll: lang === "en" ? "Use max" : lang === "ja" ? "全額利用" : "전액사용",
+    hint:
+      lang === "en"
+        ? `100P unit. 1P = ¥1. Cannot exceed payable amount.`
+        : lang === "ja"
+          ? `100P単位。1P = ¥1。お支払額を超えてはご利用いただけません。`
+          : `100P 단위, 1P = ¥1, 결제 금액을 초과해 사용할 수 없습니다.`,
+  };
+  return (
+    <label class="field field-compact" data-points-field>
+      <span class="field-label">{labels.label} ({labels.held} {ctx.pointBalance.toLocaleString()}P)</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input
+          id="points_to_use_input"
+          class="control control-compact"
+          type="number"
+          min={0}
+          max={ctx.pointBalance}
+          step={POINT_MINIMUM_USE_UNIT}
+          value={0}
+          inputmode="numeric"
+        />
+        <button type="button" id="points_use_all_btn" class="btn btn-secondary" style="min-height:38px;padding:6px 12px;font-size:12px">{labels.useAll}</button>
+      </div>
+      <span class="field-hint">{labels.hint}</span>
+    </label>
+  );
+}
+
+function buildCustomerContextApiPayload(ctx: CustomerContext) {
+  return {
+    is_authenticated: ctx.isAuthenticated,
+    point_balance: ctx.isAuthenticated ? ctx.pointBalance : 0,
+    recent_orders: ctx.isAuthenticated
+      ? ctx.recentOrders.map((order) => ({
+        order_id: order.orderId,
+        created_at: order.createdAt,
+        suitcase_qty: order.suitcaseQty,
+        backpack_qty: order.backpackQty,
+        companion_count: order.companionCount,
+        payment_method: order.paymentMethod,
+        gross_amount: order.grossAmount,
+        point_discount_amount: order.pointDiscountAmount,
+        final_amount: order.finalAmount,
+        status: order.status,
+      }))
+      : [],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // GET /customer — Intake form (faithful port of original FastAPI template)
 // ---------------------------------------------------------------------------
-customer.get("/customer", (c) => {
-  const lang = normalizeLang(c.req.query("lang"));
+customer.get("/customer", async (c) => {
   const error = c.req.query("error") || "";
+  const customerCtx = await loadCustomerContext(c);
+  const lang = resolveCustomerPageLang(c.req.query("lang"), customerCtx);
+  const customerIdentityDefaults = {
+    email: cleanIdentityValue(customerCtx.profile?.email) || cleanIdentityValue(customerCtx.session?.email),
+    name: cleanIdentityValue(customerCtx.profile?.displayName) || cleanIdentityValue(customerCtx.session?.displayName),
+    phone: cleanIdentityValue(customerCtx.profile?.phone) || cleanIdentityValue(customerCtx.session?.phone),
+  };
 
   const MAX_BAG_QTY = 99;
   const MAX_COMPANION_COUNT = 99;
@@ -305,7 +457,7 @@ customer.get("/customer", (c) => {
   };
 
   const qtyOptions = Array.from({ length: 11 }, (_, i) => i);
-  const companionOptions = Array.from({ length: 10 }, (_, i) => i + 1);
+  const companionOptions = Array.from({ length: 11 }, (_, i) => i);
 
   const discountTable = [
     { days: "7 ~ 13", rate: "5%" },
@@ -746,6 +898,8 @@ form { margin-top: 16px; }
             <div class="error-banner">{decodeURIComponent(error)}</div>
           )}
 
+          {renderCustomerContextSection(customerCtx, lang)}
+
           <section class="card card-primary">
             <form
               id="customer-form"
@@ -768,25 +922,30 @@ form { margin-top: 16px; }
             >
               <input type="hidden" name="lang" value={lang} />
               <input id="expected_pickup_at" type="hidden" name="expected_pickup_at" />
+              {customerCtx.isAuthenticated && (
+                <input type="hidden" name="account_person_id_marker" value="1" />
+              )}
+              <input id="source_preset_order_id" type="hidden" name="source_preset_order_id" value="" />
+              <input id="points_to_use" type="hidden" name="points_to_use" value="0" />
 
               {/* name */}
               <label class="field">
                 <span class="field-label">{t("name", lang)} <span style="color:#dc2626">*</span></span>
-                <input class="control" type="text" name="name" required maxlength={120} autocomplete="off" placeholder={lang === "ja" ? "例: 田中太郎" : lang === "en" ? "e.g. John Smith" : "예: 홍길동"} />
+                <input class="control" type="text" name="name" value={customerIdentityDefaults.name} required maxlength={120} autocomplete="off" placeholder={lang === "ja" ? "例: 田中太郎" : lang === "en" ? "e.g. John Smith" : "예: 홍길동"} />
                 <span class="field-hint">{lang === "ja" ? "本名をフルネームで入力してください" : lang === "en" ? "Please enter your full name" : "한글 이름을 입력해주세요 (예: 홍길동)"}</span>
               </label>
 
               {/* phone */}
               <label class="field">
                 <span class="field-label">{lang === "ja" ? "電話番号" : lang === "en" ? "Phone Number" : "전화번호"} <span style="color:#dc2626">*</span></span>
-                <input class="control" type="tel" id="phone-input" name="phone" required maxlength={40} autocomplete="off" placeholder={lang === "ja" ? "例: 090-1234-5678" : lang === "en" ? "e.g. +1 234-567-8901" : "예: 010-1234-5678"} />
+                <input class="control" type="tel" id="phone-input" name="phone" value={customerIdentityDefaults.phone} required maxlength={40} autocomplete="off" placeholder={lang === "ja" ? "例: 090-1234-5678" : lang === "en" ? "e.g. +1 234-567-8901" : "예: 010-1234-5678"} />
                 <span class="field-hint">{lang === "ja" ? "日本国外の電話番号もOK（国番号付き）- が自動入力されます" : lang === "en" ? "International numbers OK — dashes added automatically" : "한국 전화번호도 괜찮아요 — 자동으로 - 가 입력됩니다"}</span>
               </label>
 
               {/* email */}
               <label class="field">
                 <span class="field-label">{lang === "ja" ? "メールアドレス" : lang === "en" ? "Email" : "이메일"} <span style="color:#dc2626">*</span></span>
-                <input class="control" type="email" name="email" required maxlength={120} autocomplete="email" placeholder="example@email.com" />
+                <input class="control" type="email" name="email" value={customerIdentityDefaults.email} required maxlength={120} autocomplete="email" placeholder="example@email.com" />
                 <span class="field-hint" style="color:#dc2626;font-weight:600">{lang === "ja" ? "⚠️ 受付完了メールが届きます — 正確に入力してください" : lang === "en" ? "⚠️ Confirmation email will be sent — please double-check" : "⚠️ 접수 완료 이메일이 발송됩니다 — 정확하게 입력해주세요"}</span>
               </label>
 
@@ -966,6 +1125,7 @@ form { margin-top: 16px; }
                     </div>
                     <span class="field-hint">{companionHint[lang] || companionHint.ko}</span>
                   </label>
+                  {renderPointsField(customerCtx, lang)}
                 </div>
               </div>
 
@@ -1153,6 +1313,7 @@ form { margin-top: 16px; }
   var idImageInputEl = document.getElementById("id_image");
   var luggageImageInputEl = document.getElementById("luggage_image");
   var paymentMethodEls = formEl ? Array.from(formEl.querySelectorAll('input[name="payment_method"]')) : [];
+  var sourcePresetOrderIdEl = document.getElementById("source_preset_order_id");
   if (!suitcaseEl || !backpackEl || !pickupDateEl || !pickupTimeEl || !pickupHiddenEl || !priceValueEl || !formEl) return;
 
   var messages = {
@@ -1383,16 +1544,99 @@ form { margin-top: 16px; }
     syncPickupHiddenValue();
     var sq = Number(suitcaseEl.value||0), bq = Number(backpackEl.value||0);
     var ep = pickupHiddenEl.value;
+    var pointsInputEl = document.getElementById("points_to_use_input");
+    var pointsHiddenEl = document.getElementById("points_to_use");
     if (!ep||(sq===0&&bq===0)) { priceValueEl.textContent="-"; setMeta(messages.metaEmpty); return; }
     try {
       var params = new URLSearchParams({suitcase_qty:String(sq),backpack_qty:String(bq),expected_pickup_at:ep});
+      if (pointsInputEl) {
+        var pVal = Math.max(0, Math.floor(Number(pointsInputEl.value)||0));
+        if (pVal > 0) params.set("points_to_use", String(pVal));
+      }
       var resp = await fetch("/api/price-preview?"+params.toString());
       var data = await resp.json();
       if (!resp.ok) { priceValueEl.textContent=messages.invalidTitle; setMeta(data.detail||messages.invalidMeta); return; }
       var ratePct = Math.round(data.discount_rate*100);
-      priceValueEl.textContent = "\\u00A5"+data.prepaid_amount.toLocaleString();
-      setMeta(formatMessage(messages.resultMeta,{price_per_day:"\\u00A5"+data.price_per_day.toLocaleString(),days:data.expected_storage_days,discount:ratePct}));
+      var finalAmount = (typeof data.final_amount === "number") ? data.final_amount : (typeof data.final_prepaid === "number" ? data.final_prepaid : data.prepaid_amount);
+      priceValueEl.textContent = "\\u00A5"+finalAmount.toLocaleString();
+      if (pointsInputEl && pointsHiddenEl && typeof data.points_to_use === "number") {
+        if (Number(pointsInputEl.value||0) !== data.points_to_use) pointsInputEl.value = String(data.points_to_use);
+        pointsHiddenEl.value = String(data.points_to_use);
+      }
+      var pointDiscount = (typeof data.point_discount_amount === "number") ? data.point_discount_amount : 0;
+      var baseMeta = formatMessage(messages.resultMeta,{price_per_day:"\\u00A5"+data.price_per_day.toLocaleString(),days:data.expected_storage_days,discount:ratePct});
+      if (pointDiscount > 0) {
+        baseMeta = baseMeta + " · -" + pointDiscount.toLocaleString() + "P";
+      }
+      setMeta(baseMeta);
     } catch(e) { priceValueEl.textContent=messages.errorTitle; setMeta(messages.errorMeta); }
+  }
+
+  function setSelectOrCustomQty(selectEl, customEl, hiddenEl, value) {
+    if (!selectEl || !customEl || !hiddenEl) return;
+    var options = Array.from(selectEl.options || []).map(function(o){ return o.value; });
+    var asStr = String(value);
+    if (options.indexOf(asStr) !== -1 && asStr !== "custom") {
+      selectEl.value = asStr;
+      customEl.classList.add("is-hidden");
+      customEl.value = "";
+    } else {
+      selectEl.value = "custom";
+      customEl.classList.remove("is-hidden");
+      customEl.value = asStr;
+    }
+    hiddenEl.value = asStr;
+  }
+
+  function initRecentHistoryButtons() {
+    var cards = Array.from(document.querySelectorAll("[data-history-payload]"));
+    cards.forEach(function(card){
+      var btn = card.querySelector("[data-apply-history]");
+      if (!btn) return;
+      btn.addEventListener("click", function(){
+        try {
+          var payload = JSON.parse(card.getAttribute("data-history-payload")||"{}");
+          window.applyRecentOrderPreset(payload);
+        } catch (e) { /* ignore */ }
+      });
+    });
+  }
+
+  window.applyRecentOrderPreset = function(payload) {
+    if (!payload) return;
+    var suit = Number(payload.suitcase_qty||0);
+    var back = Number(payload.backpack_qty||0);
+    var hasCompanionCount = Object.prototype.hasOwnProperty.call(payload, "companion_count");
+    var comp = hasCompanionCount ? Number(payload.companion_count) : 1;
+    if (!Number.isFinite(comp) || comp < 0) comp = 1;
+    setSelectOrCustomQty(suitcaseSelectEl, suitcaseCustomEl, suitcaseEl, suit);
+    setSelectOrCustomQty(backpackSelectEl, backpackCustomEl, backpackEl, back);
+    setSelectOrCustomQty(companionSelectEl, companionCustomEl, companionHiddenEl, comp);
+    if (payload.payment_method) {
+      var radio = formEl.querySelector('input[name="payment_method"][value="'+payload.payment_method+'"]');
+      if (radio) radio.checked = true;
+    }
+    if (sourcePresetOrderIdEl) sourcePresetOrderIdEl.value = String(payload.order_id || "");
+    refreshPreview();
+  };
+
+  function initPointsControls() {
+    var pointsInputEl = document.getElementById("points_to_use_input");
+    var pointsHiddenEl = document.getElementById("points_to_use");
+    var useAllBtn = document.getElementById("points_use_all_btn");
+    if (!pointsInputEl || !pointsHiddenEl) return;
+    function sync() {
+      pointsHiddenEl.value = String(Math.max(0, Math.floor(Number(pointsInputEl.value)||0)));
+    }
+    pointsInputEl.addEventListener("input", sync);
+    pointsInputEl.addEventListener("change", function(){ sync(); refreshPreview(); });
+    if (useAllBtn) {
+      useAllBtn.addEventListener("click", function(){
+        pointsInputEl.value = String(pointsInputEl.max||0);
+        sync();
+        refreshPreview();
+      });
+    }
   }
 
   /* init */
@@ -1411,6 +1655,8 @@ form { margin-top: 16px; }
   initCompanionPicker();
   initBagQuantityPickers();
   initFilePickers();
+  initRecentHistoryButtons();
+  initPointsControls();
 
   /* phone auto-format with dashes */
   var phoneInput=document.getElementById('phone-input');
@@ -1554,6 +1800,19 @@ form { margin-top: 16px; }
   );
 });
 
+function resolveCustomerPageLang(rawQueryLang: string | null | undefined, customerCtx: CustomerContext): Lang {
+  return normalizeOptionalCustomerLang(rawQueryLang)
+    ?? normalizeOptionalCustomerLang(customerCtx.profile?.locale)
+    ?? normalizeOptionalCustomerLang(customerCtx.session?.locale)
+    ?? DEFAULT_LANG;
+}
+
+function normalizeOptionalCustomerLang(raw: string | null | undefined): Lang | null {
+  if (!raw) return null;
+  const language = raw.trim().toLowerCase().replace("_", "-").split("-")[0];
+  return SUPPORTED_LANGS.includes(language as Lang) ? language as Lang : null;
+}
+
 // ---------------------------------------------------------------------------
 // POST /customer/submit — Process form
 // ---------------------------------------------------------------------------
@@ -1561,13 +1820,32 @@ customer.post("/customer/submit", async (c) => {
   const body = await c.req.parseBody();
   const lang = normalizeLang(String(body.lang || ""));
 
+  const noStoreRedirect = (location: string) => {
+    c.header("Cache-Control", "no-store");
+    c.header("Pragma", "no-cache");
+    c.header("Expires", "0");
+    return c.redirect(location);
+  };
   const redirect = (msg: string) =>
-    c.redirect(`/customer?error=${encodeURIComponent(msg)}&lang=${lang}`);
+    noStoreRedirect(`/customer?error=${encodeURIComponent(msg)}&lang=${lang}`);
 
-  // --- Field extraction ---
-  const name = String(body.name || "").trim();
-  const phone = String(body.phone || "").trim();
-  const email = String(body.email || "").trim();
+  // --- Load authenticated customer context (null for guests) ---
+  const customerCtx = await loadCustomerContext(c);
+
+  // --- Field extraction (profile overrides body values for authenticated users) ---
+  const identity = resolveCustomerIntakeIdentity({
+    session: customerCtx.session,
+    formName: String(body.name || ""),
+    formPhone: String(body.phone || ""),
+    formEmail: String(body.email || ""),
+  });
+  const accountPersonId = identity.accountPersonId;
+  let { name, phone, email } = identity;
+  if (customerCtx.isAuthenticated && customerCtx.profile) {
+    if (customerCtx.profile.displayName) name = customerCtx.profile.displayName;
+    if (customerCtx.profile.phone) phone = customerCtx.profile.phone;
+    if (customerCtx.profile.email) email = customerCtx.profile.email;
+  }
   const rawPayment = String(body.payment_method || "").trim().toUpperCase();
   const paymentMethod = ["CASH", "PAY_QR"].includes(rawPayment) ? rawPayment : "CASH";
   const companionCount = parseInt(String(body.companion_count || "0"), 10) || 0;
@@ -1576,6 +1854,8 @@ customer.post("/customer/submit", async (c) => {
   const expectedPickupAt = String(body.expected_pickup_at || "").trim();
   const flyingPassTier = normalizeFlyingPassTier(String(body.flying_pass_tier || ""));
   const consentChecked = String(body.consent_checked || "") === "1";
+  const sourcePresetOrderIdRaw = String(body.source_preset_order_id || "").trim();
+  const requestedPoints = Math.max(0, parseInt(String(body.points_to_use || "0"), 10) || 0);
   const idImageFile = body.id_image;
   const luggageImageFile = body.luggage_image;
   const isUploadedImageFile = (value: unknown): value is File =>
@@ -1592,6 +1872,13 @@ customer.post("/customer/submit", async (c) => {
   if (!isUploadedImageFile(idImageFile)) return redirect(t("required", lang) + ": " + t("id_image", lang));
   if (!isUploadedImageFile(luggageImageFile)) return redirect(t("required", lang) + ": " + t("luggage_image", lang));
   if (!consentChecked) return redirect(t("consent_label", lang));
+
+  const sourcePresetOrderId = accountPersonId && sourcePresetOrderIdRaw
+    ? await verifyOwnedSourcePresetOrder(c.env.DB, accountPersonId, sourcePresetOrderIdRaw)
+    : null;
+  if (sourcePresetOrderIdRaw && accountPersonId && !sourcePresetOrderId) {
+    return redirect(t("error", lang));
+  }
 
   // Form sends JST time as "YYYY-MM-DDTHH:MM" — append +09:00 so JS treats it as JST
   const pickupDateStr = expectedPickupAt.includes("+") || expectedPickupAt.includes("Z")
@@ -1611,6 +1898,10 @@ customer.post("/customer/submit", async (c) => {
   // Uses null orderId for key generation since orderId doesn't exist yet.
   let idImageUrl: string | null = null;
   let luggageImageUrl: string | null = null;
+  const cleanupUploadedImages = async () => {
+    if (idImageUrl) try { await c.env.IMAGES.delete(idImageUrl); } catch { /* best-effort */ }
+    if (luggageImageUrl) try { await c.env.IMAGES.delete(luggageImageUrl); } catch { /* best-effort */ }
+  };
 
   try {
     const idValidation = validateImageUpload(idImageFile.size, idImageFile.type);
@@ -1672,47 +1963,88 @@ customer.post("/customer/submit", async (c) => {
   const passDiscount = flyingPassDiscountAmount(prepaidAmount, flyingPassTier);
   const finalPrepaid = Math.max(0, prepaidAmount - passDiscount);
 
-  // --- Insert order (clean up R2 on failure) ---
+  // --- Point usage (authenticated only; server-side validation wins) ---
+  const pointUsage = resolvePointUsage({
+    isAuthenticated: !!accountPersonId,
+    requestedPoints,
+    balancePoints: customerCtx.pointBalance,
+    payableAmount: finalPrepaid,
+    minimumUnit: POINT_MINIMUM_USE_UNIT,
+  });
+  if (!pointUsage.ok) return redirect(pointUsageErrorMessage(pointUsage.error, lang));
+  const pointsEarned = 0;
+  const finalAmount = pointUsage.amountAfterPoints;
+  const hasPointUsage = !!accountPersonId && pointUsage.pointsToUse > 0;
+
+  // --- Insert order and reserve point usage in one D1 batch ---
   try {
-    await c.env.DB.prepare(
-      `INSERT INTO luggage_orders (
+    const orderColumns = `(
         order_id, tag_no, name, phone, email, payment_method, companion_count,
         suitcase_qty, backpack_qty, set_qty,
         expected_pickup_at, expected_storage_days,
-        price_per_day, discount_rate, prepaid_amount,
-        flying_pass_tier, flying_pass_discount_amount, final_amount,
+        price_per_day, discount_rate,
+        gross_amount, prepaid_amount,
+        flying_pass_tier, flying_pass_discount_amount,
+        point_discount_amount, points_used, points_earned, point_usage_status,
+        final_amount,
         id_image_url, luggage_image_url,
+        account_person_id, source_preset_order_id,
         consent_checked, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING')`
-    )
-      .bind(
+      )`;
+    const orderPlaceholders = `${Array.from({ length: 28 }, () => "?").join(", ")}, 'PAYMENT_PENDING'`;
+    const orderInsertSql = hasPointUsage
+      ? `INSERT INTO luggage_orders ${orderColumns} SELECT ${orderPlaceholders} WHERE changes() = 1`
+      : `INSERT INTO luggage_orders ${orderColumns} VALUES (${orderPlaceholders})`;
+    const orderInsertStatement = c.env.DB.prepare(orderInsertSql).bind(
+      orderId,
+      tagNo,
+      name,
+      phone,
+      email,
+      paymentMethod,
+      companionCount,
+      suitcaseQty,
+      backpackQty,
+      setQty,
+      pickupDate.toISOString(),
+      storageDays,
+      pricePerDay,
+      discountRate,
+      finalPrepaid, // gross_amount = post-pass, pre-points payable
+      prepaidAmount,
+      flyingPassTier,
+      passDiscount,
+      pointUsage.pointDiscountAmount,
+      pointUsage.pointsToUse,
+      pointsEarned,
+      pointUsage.pointUsageStatus,
+      finalAmount,
+      idImageUrl,
+      luggageImageUrl,
+      accountPersonId,
+      sourcePresetOrderId,
+      1
+    );
+    const ledgerStatements = hasPointUsage
+      ? buildPointUsageLedgerStatements(c.env.DB, {
+        accountPersonId: accountPersonId!,
         orderId,
-        tagNo,
-        name,
-        phone,
-        email,
-        paymentMethod,
-        companionCount,
-        suitcaseQty,
-        backpackQty,
-        setQty,
-        pickupDate.toISOString(),
-        storageDays,
-        pricePerDay,
-        discountRate,
-        prepaidAmount,
-        flyingPassTier,
-        passDiscount,
-        finalPrepaid,
-        idImageUrl,
-        luggageImageUrl,
-        1
-      )
-      .run();
+        pointsUsed: pointUsage.pointsToUse,
+      })
+      : [];
+    // Order matters: ledgerStatements are [INSERT-tx, balance-UPDATE], and both
+    // the UPDATE and orderInsertStatement chain on `changes() = 1` from the
+    // statement before them. Keep the order INSERT last and never interleave —
+    // see buildPointUsageLedgerStatements for the full invariant.
+    const batchResults = await c.env.DB.batch([...ledgerStatements, orderInsertStatement]);
+    const orderResult = batchResults[batchResults.length - 1];
+    if ((orderResult.meta?.changes ?? 0) !== 1) {
+      await cleanupUploadedImages();
+      return redirect(pointUsageErrorMessage("POINTS_EXCEED_BALANCE", lang));
+    }
   } catch (e) {
     // Clean up orphaned R2 objects
-    if (idImageUrl) try { await c.env.IMAGES.delete(idImageUrl); } catch { /* best-effort */ }
-    if (luggageImageUrl) try { await c.env.IMAGES.delete(luggageImageUrl); } catch { /* best-effort */ }
+    await cleanupUploadedImages();
     console.error("Order insert failed:", e);
     captureOperationalError(e, {
       operation: "customer.submit.insert_order",
@@ -1733,6 +2065,16 @@ customer.post("/customer/submit", async (c) => {
     return redirect(t("upload_error", lang));
   }
 
+  if (accountPersonId) {
+    await cacheSignedCustomerProfile(c.env.DB, {
+      accountPersonId,
+      displayName: name,
+      email,
+      locale: lang,
+      phone,
+    }).catch((err) => console.error("Customer profile cache update failed:", err));
+  }
+
   // Send confirmation email (best-effort, keep worker alive via waitUntil)
   if (email && c.env.BREVO_API_KEY) {
     c.executionCtx.waitUntil(
@@ -1740,14 +2082,14 @@ customer.post("/customer/submit", async (c) => {
         orderId, name, email, phone,
         suitcaseQty, backpackQty,
         expectedPickupAt, expectedStorageDays: storageDays,
-        finalAmount: finalPrepaid, lang,
+        finalAmount, lang,
       }).catch((err) => {
         console.error("Email send failed:", err);
         captureOperationalError(err, {
           level: "warning",
           operation: "customer.submit.send_confirmation_email",
           tags: { external_service: "brevo", lang },
-          context: { orderId, tagNo, finalPrepaid },
+          context: { orderId, tagNo, finalAmount },
           fingerprint: ["customer.submit.send_confirmation_email"],
         });
       })
@@ -1759,8 +2101,40 @@ customer.post("/customer/submit", async (c) => {
   const viewToken = btoa(String.fromCharCode(...rawToken)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
   await c.env.DB.prepare("UPDATE luggage_orders SET view_token = ?, updated_at = datetime('now') WHERE order_id = ?").bind(viewToken, orderId).run();
 
-  return c.redirect(`/customer/orders/${orderId}?lang=${lang}&token=${viewToken}`);
+  return noStoreRedirect(`/customer/orders/${orderId}?lang=${lang}&token=${viewToken}`);
 });
+
+async function cacheSignedCustomerProfile(
+  db: D1Database,
+  input: {
+    accountPersonId: string;
+    displayName: string;
+    phone: string;
+    email: string;
+    locale: Lang;
+  },
+): Promise<void> {
+  await db.prepare(
+    // Caches contact info + locale only. Must NOT touch identity_verified_at —
+    // that is a distinct verification signal owned by its own transition, and
+    // stamping it here would falsely mark every order submitter as verified.
+    `INSERT INTO luggage_customer_profiles (
+       account_person_id, display_name, phone, email, locale, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+     ON CONFLICT(account_person_id) DO UPDATE SET
+       display_name = excluded.display_name,
+       phone = excluded.phone,
+       email = excluded.email,
+       locale = excluded.locale,
+       updated_at = datetime('now')`
+  ).bind(
+    input.accountPersonId,
+    input.displayName,
+    input.phone,
+    input.email,
+    input.locale,
+  ).run();
+}
 
 // ---------------------------------------------------------------------------
 // GET /customer/orders/:id — Success / order summary page
@@ -2270,13 +2644,24 @@ a { color: inherit; text-decoration: none; }
 });
 
 // ---------------------------------------------------------------------------
+// GET /customer/api/context — Safe signed-context smoke + preset API
+// ---------------------------------------------------------------------------
+customer.get("/customer/api/context", async (c) => {
+  const customerCtx = await loadCustomerContext(c);
+  c.header("Cache-Control", "no-store");
+  return c.json(buildCustomerContextApiPayload(customerCtx));
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/price-preview — Public JSON pricing API
 // ---------------------------------------------------------------------------
-customer.get("/api/price-preview", (c) => {
+customer.get("/api/price-preview", async (c) => {
+  c.header("Cache-Control", "no-store");
   const suitcaseQty = parseInt(c.req.query("suitcase_qty") || "0", 10) || 0;
   const backpackQty = parseInt(c.req.query("backpack_qty") || "0", 10) || 0;
   const expectedPickupAtRaw = c.req.query("expected_pickup_at") || "";
   const flyingPassTier = normalizeFlyingPassTier(c.req.query("flying_pass_tier"));
+  const requestedPoints = parseInt(c.req.query("points_to_use") || "0", 10) || 0;
 
   const pickupStr = expectedPickupAtRaw.includes("+") || expectedPickupAtRaw.includes("Z")
     ? expectedPickupAtRaw
@@ -2296,6 +2681,21 @@ customer.get("/api/price-preview", (c) => {
   const passDiscount = flyingPassDiscountAmount(prepaidAmount, flyingPassTier);
   const finalPrepaid = Math.max(0, prepaidAmount - passDiscount);
 
+  // Points usage is only applied when the request comes from an authenticated customer
+  // (server reloads the authoritative balance — client-supplied points are advisory).
+  const ctx = await loadCustomerContext(c);
+  let pointsToUse = 0;
+  if (ctx.isAuthenticated && requestedPoints > 0 && finalPrepaid > 0) {
+    const usage = calculatePointUsage({
+      requestedPoints,
+      balancePoints: ctx.pointBalance,
+      payableAmount: finalPrepaid,
+      minimumUnit: POINT_MINIMUM_USE_UNIT,
+    });
+    pointsToUse = usage.pointsToUse;
+  }
+  const finalAmount = Math.max(0, finalPrepaid - pointsToUse);
+
   return c.json({
     set_qty: setQty,
     price_per_day: pricePerDay,
@@ -2304,6 +2704,10 @@ customer.get("/api/price-preview", (c) => {
     prepaid_amount: prepaidAmount,
     flying_pass_discount_amount: passDiscount,
     final_prepaid: finalPrepaid,
+    points_to_use: pointsToUse,
+    point_discount_amount: pointsToUse,
+    final_amount: finalAmount,
+    point_balance: ctx.isAuthenticated ? ctx.pointBalance : 0,
   });
 });
 

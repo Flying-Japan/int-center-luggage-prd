@@ -15,6 +15,7 @@ import { captureOperationalError } from "../lib/observability";
 import { displayOrderStatus, displayPaymentMethod, displayFlyingPassTier } from "../lib/display";
 import { fmtJST } from "../lib/dateFormat";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
+import { applyPointEffectsForStatusChange } from "../services/points";
 import {
   normalizePaymentAllocation,
   payableAmountFromOrder,
@@ -347,13 +348,16 @@ staffOrders.post("/staff/orders/:id/mark-paid", editorAuth, async (c) => {
   const staff = getStaff(c);
 
   const order = await c.env.DB.prepare(
-    `SELECT order_id, date(created_at, '+9 hours') as business_date,
+    `SELECT order_id, status, account_person_id,
+            date(created_at, '+9 hours') as business_date,
             prepaid_amount, final_amount, extra_amount
      FROM luggage_orders WHERE order_id = ?`
   )
     .bind(orderId)
     .first<{
       order_id: string;
+      status: string;
+      account_person_id: string | null;
       business_date: string;
       prepaid_amount: number;
       final_amount: number | null;
@@ -370,6 +374,14 @@ staffOrders.post("/staff/orders/:id/mark-paid", editorAuth, async (c) => {
       "UPDATE luggage_orders SET status = 'PAID', payment_method = ?, updated_at = datetime('now') WHERE order_id = ?"
     ).bind(allocation.paymentMethod, orderId),
   ]);
+
+  await applyPointEffectsForStatusChange(c.env.DB, {
+    accountPersonId: order.account_person_id,
+    orderId,
+    fromStatus: order.status,
+    toStatus: "PAID",
+    paidAmount: payableAmountFromOrder(order),
+  });
 
   await insertAuditLog(c.env.DB, orderId, staff.id, "MARK_PAID", paymentAllocationDetails(allocation));
 
