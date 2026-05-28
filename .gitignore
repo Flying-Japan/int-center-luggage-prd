@@ -30,3 +30,8 @@ __pycache__/
 
 # Supabase CLI local state
 supabase/.temp/
+
+# Service-account keys / credentials — never commit. Load via wrangler secret / 1Password.
+secrets/
+*.service-account.json
+*.serviceaccount.json

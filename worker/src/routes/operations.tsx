@@ -2192,6 +2192,17 @@ ops.get("/staff/schedule", async (c) => {
   ).first<{ setting_value: string }>();
 
   const staff = getStaff(c);
+  const rawCalendarUrl = calendarUrl?.setting_value ?? "";
+  const allowedCalendarHosts = ["calendar.google.com", "docs.google.com"];
+  let calendarSrc = "";
+  try {
+    const parsed = new URL(rawCalendarUrl);
+    if (parsed.protocol === "https:" && allowedCalendarHosts.includes(parsed.hostname)) {
+      calendarSrc = parsed.toString();
+    }
+  } catch {
+    calendarSrc = "";
+  }
   return c.html(
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>근무 스케줄</title></head>
@@ -2200,10 +2211,10 @@ ops.get("/staff/schedule", async (c) => {
         <main class="container">
         <section class="hero"><div><p class="hero-kicker">Operations</p><h2 class="hero-title">근무 스케줄</h2></div></section>
         <section class="card" style="padding:16px">
-        {calendarUrl?.setting_value ? (
+        {calendarSrc ? (
           <>
-            <iframe src={calendarUrl.setting_value} style="width:100%;height:600px;border:none" />
-            <p style="margin-top:8px"><a href={calendarUrl.setting_value} target="_blank" style="color:var(--primary)">새 창에서 열기 ↗</a></p>
+            <iframe src={calendarSrc} style="width:100%;height:600px;border:none" />
+            <p style="margin-top:8px"><a href={calendarSrc} target="_blank" rel="noopener noreferrer" style="color:var(--primary)">새 창에서 열기 ↗</a></p>
           </>
         ) : (
           <p class="muted">캘린더 URL이 설정되지 않았습니다. 관리자에게 문의하세요.</p>
