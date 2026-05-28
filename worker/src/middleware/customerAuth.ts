@@ -1,6 +1,7 @@
 import { getCookie } from "hono/cookie";
 import { type Context, type Next } from "hono";
 import type { AppType } from "../types";
+import { constantTimeEqual } from "../lib/hmac";
 
 const HEADER_PREFIX = "x-flying-account-";
 export const ACCOUNT_CONTEXT_COOKIE = "fj_account_context";
@@ -57,7 +58,7 @@ export async function optionalCustomerAuth(c: Context<AppType>, next: Next) {
   }
 
   const expected = await signAccountContext(secret, parsed.context);
-  if (!timingSafeEqual(parsed.signature, expected)) {
+  if (!constantTimeEqual(parsed.signature, expected)) {
     return c.json({ error: "Invalid account context signature" }, 401);
   }
 
@@ -179,17 +180,6 @@ function resolveMaxAgeSeconds(value: string | undefined): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MAX_AGE_SECONDS;
   return Math.floor(parsed);
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  const left = textEncoder.encode(a);
-  const right = textEncoder.encode(b);
-  if (left.length !== right.length) return false;
-  let diff = 0;
-  for (let i = 0; i < left.length; i += 1) {
-    diff |= left[i] ^ right[i];
-  }
-  return diff === 0;
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {

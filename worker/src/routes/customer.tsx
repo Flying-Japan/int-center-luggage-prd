@@ -2025,6 +2025,10 @@ customer.post("/customer/submit", async (c) => {
         pointsUsed: pointUsage.pointsToUse,
       })
       : [];
+    // Order matters: ledgerStatements are [INSERT-tx, balance-UPDATE], and both
+    // the UPDATE and orderInsertStatement chain on `changes() = 1` from the
+    // statement before them. Keep the order INSERT last and never interleave —
+    // see buildPointUsageLedgerStatements for the full invariant.
     const batchResults = await c.env.DB.batch([...ledgerStatements, orderInsertStatement]);
     const orderResult = batchResults[batchResults.length - 1];
     if ((orderResult.meta?.changes ?? 0) !== 1) {
@@ -2104,15 +2108,17 @@ async function cacheSignedCustomerProfile(
   },
 ): Promise<void> {
   await db.prepare(
+    // Caches contact info + locale only. Must NOT touch identity_verified_at —
+    // that is a distinct verification signal owned by its own transition, and
+    // stamping it here would falsely mark every order submitter as verified.
     `INSERT INTO luggage_customer_profiles (
-       account_person_id, display_name, phone, email, locale, identity_verified_at, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'), datetime('now'))
+       account_person_id, display_name, phone, email, locale, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
      ON CONFLICT(account_person_id) DO UPDATE SET
        display_name = excluded.display_name,
        phone = excluded.phone,
        email = excluded.email,
        locale = excluded.locale,
-       identity_verified_at = excluded.identity_verified_at,
        updated_at = datetime('now')`
   ).bind(
     input.accountPersonId,

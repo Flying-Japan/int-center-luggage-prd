@@ -103,6 +103,16 @@ export function buildPointUsageLedgerStatements(
       input.accountPersonId,
       points,
     ),
+    // LOAD-BEARING INVARIANT: this UPDATE's `changes() = 1` guard refers to the
+    // row count of the immediately preceding INSERT OR IGNORE in the same batch.
+    // It deducts the balance only when a NEW reservation row was inserted, which
+    // is what makes duplicate submits (same idempotency_key → INSERT ignored →
+    // changes() = 0) skip the deduction. D1 `batch()` executes statements
+    // "sequentially, non-concurrently" in one transaction, so changes() reflects
+    // the prior statement. DO NOT reorder these two statements or insert any
+    // statement between them — and the order INSERT that follows in the batch
+    // likewise chains on `changes() = 1`. Breaking the order silently double-
+    // deducts or stops deducting. See customer.tsx submit batch assembly.
     db.prepare(
       `UPDATE luggage_customer_point_accounts
        SET balance_points = balance_points - ?,
