@@ -1527,6 +1527,11 @@ ops.get("/staff/experience", async (c) => {
                               <button class="btn btn-sm btn-secondary" type="submit" style="font-size:10px">취소</button>
                             </form>
                           )}
+                          {(staff.role === "admin" || staff.role === "editor") && (
+                            <form method="post" action={`/staff/handover/experience/${v.visit_id}/delete`} style="display:inline;margin-left:2px" onsubmit="return confirm('이 체험단 명단을 삭제하시겠습니까? 되돌릴 수 없습니다.')">
+                              <button class="btn btn-sm" type="submit" style="font-size:10px;background:#dc2626;border-color:#dc2626;color:#fff">삭제</button>
+                            </form>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1988,6 +1993,19 @@ ops.post("/staff/handover/experience/:id/update", async (c) => {
     visitId
   ).run();
 
+  return c.redirect("/staff/experience");
+});
+
+// POST /staff/handover/experience/:id/delete — Delete experience visit (editor/admin only)
+ops.post("/staff/handover/experience/:id/delete", async (c) => {
+  const staff = getStaff(c);
+  if (staff.role !== "admin" && staff.role !== "editor") {
+    return c.redirect("/staff/experience");
+  }
+  const visitId = c.req.param("id");
+  await c.env.DB.prepare(
+    "DELETE FROM luggage_experience_visits WHERE visit_id = ?"
+  ).bind(visitId).run();
   return c.redirect("/staff/experience");
 });
 
