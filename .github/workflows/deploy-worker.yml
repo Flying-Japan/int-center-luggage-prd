@@ -44,3 +44,12 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Re-sync canonical /static/* promo images to production R2 so they
+      # self-heal on every deploy. These are served from R2 (not bundled) and
+      # are NOT auto-expired (only id/ and luggage/ customer PII expire at 14d).
+      - name: Sync static assets to R2
+        run: pnpm run r2:push:static
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

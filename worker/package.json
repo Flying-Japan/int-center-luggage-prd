@@ -11,7 +11,8 @@
     "backfill:daily-sales": "node scripts/backfill-daily-sales-from-sheet.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit && node scripts/check-customer-assets.mjs",
-    "check:customer-assets": "node scripts/check-customer-assets.mjs"
+    "check:customer-assets": "node scripts/check-customer-assets.mjs",
+    "r2:push:static": "node scripts/sync-r2-static.mjs"
   },
   "dependencies": {
     "@sentry/cloudflare": "^10.54.0",
