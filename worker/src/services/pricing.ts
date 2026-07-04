@@ -22,10 +22,10 @@ export type FlyingPassTier = (typeof FLYING_PASS_TIERS)[number];
 
 const FLYING_PASS_FIXED_DISCOUNTS: Record<FlyingPassTier, number> = {
   NONE: 0,
-  BLUE: 100,
-  SILVER: 200,
-  GOLD: 300,
-  PLATINUM: 400,
+  BLUE: 200,
+  SILVER: 300,
+  GOLD: 400,
+  PLATINUM: 500,
   BLACK: 0, // BLACK = 100% free (handled separately)
 };
 
@@ -92,7 +92,6 @@ export function normalizeFlyingPassTier(raw: string | null | undefined, defaultT
  */
 export function flyingPassDiscountAmount(basePrepaid: number, tier: FlyingPassTier): number {
   if (tier === "BLACK") return basePrepaid; // 100% free
-  if (tier === "NONE") return 0;
   return FLYING_PASS_FIXED_DISCOUNTS[tier] || 0;
 }
 
@@ -123,4 +122,3 @@ export function calculateExtraAmount(pricePerDay: number, extraDays: number): nu
   if (extraDays <= 0) return 0;
   return pricePerDay * extraDays;
 }
-
