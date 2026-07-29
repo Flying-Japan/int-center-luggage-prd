@@ -60,6 +60,131 @@ function serializeVisit(row: Record<string, unknown> | null): ExperienceVisitDto
   };
 }
 
+type LuggageOrderDto = {
+  orderId: string;
+  createdAt: string;
+  updatedAt: string;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  suitcaseQty: number;
+  backpackQty: number;
+  setQty: number;
+  expectedPickupAt: string | null;
+  actualPickupAt: string | null;
+  expectedStorageDays: number;
+  actualStorageDays: number;
+  prepaidAmount: number;
+  finalAmount: number;
+  extraAmount: number;
+  paymentMethod: string | null;
+  status: string;
+  tagNo: string | null;
+  note: string | null;
+  manualEntry: number;
+  parentOrderId: string | null;
+  inWarehouse: number;
+  flyingPassTier: string;
+  paymentCashAmount: number;
+  paymentQrAmount: number;
+};
+
+function parsePaginationQuery(value: string | undefined, fallback: number, maximum?: number): number {
+  if (!value || !/^\d+$/.test(value)) return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) return fallback;
+  return maximum === undefined ? parsed : Math.min(parsed, maximum);
+}
+
+function parseJstDateQuery(value: string | undefined): string | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value) ? value : null;
+}
+
+// GET /internal/luggage-orders — Read-only order list for the integrated admin.
+internalApi.get("/internal/luggage-orders", async (c) => {
+  const status = c.req.query("status");
+  const search = c.req.query("search");
+  const dateFrom = parseJstDateQuery(c.req.query("dateFrom"));
+  const dateTo = parseJstDateQuery(c.req.query("dateTo"));
+  const limit = parsePaginationQuery(c.req.query("limit"), 100, 500);
+  const offset = parsePaginationQuery(c.req.query("offset"), 0);
+  const clauses: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (status) {
+    clauses.push("o.status = ?");
+    params.push(status);
+  }
+  if (search) {
+    clauses.push("(o.order_id LIKE ? OR o.name LIKE ? OR o.phone LIKE ? OR o.tag_no LIKE ?)");
+    const pattern = `%${search}%`;
+    params.push(pattern, pattern, pattern, pattern);
+  }
+  // created_at is stored in UTC; SQLite applies +9 hours before comparing its
+  // calendar date so dateFrom/dateTo consistently mean JST dates.
+  if (dateFrom) {
+    clauses.push("date(o.created_at, '+9 hours') >= ?");
+    params.push(dateFrom);
+  }
+  if (dateTo) {
+    clauses.push("date(o.created_at, '+9 hours') <= ?");
+    params.push(dateTo);
+  }
+
+  const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
+  const payments = `
+    SELECT order_id,
+           COALESCE(SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END), 0) AS paymentCashAmount,
+           COALESCE(SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END), 0) AS paymentQrAmount
+    FROM luggage_order_payments
+    GROUP BY order_id
+  `;
+  const result = await c.env.DB.prepare(
+    `SELECT o.order_id AS orderId,
+            o.created_at AS createdAt,
+            o.updated_at AS updatedAt,
+            o.name AS name,
+            o.phone AS phone,
+            o.email AS email,
+            o.suitcase_qty AS suitcaseQty,
+            o.backpack_qty AS backpackQty,
+            o.set_qty AS setQty,
+            o.expected_pickup_at AS expectedPickupAt,
+            o.actual_pickup_at AS actualPickupAt,
+            o.expected_storage_days AS expectedStorageDays,
+            o.actual_storage_days AS actualStorageDays,
+            o.prepaid_amount AS prepaidAmount,
+            o.final_amount AS finalAmount,
+            o.extra_amount AS extraAmount,
+            o.payment_method AS paymentMethod,
+            o.status AS status,
+            o.tag_no AS tagNo,
+            o.note AS note,
+            o.manual_entry AS manualEntry,
+            o.parent_order_id AS parentOrderId,
+            o.in_warehouse AS inWarehouse,
+            o.flying_pass_tier AS flyingPassTier,
+            COALESCE(p.paymentCashAmount, 0) AS paymentCashAmount,
+            COALESCE(p.paymentQrAmount, 0) AS paymentQrAmount
+     FROM luggage_orders o
+     LEFT JOIN (${payments}) p ON p.order_id = o.order_id${where}
+     ORDER BY o.created_at DESC, o.order_id DESC
+     LIMIT ? OFFSET ?`,
+  ).bind(...params, limit, offset).all<LuggageOrderDto>();
+  const countResult = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS total FROM luggage_orders o${where}`,
+  ).bind(...params).first<{ total: number }>();
+
+  return c.json({
+    orders: result.results,
+    total: countResult?.total ?? 0,
+    limit,
+    offset,
+  });
+});
+
 type ExperienceUpsertPayload = {
   benefitAmount?: unknown;
   benefitLabel?: unknown;
