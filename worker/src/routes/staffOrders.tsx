@@ -15,6 +15,7 @@ import { captureOperationalError } from "../lib/observability";
 import { displayOrderStatus, displayPaymentMethod, displayFlyingPassTier } from "../lib/display";
 import { fmtJST } from "../lib/dateFormat";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
+import { constantTimeEqual, hmacSha256Hex } from "../lib/hmac";
 import {
   normalizePaymentAllocation,
   payableAmountFromOrder,
@@ -98,6 +99,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
 
   const staff = getStaff(c);
   const error = c.req.query("error") || "";
+  const manualCreated = order.manual_entry === 1 && c.req.query("manual_created") === orderId;
 
   const fmtDatetimeLocal = (iso: string | null) => {
     if (!iso) return "";
@@ -334,6 +336,14 @@ staffOrders.get("/staff/orders/:id", async (c) => {
           </section>
         </main>
         <NewOrderAlert />
+        {manualCreated && (
+          <script dangerouslySetInnerHTML={{ __html: `
+            try{sessionStorage.removeItem('luggageStaffManualOrderDraftV1')}catch(e){}
+            var manualCreatedUrl=new URL(window.location.href);
+            manualCreatedUrl.searchParams.delete('manual_created');
+            history.replaceState(null,'',manualCreatedUrl.pathname+manualCreatedUrl.search+manualCreatedUrl.hash);
+          ` }} />
+        )}
       </body>
     </html>
   );
@@ -536,6 +546,20 @@ staffOrders.post("/staff/orders/:id/create-extension", editorAuth, async (c) => 
 staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
   const body = await c.req.parseBody();
   const staff = getStaff(c);
+  const serverNow = new Date();
+  const receivedAtRaw = String(body.received_at || "");
+  const receivedAtSignature = String(body.received_at_signature || "");
+  const receivedAtParsed = new Date(receivedAtRaw);
+  const expectedReceivedAtSignature = await hmacSha256Hex(
+    c.env.APP_SECRET_KEY,
+    `${receivedAtRaw}:${staff.id}`
+  );
+  const receivedAtIsValid =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(receivedAtRaw)
+    && !Number.isNaN(receivedAtParsed.getTime())
+    && receivedAtParsed.getTime() <= serverNow.getTime() + 5 * 60 * 1000
+    && constantTimeEqual(receivedAtSignature, expectedReceivedAtSignature);
+  const receivedAt = receivedAtIsValid ? receivedAtParsed : serverNow;
 
   const name = String(body.name || "").trim();
   const phone = String(body.phone || "").trim();
@@ -543,7 +567,12 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
   const backpackQty = Math.min(99, parseInt(String(body.backpack_qty || "0"), 10));
   const companionCount = parseInt(String(body.companion_count || "0"), 10);
   const flyingPassTier = normalizeFlyingPassTier(String(body.flying_pass_tier || ""));
-  const expectedPickupAt = String(body.expected_pickup_at || "");
+  const expectedPickupLocal = String(body.expected_pickup_at || "").trim();
+  let expectedPickupAt = "";
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(expectedPickupLocal)) {
+    const parsedPickup = new Date(expectedPickupLocal + ":00+09:00");
+    if (!Number.isNaN(parsedPickup.getTime())) expectedPickupAt = parsedPickup.toISOString();
+  }
   const rawNote = String(body.note || "").trim();
 
   // Free reason: 지인 접수, 블로거 방문, 쿠폰, 기타
@@ -562,18 +591,24 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
   // Check if pickup is next day or later → overnight counter (96+)
   let isOvernight = false;
   if (expectedPickupAt) {
-    const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
-    const pickupD = new Date(expectedPickupAt.includes("+") || expectedPickupAt.includes("Z") ? expectedPickupAt : expectedPickupAt + ":00+09:00");
+    const nowJST = new Date(receivedAt.getTime() + 9 * 60 * 60 * 1000);
+    const pickupD = new Date(expectedPickupAt);
     const pickupJST = new Date(pickupD.getTime() + 9 * 60 * 60 * 1000);
     isOvernight = pickupJST.getUTCDate() !== nowJST.getUTCDate()
       || pickupJST.getUTCMonth() !== nowJST.getUTCMonth()
       || pickupJST.getUTCFullYear() !== nowJST.getUTCFullYear();
   }
-  const orderId = await buildOrderId(c.env.DB, undefined, isOvernight);
+  const receivedJST = new Date(receivedAt.getTime() + 9 * 60 * 60 * 1000);
+  const businessDate = [
+    receivedJST.getUTCFullYear(),
+    String(receivedJST.getUTCMonth() + 1).padStart(2, "0"),
+    String(receivedJST.getUTCDate()).padStart(2, "0"),
+  ].join("");
+  const orderId = await buildOrderId(c.env.DB, receivedAt, isOvernight);
   // Tag assignment: overnight → 91+ sequential, same-day → Phase 1/2 (1-90)
   const tagNo = isOvernight
-    ? await buildOvernightTag(c.env.DB)
-    : await buildSameDayTag(c.env.DB);
+    ? await buildOvernightTag(c.env.DB, businessDate)
+    : await buildSameDayTag(c.env.DB, businessDate);
   if (tagNo === null) {
     return c.redirect("/staff/dashboard?error=당일 태그(1-90) 모두 사용 중입니다");
   }
@@ -581,7 +616,7 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
 
   let expectedStorageDays = 1;
   if (expectedPickupAt) {
-    expectedStorageDays = calculateStorageDays(new Date().toISOString(), expectedPickupAt);
+    expectedStorageDays = calculateStorageDays(receivedAt, expectedPickupAt);
   }
 
   const { discountRate, prepaidAmount: rawPrepaid } = calculatePrepaidAmount(pricePerDay, expectedStorageDays);
@@ -626,7 +661,7 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
 
   await insertAuditLog(c.env.DB, orderId, staff.id, "MANUAL_CREATE");
 
-  return c.redirect(`/staff/orders/${orderId}`);
+  return c.redirect(`/staff/orders/${orderId}?manual_created=${encodeURIComponent(orderId)}`);
 });
 
 // GET /staff/orders/:id/id-image — Serve ID photo with audit logging

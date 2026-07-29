@@ -19,6 +19,7 @@ import { tagColorClass, TAG_COLOR_RANGES } from "./lib/tagColors";
 import { getDashboardSyncToken } from "./lib/dashboardSync";
 import { StaffTopbar, NewOrderAlert } from "./lib/components";
 import { fetchStaffNamesByIds } from "./lib/staffProfiles";
+import { hmacSha256Hex } from "./lib/hmac";
 
 const app = new Hono<AppType>();
 
@@ -207,6 +208,11 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
     if (extra) for (const [k, v] of Object.entries(extra)) u.set(k, v);
     return `/staff/dashboard?${u.toString()}`;
   };
+  const manualReceivedAt = new Date().toISOString();
+  const manualReceivedAtSignature = await hmacSha256Hex(
+    c.env.APP_SECRET_KEY,
+    `${manualReceivedAt}:${staff.id}`
+  );
 
   return c.html(
     <html lang="ko">
@@ -469,6 +475,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
           <details class="card" style="margin-top:16px">
             <summary class="card-title" style="cursor:pointer">수기 접수</summary>
             <form id="manual-form" action="/staff/orders/manual" method="post" class="grid2" style="margin-top:12px">
+              <input type="hidden" name="received_at" value={manualReceivedAt} />
+              <input type="hidden" name="received_at_signature" value={manualReceivedAtSignature} />
               <label class="field">
                 <span class="field-label">이름 *</span>
                 <input class="control" type="text" name="name" required />
@@ -479,11 +487,11 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               </label>
               <label class="field">
                 <span class="field-label">캐리어</span>
-                <input class="control" type="number" name="suitcase_qty" value="1" min="0" />
+                <input class="control" type="number" name="suitcase_qty" value="1" min="0" max="99" />
               </label>
               <label class="field">
                 <span class="field-label">백팩</span>
-                <input class="control" type="number" name="backpack_qty" value="0" min="0" />
+                <input class="control" type="number" name="backpack_qty" value="0" min="0" max="99" />
               </label>
               <label class="field">
                 <span class="field-label">예정 픽업 일시</span>
@@ -511,6 +519,11 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 <span class="field-label">비고</span>
                 <input class="control" type="text" name="note" placeholder="비고 (선택)" />
               </label>
+              <div style="grid-column:1/-1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;display:flex;flex-wrap:wrap;gap:16px;font-size:13px">
+                <span>예상 보관일수 <strong id="manual-storage-days">1일</strong></span>
+                <span>1일 요금 <strong id="manual-price-per-day">¥800</strong></span>
+                <span>예상 결제금액 <strong id="manual-prepaid-amount">¥800</strong></span>
+              </div>
               <label class="button-wrap">
                 <span class="field-label sr-only">접수</span>
                 <button class="btn btn-primary" type="submit">수기 접수</button>
@@ -556,7 +569,84 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
           (function(){
             // Free reason toggle for manual form
             var mf=document.getElementById('manual-form');
-            if(mf){var frt=document.getElementById('free-reason-text');mf.querySelectorAll('input[name=free_reason]').forEach(function(r){r.addEventListener('change',function(){frt.style.display=r.value==='기타'?'block':'none';if(r.value==='기타')frt.focus()})})}
+            var MANUAL_DRAFT_KEY='luggageStaffManualOrderDraftV1';
+            var manualDraftFields=['name','phone','suitcase_qty','backpack_qty','expected_pickup_at','free_reason_text','note'];
+            function manualFormValues(){
+              if(!mf) return null;
+              var values={};
+              manualDraftFields.forEach(function(name){var el=mf.elements.namedItem(name);values[name]=el?el.value:'';});
+              var freeReason=mf.querySelector('input[name=free_reason]:checked');
+              values.free_reason=freeReason?freeReason.value:'';
+              return values;
+            }
+            function saveManualDraft(e){
+              if(!mf||!e.target||!['name','phone','suitcase_qty','backpack_qty','expected_pickup_at','free_reason','free_reason_text','note'].includes(e.target.name)) return;
+              try{sessionStorage.setItem(MANUAL_DRAFT_KEY,JSON.stringify(manualFormValues()))}catch(err){}
+            }
+            function restoreManualDraft(){
+              if(!mf) return false;
+              try{
+                var raw=sessionStorage.getItem(MANUAL_DRAFT_KEY);
+                if(!raw) return false;
+                var draft=JSON.parse(raw);
+                if(!draft||typeof draft!=='object') return false;
+                manualDraftFields.forEach(function(name){
+                  if(typeof draft[name]==='string'){
+                    var el=mf.elements.namedItem(name);
+                    if(el) el.value=draft[name];
+                  }
+                });
+                if(typeof draft.free_reason==='string'){
+                  mf.querySelectorAll('input[name=free_reason]').forEach(function(r){r.checked=r.value===draft.free_reason;});
+                }
+                var details=mf.closest('details');
+                if(details) details.open=true;
+                return true;
+              }catch(err){return false;}
+            }
+            function updateManualEstimate(){
+              if(!mf) return;
+              var suitcase=Math.min(99,Math.max(0,parseInt(mf.elements.namedItem('suitcase_qty').value,10)||0));
+              var backpack=Math.min(99,Math.max(0,parseInt(mf.elements.namedItem('backpack_qty').value,10)||0));
+              var sets=Math.min(suitcase,backpack);
+              var pricePerDay=sets*1200+(suitcase-sets)*800+(backpack-sets)*500;
+              var storageDays=1;
+              var pickupValue=mf.elements.namedItem('expected_pickup_at').value;
+              var receivedValue=mf.elements.namedItem('received_at').value;
+              if(pickupValue){
+                var received=new Date(receivedValue);
+                var pickup=new Date(pickupValue+':00+09:00');
+                if(!isNaN(received.getTime())&&!isNaN(pickup.getTime())){
+                  var receivedJst=new Date(received.getTime()+9*60*60*1000);
+                  var pickupJst=new Date(pickup.getTime()+9*60*60*1000);
+                  var receivedDate=Date.UTC(receivedJst.getUTCFullYear(),receivedJst.getUTCMonth(),receivedJst.getUTCDate());
+                  var pickupDate=Date.UTC(pickupJst.getUTCFullYear(),pickupJst.getUTCMonth(),pickupJst.getUTCDate());
+                  storageDays=Math.max(1,Math.floor((pickupDate-receivedDate)/(24*60*60*1000))+1);
+                }
+              }
+              var discountRate=storageDays>=60?0.2:storageDays>=30?0.15:storageDays>=14?0.1:storageDays>=7?0.05:0;
+              var isFree=!!mf.querySelector('input[name=free_reason]:checked:not([value=""])');
+              var displayedDaily=isFree?0:pricePerDay;
+              var prepaid=isFree?0:Math.round(pricePerDay*storageDays*(1-discountRate));
+              document.getElementById('manual-storage-days').textContent=storageDays+'일';
+              document.getElementById('manual-price-per-day').textContent='¥'+displayedDaily.toLocaleString();
+              document.getElementById('manual-prepaid-amount').textContent='¥'+prepaid.toLocaleString();
+            }
+            if(mf){
+              var frt=document.getElementById('free-reason-text');
+              mf.querySelectorAll('input[name=free_reason]').forEach(function(r){r.addEventListener('change',function(){frt.style.display=r.value==='기타'?'block':'none';if(r.value==='기타')frt.focus();updateManualEstimate()})});
+              ['suitcase_qty','backpack_qty','expected_pickup_at'].forEach(function(name){mf.elements.namedItem(name).addEventListener('input',updateManualEstimate);});
+              restoreManualDraft();
+              var restoredFreeReason=mf.querySelector('input[name=free_reason]:checked');
+              frt.style.display=restoredFreeReason&&restoredFreeReason.value==='기타'?'block':'none';
+              updateManualEstimate();
+              mf.addEventListener('input',saveManualDraft);
+              mf.addEventListener('change',saveManualDraft);
+              mf.addEventListener('submit',function(){
+                var button=mf.querySelector('button[type=submit]');
+                if(button){button.disabled=true;button.textContent='접수 중...';}
+              });
+            }
 
             var dashboardSyncToken=${JSON.stringify(dashboardSyncToken)};
             var dashboardSyncBusy=false;
@@ -570,9 +660,12 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               if(document.querySelector('.price-popover')) return true;
               var ae=document.activeElement;
               if(!ae) return false;
-              if((ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT')&&(ae.closest('#manual-form')||ae.closest('#staff-search-form'))) return true;
+              if((ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT')&&ae.closest('#staff-search-form')) return true;
               return false;
             }
+            window.canReloadLuggageDashboard=function(){
+              return !hasTransientUiOpen();
+            };
 
             function pollDashboardSync(){
               if(dashboardSyncBusy||document.hidden) return;
@@ -581,7 +674,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 .then(function(r){return r.ok?r.json():null;})
                 .then(function(d){
                   if(!d||!d.token||d.token===dashboardSyncToken) return;
-                  if(hasTransientUiOpen()) return;
+                  if(!window.canReloadLuggageDashboard()) return;
                   window.location.reload();
                 })
                 .catch(function(){})
