@@ -11,6 +11,8 @@ internalApi.use("/internal/*", internalAuth);
 const EXPERIENCE_STATUSES = new Set(["SCHEDULED", "VISITED", "RECEIVED", "CANCELLED"]);
 const EXPERIENCE_VISITOR_TYPES = new Set(["BLOGGER", "INFLUENCER", "YOUTUBER", "OTHER"]);
 const EXPERIENCE_BENEFIT_TYPES = new Set(["GIFT_CARD", "CASH", "PRODUCT", "OTHER", "REVIEWER_EXPERIENCE"]);
+const LUGGAGE_NOTE_ACTOR_ROLES = new Set(["center_staff", "manager", "super_admin"]);
+const LUGGAGE_ORDER_ID_PATTERN = /^(?:EXT-)?\d{8}-\d{3,10}$/;
 
 // Stable response shape for callers. Prevents raw D1 columns from leaking
 // into the contract — future schema additions stay internal unless we
@@ -182,6 +184,139 @@ internalApi.get("/internal/luggage-orders", async (c) => {
     total: countResult?.total ?? 0,
     limit,
     offset,
+  });
+});
+
+type LuggageNoteActor = {
+  userId: string;
+  name: string;
+  email: string;
+  role: "center_staff" | "manager" | "super_admin";
+};
+
+type LuggageNoteUpdateDto = {
+  orderId: string;
+  note: string | null;
+  updatedAt: string;
+};
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: Set<string>): boolean {
+  return Object.keys(value).every((key) => allowedKeys.has(key));
+}
+
+function requiredActorText(value: unknown, field: string, maxLength: number): string {
+  if (typeof value !== "string") {
+    throw new Error(`actor.${field} is required`);
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error(`actor.${field} is required`);
+  }
+  if (normalized.length > maxLength) {
+    throw new Error(`actor.${field} exceeds ${maxLength} characters`);
+  }
+  return normalized;
+}
+
+function normalizeLuggageNotePayload(payload: unknown): { actor: LuggageNoteActor; note: string | null } {
+  const payloadKeys = new Set(["note", "actor"]);
+  if (!isPlainRecord(payload) || !hasOnlyKeys(payload, payloadKeys) || !("note" in payload) || !("actor" in payload)) {
+    throw new Error("Body must contain only note and actor");
+  }
+  if (typeof payload.note !== "string" && payload.note !== null) {
+    throw new Error("note must be a string or null");
+  }
+  const note = payload.note?.trim() || null;
+  if (note && note.length > 500) {
+    throw new Error("note exceeds 500 characters");
+  }
+
+  const actorKeys = new Set(["userId", "name", "email", "role"]);
+  if (!isPlainRecord(payload.actor) || !hasOnlyKeys(payload.actor, actorKeys)) {
+    throw new Error("actor must contain only userId, name, email, and role");
+  }
+  const role = requiredActorText(payload.actor.role, "role", 50);
+  if (!LUGGAGE_NOTE_ACTOR_ROLES.has(role)) {
+    throw new Error("actor.role is not allowed");
+  }
+
+  return {
+    note,
+    actor: {
+      userId: requiredActorText(payload.actor.userId, "userId", 200),
+      name: requiredActorText(payload.actor.name, "name", 100),
+      email: requiredActorText(payload.actor.email, "email", 254),
+      role: role as LuggageNoteActor["role"],
+    },
+  };
+}
+
+// PATCH /internal/luggage-orders/:orderId/note — Note-only mutation for the unified admin.
+internalApi.patch("/internal/luggage-orders/:orderId/note", async (c) => {
+  const orderId = c.req.param("orderId");
+  if (orderId.length > 32 || !LUGGAGE_ORDER_ID_PATTERN.test(orderId)) {
+    return c.json({ error: "Invalid orderId" }, 400);
+  }
+
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  let normalized: ReturnType<typeof normalizeLuggageNotePayload>;
+  try {
+    normalized = normalizeLuggageNotePayload(payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+
+  const current = await c.env.DB.prepare(
+    "SELECT note, updated_at AS updatedAt FROM luggage_orders WHERE order_id = ?",
+  ).bind(orderId).first<{ note: string | null; updatedAt: string }>();
+  if (!current) {
+    return c.json({ error: "Luggage order not found" }, 404);
+  }
+  if (current.note === normalized.note) {
+    return c.json({
+      orderId,
+      note: current.note,
+      updatedAt: current.updatedAt,
+    });
+  }
+
+  const auditDetails = JSON.stringify({
+    before: current.note,
+    after: normalized.note,
+    actor: normalized.actor,
+  });
+  const [updateResult] = await c.env.DB.batch<LuggageNoteUpdateDto>([
+    c.env.DB.prepare(
+      `UPDATE luggage_orders
+       SET note = ?, updated_at = datetime('now')
+       WHERE order_id = ?
+       RETURNING order_id AS orderId, note, updated_at AS updatedAt`,
+    ).bind(normalized.note, orderId),
+    c.env.DB.prepare(
+      `INSERT INTO luggage_audit_logs
+         (order_id, staff_id, device_id, action, details, timestamp)
+       VALUES (?, NULL, 'unified-admin', 'UNIFIED_ADMIN_NOTE_UPDATE', ?, datetime('now'))`,
+    ).bind(orderId, auditDetails),
+  ]);
+  const updated = updateResult.results[0];
+  if (!updated) {
+    return c.json({ error: "Luggage order not found" }, 404);
+  }
+
+  return c.json({
+    orderId: updated.orderId,
+    note: updated.note,
+    updatedAt: updated.updatedAt,
   });
 });
 
