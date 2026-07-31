@@ -1,6 +1,11 @@
 import { Hono } from "hono";
 import type { AppType } from "../types";
 import { internalAuth } from "../middleware/internalAuth";
+import {
+  normalizePaymentAllocation,
+  paymentAllocationStatements,
+  payableAmountFromOrder,
+} from "../lib/payments";
 
 const internalApi = new Hono<AppType>();
 // Mounted via `app.route("/", internalApi)` in index.tsx, so a bare "/*" here
@@ -91,6 +96,13 @@ type LuggageOrderDto = {
   paymentQrAmount: number;
 };
 
+type LuggageStatusCounts = {
+  paymentPending: number;
+  paid: number;
+  pickedUp: number;
+  cancelled: number;
+};
+
 function parsePaginationQuery(value: string | undefined, fallback: number, maximum?: number): number {
   if (!value || !/^\d+$/.test(value)) return fallback;
   const parsed = Number(value);
@@ -114,25 +126,37 @@ internalApi.get("/internal/luggage-orders", async (c) => {
   const offset = parsePaginationQuery(c.req.query("offset"), 0);
   const clauses: string[] = [];
   const params: Array<string | number> = [];
+  const countClauses: string[] = [];
+  const countParams: Array<string | number> = [];
 
   if (status) {
-    clauses.push("o.status = ?");
-    params.push(status);
+    if (status === "UNPICKED") {
+      clauses.push("o.status IN ('PAYMENT_PENDING', 'PAID')");
+    } else {
+      clauses.push("o.status = ?");
+      params.push(status);
+    }
   }
   if (search) {
     clauses.push("(o.order_id LIKE ? OR o.name LIKE ? OR o.phone LIKE ? OR o.tag_no LIKE ?)");
+    countClauses.push("(o.order_id LIKE ? OR o.name LIKE ? OR o.phone LIKE ? OR o.tag_no LIKE ?)");
     const pattern = `%${search}%`;
     params.push(pattern, pattern, pattern, pattern);
+    countParams.push(pattern, pattern, pattern, pattern);
   }
   // created_at is stored in UTC; SQLite applies +9 hours before comparing its
   // calendar date so dateFrom/dateTo consistently mean JST dates.
   if (dateFrom) {
     clauses.push("date(o.created_at, '+9 hours') >= ?");
     params.push(dateFrom);
+    countClauses.push("date(o.created_at, '+9 hours') >= ?");
+    countParams.push(dateFrom);
   }
   if (dateTo) {
     clauses.push("date(o.created_at, '+9 hours') <= ?");
     params.push(dateTo);
+    countClauses.push("date(o.created_at, '+9 hours') <= ?");
+    countParams.push(dateTo);
   }
 
   const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
@@ -178,12 +202,26 @@ internalApi.get("/internal/luggage-orders", async (c) => {
   const countResult = await c.env.DB.prepare(
     `SELECT COUNT(*) AS total FROM luggage_orders o${where}`,
   ).bind(...params).first<{ total: number }>();
+  const statusCountsResult = await c.env.DB.prepare(
+    `SELECT
+       COALESCE(SUM(CASE WHEN o.status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END), 0) AS paymentPending,
+       COALESCE(SUM(CASE WHEN o.status = 'PAID' THEN 1 ELSE 0 END), 0) AS paid,
+       COALESCE(SUM(CASE WHEN o.status = 'PICKED_UP' THEN 1 ELSE 0 END), 0) AS pickedUp,
+       COALESCE(SUM(CASE WHEN o.status = 'CANCELLED' THEN 1 ELSE 0 END), 0) AS cancelled
+     FROM luggage_orders o${countClauses.length ? ` WHERE ${countClauses.join(" AND ")}` : ""}`,
+  ).bind(...countParams).first<LuggageStatusCounts>();
 
   return c.json({
     orders: result.results,
     total: countResult?.total ?? 0,
     limit,
     offset,
+    statusCounts: {
+      paymentPending: statusCountsResult?.paymentPending ?? 0,
+      paid: statusCountsResult?.paid ?? 0,
+      pickedUp: statusCountsResult?.pickedUp ?? 0,
+      cancelled: statusCountsResult?.cancelled ?? 0,
+    },
   });
 });
 
@@ -198,6 +236,32 @@ type LuggageNoteUpdateDto = {
   orderId: string;
   note: string | null;
   updatedAt: string;
+};
+
+type LuggagePaymentStatus = "PAYMENT_PENDING" | "PAID";
+
+type LuggagePaymentStatusOrder = {
+  orderId: string;
+  status: string;
+  paymentMethod: string | null;
+  businessDate: string;
+  prepaidAmount: number;
+  finalAmount: number | null;
+  extraAmount: number | null;
+  paymentCashAmount: number;
+  paymentQrAmount: number;
+};
+
+type LuggagePaymentStatusResponse = {
+  success: true;
+  changed: boolean;
+  order: {
+    orderId: string;
+    status: LuggagePaymentStatus;
+    paymentMethod: string | null;
+    paymentCashAmount: number;
+    paymentQrAmount: number;
+  };
 };
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -254,6 +318,161 @@ function normalizeLuggageNotePayload(payload: unknown): { actor: LuggageNoteActo
     },
   };
 }
+
+function normalizeLuggagePaymentStatusPayload(payload: unknown): {
+  actor: LuggageNoteActor;
+  targetStatus: LuggagePaymentStatus;
+  payment?: { cashAmount: number; qrAmount: number };
+} {
+  const payloadKeys = new Set(["targetStatus", "payment", "actor"]);
+  if (!isPlainRecord(payload) || !hasOnlyKeys(payload, payloadKeys) || !("targetStatus" in payload) || !("actor" in payload)) {
+    throw new Error("Body must contain targetStatus, actor, and optional payment");
+  }
+  if (payload.targetStatus !== "PAYMENT_PENDING" && payload.targetStatus !== "PAID") {
+    throw new Error("targetStatus must be PAYMENT_PENDING or PAID");
+  }
+  const actorPayload = normalizeLuggageNotePayload({ note: null, actor: payload.actor }).actor;
+  if (payload.targetStatus === "PAYMENT_PENDING") {
+    if ("payment" in payload) throw new Error("payment is only allowed when targetStatus is PAID");
+    return { actor: actorPayload, targetStatus: payload.targetStatus };
+  }
+  if (!("payment" in payload)) {
+    return { actor: actorPayload, targetStatus: payload.targetStatus };
+  }
+  if (!isPlainRecord(payload.payment) || !hasOnlyKeys(payload.payment, new Set(["cashAmount", "qrAmount"]))) {
+    throw new Error("payment must contain only cashAmount and qrAmount");
+  }
+  const cashAmount = payload.payment.cashAmount;
+  const qrAmount = payload.payment.qrAmount;
+  if (
+    typeof cashAmount !== "number"
+    || typeof qrAmount !== "number"
+    || !Number.isInteger(cashAmount)
+    || cashAmount < 0
+    || !Number.isInteger(qrAmount)
+    || qrAmount < 0
+  ) {
+    throw new Error("payment amounts must be non-negative integers");
+  }
+  return { actor: actorPayload, targetStatus: payload.targetStatus, payment: { cashAmount, qrAmount } };
+}
+
+function serializePaymentStatusOrder(order: LuggagePaymentStatusOrder): LuggagePaymentStatusResponse["order"] {
+  return {
+    orderId: order.orderId,
+    status: order.status as LuggagePaymentStatus,
+    paymentMethod: order.paymentMethod,
+    paymentCashAmount: order.paymentCashAmount,
+    paymentQrAmount: order.paymentQrAmount,
+  };
+}
+
+function serializePaymentAuditActor(actor: LuggageNoteActor) {
+  return { id: actor.userId, name: actor.name, email: actor.email };
+}
+
+// PATCH /internal/luggage-orders/:orderId/payment-status — Explicit payment transition for the unified admin.
+internalApi.patch("/internal/luggage-orders/:orderId/payment-status", async (c) => {
+  const orderId = c.req.param("orderId");
+  if (orderId.length > 32 || !LUGGAGE_ORDER_ID_PATTERN.test(orderId)) {
+    return c.json({ error: "Invalid orderId" }, 400);
+  }
+
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  let normalized: ReturnType<typeof normalizeLuggagePaymentStatusPayload>;
+  try {
+    normalized = normalizeLuggagePaymentStatusPayload(payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+
+  const current = await c.env.DB.prepare(
+    `SELECT o.order_id AS orderId, o.status, o.payment_method AS paymentMethod,
+            date(o.created_at, '+9 hours') AS businessDate, o.prepaid_amount AS prepaidAmount,
+            o.final_amount AS finalAmount, o.extra_amount AS extraAmount,
+            COALESCE(SUM(CASE WHEN p.tender_type = 'CASH' THEN p.amount ELSE 0 END), 0) AS paymentCashAmount,
+            COALESCE(SUM(CASE WHEN p.tender_type = 'PAY_QR' THEN p.amount ELSE 0 END), 0) AS paymentQrAmount
+     FROM luggage_orders o
+     LEFT JOIN luggage_order_payments p ON p.order_id = o.order_id
+     WHERE o.order_id = ?
+     GROUP BY o.order_id`,
+  ).bind(orderId).first<LuggagePaymentStatusOrder>();
+  if (!current) return c.json({ error: "Luggage order not found" }, 404);
+  if (current.status === normalized.targetStatus) {
+    return c.json<LuggagePaymentStatusResponse>({ success: true, changed: false, order: serializePaymentStatusOrder(current) });
+  }
+  if ((current.status !== "PAYMENT_PENDING" && current.status !== "PAID")
+    || !((current.status === "PAYMENT_PENDING" && normalized.targetStatus === "PAID")
+      || (current.status === "PAID" && normalized.targetStatus === "PAYMENT_PENDING"))) {
+    return c.json({ error: "Payment status transition is not allowed" }, 409);
+  }
+  if (normalized.targetStatus === "PAID" && !normalized.payment) {
+    return c.json({ error: "payment is required when targetStatus is PAID" }, 400);
+  }
+
+  const before = serializePaymentStatusOrder(current);
+  let after: LuggagePaymentStatusResponse["order"];
+  let statements: D1PreparedStatement[];
+  if (normalized.targetStatus === "PAID") {
+    const payableAmount = payableAmountFromOrder({
+      prepaid_amount: current.prepaidAmount,
+      final_amount: current.finalAmount,
+      extra_amount: current.extraAmount,
+    });
+    const allocation = normalizePaymentAllocation({
+      cash_amount: normalized.payment?.cashAmount,
+      qr_amount: normalized.payment?.qrAmount,
+    }, payableAmount);
+    if ("error" in allocation) return c.json({ error: allocation.error }, 400);
+    after = { orderId, status: "PAID", paymentMethod: allocation.paymentMethod, paymentCashAmount: allocation.cashAmount, paymentQrAmount: allocation.qrAmount };
+    const auditDetails = JSON.stringify({ source: "unified-admin", before, after, actor: serializePaymentAuditActor(normalized.actor) });
+    statements = [
+      ...paymentAllocationStatements(c.env.DB, orderId, current.businessDate, null, allocation, "PAYMENT_PENDING"),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_PAYMENT_STATUS_UPDATE', ?, datetime('now')
+         WHERE EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ? AND status = 'PAYMENT_PENDING')`,
+      ).bind(orderId, auditDetails, orderId),
+      c.env.DB.prepare(
+        `UPDATE luggage_orders SET status = 'PAID', payment_method = ?, updated_at = datetime('now')
+         WHERE order_id = ? AND status = 'PAYMENT_PENDING'
+         RETURNING order_id AS orderId`,
+      ).bind(allocation.paymentMethod, orderId),
+    ];
+  } else {
+    after = { orderId, status: "PAYMENT_PENDING", paymentMethod: current.paymentMethod, paymentCashAmount: 0, paymentQrAmount: 0 };
+    const auditDetails = JSON.stringify({ source: "unified-admin", before, after, actor: serializePaymentAuditActor(normalized.actor) });
+    statements = [
+      c.env.DB.prepare(
+        `DELETE FROM luggage_order_payments
+         WHERE order_id = ? AND EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ? AND status = 'PAID')`,
+      ).bind(orderId, orderId),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_PAYMENT_STATUS_UPDATE', ?, datetime('now')
+         WHERE EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ? AND status = 'PAID')`,
+      ).bind(orderId, auditDetails, orderId),
+      c.env.DB.prepare(
+        `UPDATE luggage_orders SET status = 'PAYMENT_PENDING', updated_at = datetime('now')
+         WHERE order_id = ? AND status = 'PAID'
+         RETURNING order_id AS orderId`,
+      ).bind(orderId),
+    ];
+  }
+  try {
+    const results = await c.env.DB.batch(statements);
+    const updateResult = results[results.length - 1];
+    if (!updateResult.results?.[0]) return c.json({ error: "Payment status was changed by another request" }, 409);
+  } catch {
+    return c.json({ error: "Unable to update payment status" }, 500);
+  }
+  return c.json<LuggagePaymentStatusResponse>({ success: true, changed: true, order: after });
+});
 
 // PATCH /internal/luggage-orders/:orderId/note — Note-only mutation for the unified admin.
 internalApi.patch("/internal/luggage-orders/:orderId/note", async (c) => {

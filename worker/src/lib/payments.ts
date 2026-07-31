@@ -73,25 +73,39 @@ export function paymentAllocationStatements(
   orderId: string,
   businessDate: string,
   staffId: string | null,
-  allocation: PaymentAllocation
+  allocation: PaymentAllocation,
+  expectedOrderStatus?: string,
 ): D1PreparedStatement[] {
-  const statements = [
-    db.prepare("DELETE FROM luggage_order_payments WHERE order_id = ?").bind(orderId),
+  const statements = [expectedOrderStatus
+    ? db.prepare(
+      "DELETE FROM luggage_order_payments WHERE order_id = ? AND EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ? AND status = ?)"
+    ).bind(orderId, orderId, expectedOrderStatus)
+    : db.prepare("DELETE FROM luggage_order_payments WHERE order_id = ?").bind(orderId),
   ];
   if (allocation.cashAmount > 0) {
     statements.push(
-      db.prepare(
+      expectedOrderStatus ? db.prepare(
         `INSERT INTO luggage_order_payments (order_id, business_date, tender_type, amount, staff_id)
-         VALUES (?, ?, 'CASH', ?, ?)`
-      ).bind(orderId, businessDate, allocation.cashAmount, staffId)
+         SELECT ?, ?, 'CASH', ?, ?
+         WHERE EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ? AND status = ?)`
+      ).bind(orderId, businessDate, allocation.cashAmount, staffId, orderId, expectedOrderStatus)
+        : db.prepare(
+          `INSERT INTO luggage_order_payments (order_id, business_date, tender_type, amount, staff_id)
+           VALUES (?, ?, 'CASH', ?, ?)`
+        ).bind(orderId, businessDate, allocation.cashAmount, staffId)
     );
   }
   if (allocation.qrAmount > 0) {
     statements.push(
-      db.prepare(
+      expectedOrderStatus ? db.prepare(
         `INSERT INTO luggage_order_payments (order_id, business_date, tender_type, amount, staff_id)
-         VALUES (?, ?, 'PAY_QR', ?, ?)`
-      ).bind(orderId, businessDate, allocation.qrAmount, staffId)
+         SELECT ?, ?, 'PAY_QR', ?, ?
+         WHERE EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ? AND status = ?)`
+      ).bind(orderId, businessDate, allocation.qrAmount, staffId, orderId, expectedOrderStatus)
+        : db.prepare(
+          `INSERT INTO luggage_order_payments (order_id, business_date, tender_type, amount, staff_id)
+           VALUES (?, ?, 'PAY_QR', ?, ?)`
+        ).bind(orderId, businessDate, allocation.qrAmount, staffId)
     );
   }
   return statements;
