@@ -6,6 +6,7 @@ import {
   paymentAllocationStatements,
   payableAmountFromOrder,
 } from "../lib/payments";
+import { FLYING_PASS_TIERS, normalizeFlyingPassTier, recalculateOrderPrepaid } from "../services/pricing";
 
 const internalApi = new Hono<AppType>();
 // Mounted via `app.route("/", internalApi)` in index.tsx, so a bare "/*" here
@@ -82,8 +83,9 @@ type LuggageOrderDto = {
   expectedStorageDays: number;
   actualStorageDays: number;
   prepaidAmount: number;
-  finalAmount: number;
+  finalAmount: number | null;
   extraAmount: number;
+  pricePerDay: number;
   paymentMethod: string | null;
   status: string;
   tagNo: string | null;
@@ -92,6 +94,8 @@ type LuggageOrderDto = {
   parentOrderId: string | null;
   inWarehouse: number;
   flyingPassTier: string;
+  flyingPassDiscountAmount: number;
+  staffPrepaidOverrideAmount: number | null;
   paymentCashAmount: number;
   paymentQrAmount: number;
 };
@@ -184,6 +188,7 @@ internalApi.get("/internal/luggage-orders", async (c) => {
             o.prepaid_amount AS prepaidAmount,
             o.final_amount AS finalAmount,
             o.extra_amount AS extraAmount,
+            o.price_per_day AS pricePerDay,
             o.payment_method AS paymentMethod,
             o.status AS status,
             o.tag_no AS tagNo,
@@ -192,6 +197,8 @@ internalApi.get("/internal/luggage-orders", async (c) => {
             o.parent_order_id AS parentOrderId,
             o.in_warehouse AS inWarehouse,
             o.flying_pass_tier AS flyingPassTier,
+            o.flying_pass_discount_amount AS flyingPassDiscountAmount,
+            o.staff_prepaid_override_amount AS staffPrepaidOverrideAmount,
             COALESCE(p.paymentCashAmount, 0) AS paymentCashAmount,
             COALESCE(p.paymentQrAmount, 0) AS paymentQrAmount
      FROM luggage_orders o
@@ -235,6 +242,49 @@ type LuggageNoteActor = {
 type LuggageNoteUpdateDto = {
   orderId: string;
   note: string | null;
+  updatedAt: string;
+};
+
+type LuggageOperationsFieldsOrder = {
+  orderId: string;
+  status: string;
+  name: string | null;
+  tagNo: string | null;
+  expectedPickupAt: string | null;
+  inWarehouse: number;
+  updatedAt: string;
+};
+
+type LuggageOperationsFieldsUpdateDto = {
+  orderId: string;
+  name: string | null;
+  tagNo: string | null;
+  expectedPickupAt: string | null;
+  inWarehouse: number;
+  updatedAt: string;
+};
+
+type LuggagePriceOrder = {
+  orderId: string;
+  pricePerDay: number;
+  expectedStorageDays: number;
+  prepaidAmount: number;
+  finalAmount: number | null;
+  flyingPassTier: string;
+  flyingPassDiscountAmount: number;
+  paymentMethod: string | null;
+  staffPrepaidOverrideAmount: number | null;
+  updatedAt: string;
+};
+
+type LuggagePriceUpdateDto = {
+  orderId: string;
+  paymentMethod: string | null;
+  flyingPassTier: string;
+  flyingPassDiscountAmount: number;
+  prepaidAmount: number;
+  finalAmount: number;
+  staffPrepaidOverrideAmount: number | null;
   updatedAt: string;
 };
 
@@ -317,6 +367,108 @@ function normalizeLuggageNotePayload(payload: unknown): { actor: LuggageNoteActo
       role: role as LuggageNoteActor["role"],
     },
   };
+}
+
+function parseTimezoneIso(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2})$/i.exec(value);
+  if (!match) throw new Error("expectedPickupAt must be an ISO timestamp with timezone");
+  const [, year, month, day, hour, minute, second = "00", fraction = "", timezone] = match;
+  const localDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second), Number(fraction.padEnd(3, "0"))));
+  if (
+    localDate.getUTCFullYear() !== Number(year)
+    || localDate.getUTCMonth() + 1 !== Number(month)
+    || localDate.getUTCDate() !== Number(day)
+    || localDate.getUTCHours() !== Number(hour)
+    || localDate.getUTCMinutes() !== Number(minute)
+    || localDate.getUTCSeconds() !== Number(second)
+  ) {
+    throw new Error("expectedPickupAt is not a valid calendar timestamp");
+  }
+  if (timezone !== "Z") {
+    const [, , timezoneHour, timezoneMinute] = /^([+-])(\d{2}):(\d{2})$/.exec(timezone) ?? [];
+    if (Number(timezoneHour) > 23 || Number(timezoneMinute) > 59) {
+      throw new Error("expectedPickupAt has an invalid timezone offset");
+    }
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new Error("expectedPickupAt is not a valid date");
+  return parsed.toISOString();
+}
+
+function normalizeLuggageOperationsFieldsPayload(payload: unknown): {
+  actor: LuggageNoteActor;
+  update: { name?: string | null; tagNo?: string | null; expectedPickupAt?: string | null; inWarehouse?: number };
+} {
+  const payloadKeys = new Set(["name", "tagNo", "expectedPickupAt", "inWarehouse", "actor"]);
+  if (!isPlainRecord(payload) || !hasOnlyKeys(payload, payloadKeys) || !("actor" in payload)) {
+    throw new Error("Body must contain actor and only supported operation fields");
+  }
+  const hasOperationsField = "name" in payload || "tagNo" in payload || "expectedPickupAt" in payload || "inWarehouse" in payload;
+  if (!hasOperationsField) throw new Error("At least one operation field is required");
+  const actor = normalizeLuggageNotePayload({ note: null, actor: payload.actor }).actor;
+  const update: { name?: string | null; tagNo?: string | null; expectedPickupAt?: string | null; inWarehouse?: number } = {};
+  if ("name" in payload) {
+    if (typeof payload.name !== "string" && payload.name !== null) throw new Error("name must be a string or null");
+    // Match the staff inline-update contract: null and an empty string remain distinct stored values.
+    update.name = typeof payload.name === "string" ? payload.name.trim() : null;
+  }
+  if ("tagNo" in payload) {
+    if (typeof payload.tagNo !== "string" && payload.tagNo !== null) throw new Error("tagNo must be a string or null");
+    const tagNo = payload.tagNo?.trim() ?? "";
+    if (!tagNo) {
+      update.tagNo = null;
+    } else if (!/^\d+$/.test(tagNo) || Number(tagNo) < 1 || Number(tagNo) > 100) {
+      throw new Error("tagNo must be an integer from 1 to 100");
+    } else {
+      update.tagNo = String(Number(tagNo));
+    }
+  }
+  if ("expectedPickupAt" in payload) {
+    if (typeof payload.expectedPickupAt !== "string" && payload.expectedPickupAt !== null) {
+      throw new Error("expectedPickupAt must be an ISO timestamp with timezone or null");
+    }
+    update.expectedPickupAt = typeof payload.expectedPickupAt === "string" ? parseTimezoneIso(payload.expectedPickupAt) : null;
+  }
+  if ("inWarehouse" in payload) {
+    if (typeof payload.inWarehouse !== "boolean") throw new Error("inWarehouse must be a boolean");
+    update.inWarehouse = payload.inWarehouse ? 1 : 0;
+  }
+  return { actor, update };
+}
+
+function normalizeLuggagePricePayload(payload: unknown): {
+  actor: LuggageNoteActor;
+  update: { paymentMethod?: "CASH" | "PAY_QR"; flyingPassTier?: string; staffPrepaidOverrideAmount?: number | null };
+} {
+  const payloadKeys = new Set(["paymentMethod", "flyingPassTier", "staffPrepaidOverrideAmount", "actor"]);
+  if (!isPlainRecord(payload) || !hasOnlyKeys(payload, payloadKeys) || !("actor" in payload)) {
+    throw new Error("Body must contain actor and only supported price fields");
+  }
+  if (!("paymentMethod" in payload) && !("flyingPassTier" in payload) && !("staffPrepaidOverrideAmount" in payload)) {
+    throw new Error("At least one price field is required");
+  }
+  const actor = normalizeLuggageNotePayload({ note: null, actor: payload.actor }).actor;
+  const update: { paymentMethod?: "CASH" | "PAY_QR"; flyingPassTier?: string; staffPrepaidOverrideAmount?: number | null } = {};
+  if ("paymentMethod" in payload) {
+    if (payload.paymentMethod !== "CASH" && payload.paymentMethod !== "PAY_QR") {
+      throw new Error("paymentMethod must be CASH or PAY_QR");
+    }
+    update.paymentMethod = payload.paymentMethod;
+  }
+  if ("flyingPassTier" in payload) {
+    if (typeof payload.flyingPassTier !== "string" || !FLYING_PASS_TIERS.includes(payload.flyingPassTier as typeof FLYING_PASS_TIERS[number])) {
+      throw new Error("flyingPassTier is invalid");
+    }
+    update.flyingPassTier = normalizeFlyingPassTier(payload.flyingPassTier);
+  }
+  if ("staffPrepaidOverrideAmount" in payload) {
+    const override = payload.staffPrepaidOverrideAmount;
+    if (override !== null && (typeof override !== "number" || !Number.isInteger(override) || override < 0 || override > 500000)) {
+      throw new Error("staffPrepaidOverrideAmount must be an integer from 0 to 500000 or null");
+    }
+    update.staffPrepaidOverrideAmount = override;
+  }
+  return { actor, update };
 }
 
 function normalizeLuggagePaymentStatusPayload(payload: unknown): {
@@ -472,6 +624,246 @@ internalApi.patch("/internal/luggage-orders/:orderId/payment-status", async (c) 
     return c.json({ error: "Unable to update payment status" }, 500);
   }
   return c.json<LuggagePaymentStatusResponse>({ success: true, changed: true, order: after });
+});
+
+// PATCH /internal/luggage-orders/:orderId/operations-fields — Limited operational field mutation for the unified admin.
+internalApi.patch("/internal/luggage-orders/:orderId/operations-fields", async (c) => {
+  const orderId = c.req.param("orderId");
+  if (orderId.length > 32 || !LUGGAGE_ORDER_ID_PATTERN.test(orderId)) {
+    return c.json({ error: "Invalid orderId" }, 400);
+  }
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  let normalized: ReturnType<typeof normalizeLuggageOperationsFieldsPayload>;
+  try {
+    normalized = normalizeLuggageOperationsFieldsPayload(payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+
+  const current = await c.env.DB.prepare(
+    `SELECT order_id AS orderId, status, name, tag_no AS tagNo, expected_pickup_at AS expectedPickupAt,
+            in_warehouse AS inWarehouse, updated_at AS updatedAt
+     FROM luggage_orders WHERE order_id = ?`,
+  ).bind(orderId).first<LuggageOperationsFieldsOrder>();
+  if (!current) return c.json({ error: "Luggage order not found" }, 404);
+
+  const before = {
+    orderId: current.orderId,
+    name: current.name,
+    tagNo: current.tagNo,
+    expectedPickupAt: current.expectedPickupAt,
+    inWarehouse: current.inWarehouse === 1,
+  };
+  const after = {
+    orderId,
+    name: "name" in normalized.update ? normalized.update.name! : current.name,
+    tagNo: "tagNo" in normalized.update ? normalized.update.tagNo! : current.tagNo,
+    expectedPickupAt: "expectedPickupAt" in normalized.update ? normalized.update.expectedPickupAt! : current.expectedPickupAt,
+    inWarehouse: "inWarehouse" in normalized.update ? normalized.update.inWarehouse === 1 : current.inWarehouse === 1,
+  };
+  if (
+    before.name === after.name
+    && before.tagNo === after.tagNo
+    && before.expectedPickupAt === after.expectedPickupAt
+    && before.inWarehouse === after.inWarehouse
+  ) {
+    return c.json({
+      changed: false,
+      orderId: current.orderId,
+      name: current.name,
+      tagNo: current.tagNo,
+      expectedPickupAt: current.expectedPickupAt,
+      inWarehouse: current.inWarehouse === 1,
+      updatedAt: current.updatedAt,
+    });
+  }
+
+  const updates: string[] = [];
+  const values: Array<string | number | null> = [];
+  if ("name" in normalized.update) {
+    updates.push("name = ?");
+    values.push(normalized.update.name ?? null);
+  }
+  if ("tagNo" in normalized.update) {
+    updates.push("tag_no = ?");
+    values.push(normalized.update.tagNo ?? null);
+  }
+  if ("expectedPickupAt" in normalized.update) {
+    updates.push("expected_pickup_at = ?");
+    values.push(normalized.update.expectedPickupAt ?? null);
+  }
+  if ("inWarehouse" in normalized.update) {
+    updates.push("in_warehouse = ?");
+    values.push(normalized.update.inWarehouse ?? 0);
+  }
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    before,
+    after,
+    actor: normalized.actor,
+  });
+  try {
+    const results = await c.env.DB.batch<LuggageOperationsFieldsUpdateDto>([
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_OPERATION_FIELDS_UPDATE', ?, datetime('now')
+         WHERE EXISTS (
+           SELECT 1 FROM luggage_orders
+           WHERE order_id = ? AND updated_at = ? AND status = ?
+             AND name IS ? AND tag_no IS ? AND expected_pickup_at IS ? AND in_warehouse = ?
+         )`,
+      ).bind(orderId, auditDetails, orderId, current.updatedAt, current.status, current.name, current.tagNo, current.expectedPickupAt, current.inWarehouse),
+      c.env.DB.prepare(
+        `UPDATE luggage_orders SET ${updates.join(", ")}, updated_at = datetime('now')
+         WHERE order_id = ? AND updated_at = ? AND status = ?
+           AND name IS ? AND tag_no IS ? AND expected_pickup_at IS ? AND in_warehouse = ?
+         RETURNING order_id AS orderId, name, tag_no AS tagNo, expected_pickup_at AS expectedPickupAt,
+                   in_warehouse AS inWarehouse, updated_at AS updatedAt`,
+      ).bind(...values, orderId, current.updatedAt, current.status, current.name, current.tagNo, current.expectedPickupAt, current.inWarehouse),
+    ]);
+    const updated = results[1].results?.[0];
+    if (!updated) return c.json({ error: "Luggage order was changed by another request" }, 409);
+    return c.json({
+      changed: true,
+      orderId: updated.orderId,
+      name: updated.name,
+      tagNo: updated.tagNo,
+      expectedPickupAt: updated.expectedPickupAt,
+      inWarehouse: updated.inWarehouse === 1,
+      updatedAt: updated.updatedAt,
+    });
+  } catch {
+    return c.json({ error: "Unable to update luggage operation fields" }, 500);
+  }
+});
+
+// PATCH /internal/luggage-orders/:orderId/price — Price configuration mutation for the unified admin.
+internalApi.patch("/internal/luggage-orders/:orderId/price", async (c) => {
+  const orderId = c.req.param("orderId");
+  if (orderId.length > 32 || !LUGGAGE_ORDER_ID_PATTERN.test(orderId)) return c.json({ error: "Invalid orderId" }, 400);
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  let normalized: ReturnType<typeof normalizeLuggagePricePayload>;
+  try {
+    normalized = normalizeLuggagePricePayload(payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const current = await c.env.DB.prepare(
+    `SELECT order_id AS orderId, price_per_day AS pricePerDay, expected_storage_days AS expectedStorageDays,
+            prepaid_amount AS prepaidAmount, final_amount AS finalAmount,
+            flying_pass_tier AS flyingPassTier, flying_pass_discount_amount AS flyingPassDiscountAmount,
+            payment_method AS paymentMethod, staff_prepaid_override_amount AS staffPrepaidOverrideAmount,
+            updated_at AS updatedAt
+     FROM luggage_orders WHERE order_id = ?`,
+  ).bind(orderId).first<LuggagePriceOrder>();
+  if (!current) return c.json({ error: "Luggage order not found" }, 404);
+
+  const flyingPassTier = normalizeFlyingPassTier(normalized.update.flyingPassTier ?? current.flyingPassTier);
+  const paymentMethod = normalized.update.paymentMethod ?? current.paymentMethod ?? "CASH";
+  if (paymentMethod !== "CASH" && paymentMethod !== "PAY_QR") return c.json({ error: "Invalid payment method" }, 400);
+  const { finalPrepaid, flyingPassDiscountAmount } = recalculateOrderPrepaid(
+    current.pricePerDay,
+    current.expectedStorageDays,
+    flyingPassTier,
+  );
+  const staffPrepaidOverrideAmount: number | null = "staffPrepaidOverrideAmount" in normalized.update
+    ? normalized.update.staffPrepaidOverrideAmount ?? null
+    : current.staffPrepaidOverrideAmount;
+  const prepaidAmount = staffPrepaidOverrideAmount ?? finalPrepaid;
+  const after = {
+    orderId,
+    paymentMethod,
+    flyingPassTier,
+    flyingPassDiscountAmount,
+    prepaidAmount,
+    finalAmount: prepaidAmount,
+    staffPrepaidOverrideAmount,
+  };
+  const before = {
+    orderId: current.orderId,
+    paymentMethod: current.paymentMethod,
+    flyingPassTier: current.flyingPassTier,
+    flyingPassDiscountAmount: current.flyingPassDiscountAmount,
+    prepaidAmount: current.prepaidAmount,
+    finalAmount: current.finalAmount,
+    staffPrepaidOverrideAmount: current.staffPrepaidOverrideAmount,
+  };
+  if (
+    before.paymentMethod === after.paymentMethod
+    && before.flyingPassTier === after.flyingPassTier
+    && before.flyingPassDiscountAmount === after.flyingPassDiscountAmount
+    && before.prepaidAmount === after.prepaidAmount
+    && before.finalAmount === after.finalAmount
+    && before.staffPrepaidOverrideAmount === after.staffPrepaidOverrideAmount
+  ) {
+    return c.json({
+      changed: false,
+      orderId: current.orderId,
+      paymentMethod: current.paymentMethod,
+      flyingPassTier: current.flyingPassTier,
+      flyingPassDiscountAmount: current.flyingPassDiscountAmount,
+      prepaidAmount: current.prepaidAmount,
+      finalAmount: current.finalAmount,
+      staffPrepaidOverrideAmount: current.staffPrepaidOverrideAmount,
+      updatedAt: current.updatedAt,
+    });
+  }
+  const auditDetails = JSON.stringify({ source: "unified-admin", before, after, actor: normalized.actor });
+  try {
+    const results = await c.env.DB.batch<LuggagePriceUpdateDto>([
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_PRICE_UPDATE', ?, datetime('now')
+         WHERE EXISTS (
+           SELECT 1 FROM luggage_orders
+           WHERE order_id = ? AND updated_at = ?
+             AND price_per_day = ? AND expected_storage_days = ?
+             AND prepaid_amount = ? AND final_amount IS ?
+             AND flying_pass_tier IS ? AND flying_pass_discount_amount = ?
+             AND payment_method IS ? AND staff_prepaid_override_amount IS ?
+         )`,
+      ).bind(orderId, auditDetails, orderId, current.updatedAt, current.pricePerDay, current.expectedStorageDays, current.prepaidAmount, current.finalAmount, current.flyingPassTier, current.flyingPassDiscountAmount, current.paymentMethod, current.staffPrepaidOverrideAmount),
+      c.env.DB.prepare(
+        `UPDATE luggage_orders
+         SET payment_method = ?, flying_pass_tier = ?, flying_pass_discount_amount = ?,
+             prepaid_amount = ?, final_amount = ?, staff_prepaid_override_amount = ?, updated_at = datetime('now')
+         WHERE order_id = ? AND updated_at = ?
+           AND price_per_day = ? AND expected_storage_days = ?
+           AND prepaid_amount = ? AND final_amount IS ?
+           AND flying_pass_tier IS ? AND flying_pass_discount_amount = ?
+           AND payment_method IS ? AND staff_prepaid_override_amount IS ?
+         RETURNING order_id AS orderId, payment_method AS paymentMethod, flying_pass_tier AS flyingPassTier,
+                   flying_pass_discount_amount AS flyingPassDiscountAmount, prepaid_amount AS prepaidAmount,
+                   final_amount AS finalAmount, staff_prepaid_override_amount AS staffPrepaidOverrideAmount,
+                   updated_at AS updatedAt`,
+      ).bind(after.paymentMethod, after.flyingPassTier, after.flyingPassDiscountAmount, after.prepaidAmount, after.finalAmount, after.staffPrepaidOverrideAmount, orderId, current.updatedAt, current.pricePerDay, current.expectedStorageDays, current.prepaidAmount, current.finalAmount, current.flyingPassTier, current.flyingPassDiscountAmount, current.paymentMethod, current.staffPrepaidOverrideAmount),
+    ]);
+    const updated = results[1].results?.[0];
+    if (!updated) return c.json({ error: "Luggage order price was changed by another request" }, 409);
+    return c.json({
+      changed: true,
+      orderId: updated.orderId,
+      paymentMethod: updated.paymentMethod,
+      flyingPassTier: updated.flyingPassTier,
+      flyingPassDiscountAmount: updated.flyingPassDiscountAmount,
+      prepaidAmount: updated.prepaidAmount,
+      finalAmount: updated.finalAmount,
+      staffPrepaidOverrideAmount: updated.staffPrepaidOverrideAmount,
+      updatedAt: updated.updatedAt,
+    });
+  } catch {
+    return c.json({ error: "Unable to update luggage price" }, 500);
+  }
 });
 
 // PATCH /internal/luggage-orders/:orderId/note — Note-only mutation for the unified admin.
