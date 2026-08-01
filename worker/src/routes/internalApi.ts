@@ -9,6 +9,8 @@ import {
 import { FLYING_PASS_TIERS, calculateExtraAmount, calculatePrepaidAmount, calculatePricePerDay, flyingPassDiscountAmount, normalizeFlyingPassTier, recalculateOrderPrepaid } from "../services/pricing";
 import { buildOrderId, buildOvernightTag, buildSameDayTag } from "../services/orderNumber";
 import { downloadImage } from "../lib/r2";
+import { fetchStaffNamesByIds } from "../lib/staffProfiles";
+import { CASH_CLOSING_STARTING_FLOAT, resolveAutoSalesSummariesByDate, type AutoSalesSummary } from "../services/cashClosingSales";
 import { calculateExtraDays, calculateStorageDays, toJST, validatePickupTimeWindow } from "../services/storage";
 
 const internalApi = new Hono<AppType>();
@@ -139,6 +141,201 @@ function parseJstDateQuery(value: string | undefined): string | null {
   const parsed = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value) ? value : null;
 }
+
+type LuggageCashClosingType = "MORNING_HANDOVER" | "FINAL_CLOSE" | "UNKNOWN";
+
+type LuggageCashClosingDto = {
+  closingId: number;
+  businessDate: string | null;
+  closingType: LuggageCashClosingType;
+  workflowStatus: string | null;
+  denominations: Record<string, number | null>;
+  cashTotal: number | null;
+  paypayAmount: number | null;
+  actualQrAmount: number | null;
+  actualAmount: number | null;
+  qrDifferenceAmount: number | null;
+  rentalCashAmount: number | null;
+  wandRefundAmount: number | null;
+  floor4fCount: number | null;
+  floor8fCount: number | null;
+  autoSalesAmount: number | null;
+  differenceAmount: number | null;
+  note: string | null;
+  authorName: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  submittedAt: string | null;
+  morningHandover: {
+    closingId: number;
+    createdAt: string | null;
+    authorName: string | null;
+  } | null;
+};
+
+type LuggageCashClosingRow = Record<string, unknown>;
+
+const CASH_CLOSING_DENOMINATIONS = [10000, 5000, 2000, 1000, 500, 100, 50, 10, 5, 1] as const;
+
+function nullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function nullableFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeCashClosingType(value: unknown): LuggageCashClosingType {
+  if (value === "MORNING_HANDOVER" || value === "FINAL_CLOSE") return value;
+  return "UNKNOWN";
+}
+
+function serializeCashClosing(
+  row: LuggageCashClosingRow,
+  authorNames: Map<string, string>,
+  autoSalesByDate: Map<string, AutoSalesSummary>,
+): LuggageCashClosingDto {
+  const authorId = nullableString(row.staffId);
+  const morningAuthorId = nullableString(row.morningStaffId);
+  const denominations: Record<string, number | null> = {};
+  for (const denomination of CASH_CLOSING_DENOMINATIONS) {
+    denominations[String(denomination)] = nullableFiniteNumber(row[`count${denomination}`]);
+  }
+
+  const morningClosingId = nullableFiniteNumber(row.morningClosingId);
+  const businessDate = nullableString(row.businessDate);
+  const paypayAmount = nullableFiniteNumber(row.paypayAmount);
+  const rawActualQrAmount = nullableFiniteNumber(row.rawActualQrAmount);
+  const actualQrAmount = rawActualQrAmount === 0 ? paypayAmount : rawActualQrAmount;
+  const autoSalesAmount = businessDate && autoSalesByDate.get(businessDate)
+    ? autoSalesByDate.get(businessDate)?.totalAmount ?? null
+    : nullableFiniteNumber(row.storedAutoSalesAmount);
+  const cashTotal = nullableFiniteNumber(row.cashTotal);
+  const differenceAmount = cashTotal === null || actualQrAmount === null || autoSalesAmount === null
+    ? null
+    : (cashTotal - CASH_CLOSING_STARTING_FLOAT) + actualQrAmount - autoSalesAmount;
+  return {
+    closingId: nullableFiniteNumber(row.closingId) ?? 0,
+    businessDate,
+    closingType: normalizeCashClosingType(row.closingType),
+    workflowStatus: nullableString(row.workflowStatus),
+    denominations,
+    cashTotal,
+    paypayAmount,
+    actualQrAmount,
+    actualAmount: nullableFiniteNumber(row.actualAmount),
+    qrDifferenceAmount: nullableFiniteNumber(row.qrDifferenceAmount),
+    rentalCashAmount: nullableFiniteNumber(row.rentalCashAmount),
+    wandRefundAmount: nullableFiniteNumber(row.wandRefundAmount),
+    floor4fCount: nullableFiniteNumber(row.floor4fCount),
+    floor8fCount: nullableFiniteNumber(row.floor8fCount),
+    autoSalesAmount,
+    differenceAmount,
+    note: nullableString(row.note),
+    authorName: authorId ? authorNames.get(authorId) ?? nullableString(row.ownerName) : nullableString(row.ownerName),
+    createdAt: nullableString(row.createdAt),
+    updatedAt: nullableString(row.updatedAt),
+    submittedAt: nullableString(row.submittedAt),
+    morningHandover: morningClosingId === null ? null : {
+      closingId: morningClosingId,
+      createdAt: nullableString(row.morningCreatedAt),
+      authorName: morningAuthorId ? authorNames.get(morningAuthorId) ?? nullableString(row.morningOwnerName) : nullableString(row.morningOwnerName),
+    },
+  };
+}
+
+const CASH_CLOSING_SELECT = `
+  SELECT c.closing_id AS closingId,
+         c.business_date AS businessDate,
+         c.closing_type AS closingType,
+         c.workflow_status AS workflowStatus,
+         c.count_10000 AS count10000,
+         c.count_5000 AS count5000,
+         c.count_2000 AS count2000,
+         c.count_1000 AS count1000,
+         c.count_500 AS count500,
+         c.count_100 AS count100,
+         c.count_50 AS count50,
+         c.count_10 AS count10,
+         c.count_5 AS count5,
+         c.count_1 AS count1,
+         c.total_amount AS cashTotal,
+         c.paypay_amount AS paypayAmount,
+         c.actual_qr_amount AS rawActualQrAmount,
+         c.actual_amount AS actualAmount,
+         c.qr_difference_amount AS qrDifferenceAmount,
+         c.rental_cash AS rentalCashAmount,
+         c.wand_refund AS wandRefundAmount,
+         c.floor_4f_count AS floor4fCount,
+         c.floor_8f_count AS floor8fCount,
+         c.check_auto_amount AS storedAutoSalesAmount,
+         c.note AS note,
+         c.staff_id AS staffId,
+         c.owner_name AS ownerName,
+         c.created_at AS createdAt,
+         c.updated_at AS updatedAt,
+         c.submitted_at AS submittedAt,
+         morning.closing_id AS morningClosingId,
+         morning.created_at AS morningCreatedAt,
+         morning.staff_id AS morningStaffId,
+         morning.owner_name AS morningOwnerName
+  FROM luggage_cash_closings c
+  LEFT JOIN luggage_cash_closings morning
+    ON morning.business_date = c.business_date
+   AND c.closing_type = 'FINAL_CLOSE'
+   AND morning.closing_type = 'MORNING_HANDOVER'`;
+
+async function serializeCashClosings(env: AppType["Bindings"], rows: LuggageCashClosingRow[]): Promise<LuggageCashClosingDto[]> {
+  const staffIds = rows.flatMap((row) => [nullableString(row.staffId), nullableString(row.morningStaffId)]);
+  const businessDates = rows.map((row) => nullableString(row.businessDate)).filter((value): value is string => value !== null);
+  const [authorNames, autoSalesByDate] = await Promise.all([
+    fetchStaffNamesByIds(env, staffIds),
+    resolveAutoSalesSummariesByDate(env.DB, businessDates),
+  ]);
+  return rows.map((row) => serializeCashClosing(row, authorNames, autoSalesByDate));
+}
+
+// GET /internal/luggage-cash-closings — Read-only cash-closing list for the integrated admin.
+internalApi.get("/internal/luggage-cash-closings", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const dateFromRaw = c.req.query("dateFrom");
+  const dateToRaw = c.req.query("dateTo");
+  const dateFrom = parseJstDateQuery(dateFromRaw);
+  const dateTo = parseJstDateQuery(dateToRaw);
+  if ((dateFromRaw && !dateFrom) || (dateToRaw && !dateTo) || (dateFrom && dateTo && dateFrom > dateTo)) {
+    return c.json({ error: "invalid JST date range" }, 400);
+  }
+  const limit = parsePaginationQuery(c.req.query("limit"), 50, 200);
+  const offset = parsePaginationQuery(c.req.query("offset"), 0);
+  const clauses: string[] = [];
+  const params: string[] = [];
+  if (dateFrom) { clauses.push("c.business_date >= ?"); params.push(dateFrom); }
+  if (dateTo) { clauses.push("c.business_date <= ?"); params.push(dateTo); }
+  const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
+  const [rows, total] = await Promise.all([
+    c.env.DB.prepare(`${CASH_CLOSING_SELECT}${where} ORDER BY c.business_date DESC, c.created_at DESC, c.closing_id DESC LIMIT ? OFFSET ?`)
+      .bind(...params, limit, offset)
+      .all<LuggageCashClosingRow>(),
+    c.env.DB.prepare(`SELECT COUNT(*) AS total FROM luggage_cash_closings c${where}`)
+      .bind(...params)
+      .first<{ total: number }>(),
+  ]);
+  return c.json({ closings: await serializeCashClosings(c.env, rows.results), total: total?.total ?? 0, limit, offset });
+});
+
+// GET /internal/luggage-cash-closings/:closingId — Read-only cash-closing detail for the integrated admin.
+internalApi.get("/internal/luggage-cash-closings/:closingId", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const closingId = c.req.param("closingId");
+  if (!/^\d+$/.test(closingId) || !Number.isSafeInteger(Number(closingId)) || Number(closingId) < 1) {
+    return c.json({ error: "invalid cash closing id" }, 400);
+  }
+  const row = await c.env.DB.prepare(`${CASH_CLOSING_SELECT} WHERE c.closing_id = ?`)
+    .bind(Number(closingId))
+    .first<LuggageCashClosingRow>();
+  if (!row) return c.json({ error: "cash closing not found" }, 404);
+  return c.json({ closing: (await serializeCashClosings(c.env, [row]))[0] });
+});
 
 // GET /internal/luggage-orders — Read-only order list for the integrated admin.
 internalApi.get("/internal/luggage-orders", async (c) => {
