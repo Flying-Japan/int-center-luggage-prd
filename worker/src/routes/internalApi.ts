@@ -8,6 +8,7 @@ import {
 } from "../lib/payments";
 import { FLYING_PASS_TIERS, calculateExtraAmount, calculatePricePerDay, normalizeFlyingPassTier, recalculateOrderPrepaid } from "../services/pricing";
 import { buildOrderId } from "../services/orderNumber";
+import { downloadImage } from "../lib/r2";
 import { calculateExtraDays, calculateStorageDays } from "../services/storage";
 
 const internalApi = new Hono<AppType>();
@@ -20,6 +21,7 @@ const EXPERIENCE_STATUSES = new Set(["SCHEDULED", "VISITED", "RECEIVED", "CANCEL
 const EXPERIENCE_VISITOR_TYPES = new Set(["BLOGGER", "INFLUENCER", "YOUTUBER", "OTHER"]);
 const EXPERIENCE_BENEFIT_TYPES = new Set(["GIFT_CARD", "CASH", "PRODUCT", "OTHER", "REVIEWER_EXPERIENCE"]);
 const LUGGAGE_NOTE_ACTOR_ROLES = new Set(["center_staff", "manager", "super_admin"]);
+const LUGGAGE_IMAGE_ACTOR_ROLES = new Set(["center_staff", "manager", "super_admin", "viewer"]);
 const LUGGAGE_ORDER_ID_PATTERN = /^(?:EXT-)?\d{8}-\d{3,10}$/;
 
 // Stable response shape for callers. Prevents raw D1 columns from leaking
@@ -101,6 +103,8 @@ type LuggageOrderDto = {
   staffPrepaidOverrideAmount: number | null;
   paymentCashAmount: number;
   paymentQrAmount: number;
+  hasIdImage: boolean;
+  hasLuggageImage: boolean;
   extensions: LuggageExtensionSummaryDto[];
 };
 
@@ -217,7 +221,9 @@ internalApi.get("/internal/luggage-orders", async (c) => {
             o.flying_pass_discount_amount AS flyingPassDiscountAmount,
             o.staff_prepaid_override_amount AS staffPrepaidOverrideAmount,
             COALESCE(p.paymentCashAmount, 0) AS paymentCashAmount,
-            COALESCE(p.paymentQrAmount, 0) AS paymentQrAmount
+            COALESCE(p.paymentQrAmount, 0) AS paymentQrAmount,
+            CASE WHEN o.id_image_url IS NOT NULL AND trim(o.id_image_url) <> '' THEN 1 ELSE 0 END AS hasIdImage,
+            CASE WHEN o.luggage_image_url IS NOT NULL AND trim(o.luggage_image_url) <> '' THEN 1 ELSE 0 END AS hasLuggageImage
      FROM luggage_orders o
      LEFT JOIN (${payments}) p ON p.order_id = o.order_id${where}
      ORDER BY o.created_at DESC, o.order_id DESC
@@ -267,6 +273,8 @@ internalApi.get("/internal/luggage-orders", async (c) => {
   return c.json({
     orders: result.results.map((order) => ({
       ...order,
+      hasIdImage: Boolean(order.hasIdImage),
+      hasLuggageImage: Boolean(order.hasLuggageImage),
       extensions: extensionsByParent.get(order.orderId) ?? [],
     })),
     total: countResult?.total ?? 0,
@@ -661,6 +669,34 @@ function normalizeLuggageExtensionCreatePayload(payload: unknown): {
   };
 }
 
+type LuggageImageActor = Omit<LuggageNoteActor, "role"> & { role: "center_staff" | "manager" | "super_admin" | "viewer" };
+
+function normalizeLuggageImagePayload(payload: unknown): { actor: LuggageImageActor } {
+  const payloadKeys = new Set(["actor"]);
+  if (!isPlainRecord(payload) || !hasOnlyKeys(payload, payloadKeys) || !("actor" in payload)) {
+    throw new Error("Body must contain only actor");
+  }
+  const actorKeys = new Set(["userId", "name", "email", "role"]);
+  if (!isPlainRecord(payload.actor) || !hasOnlyKeys(payload.actor, actorKeys)) {
+    throw new Error("actor must contain only userId, name, email, and role");
+  }
+  const role = requiredActorText(payload.actor.role, "role", 50);
+  if (!LUGGAGE_IMAGE_ACTOR_ROLES.has(role)) throw new Error("actor.role is not allowed");
+  return {
+    actor: {
+      userId: requiredActorText(payload.actor.userId, "userId", 200),
+      name: requiredActorText(payload.actor.name, "name", 100),
+      email: requiredActorText(payload.actor.email, "email", 254),
+      role: role as LuggageImageActor["role"],
+    },
+  };
+}
+
+function isAllowedImageContentType(contentType: string): boolean {
+  const normalized = contentType.split(";", 1)[0].trim().toLowerCase();
+  return ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"].includes(normalized);
+}
+
 function serializePaymentStatusOrder(order: LuggagePaymentStatusOrder): LuggagePaymentStatusResponse["order"] {
   return {
     orderId: order.orderId,
@@ -674,6 +710,63 @@ function serializePaymentStatusOrder(order: LuggagePaymentStatusOrder): LuggageP
 function serializePaymentAuditActor(actor: LuggageNoteActor) {
   return { id: actor.userId, name: actor.name, email: actor.email };
 }
+
+// POST /internal/luggage-orders/:orderId/images/:kind — Private image stream for the unified admin.
+internalApi.post("/internal/luggage-orders/:orderId/images/:kind", async (c) => {
+  const orderId = c.req.param("orderId");
+  const kind = c.req.param("kind");
+  if (orderId.length > 32 || !LUGGAGE_ORDER_ID_PATTERN.test(orderId)) {
+    return c.json({ error: "Invalid orderId" }, 400);
+  }
+  if (kind !== "id" && kind !== "luggage") return c.json({ error: "Invalid image kind" }, 400);
+
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  let normalized: ReturnType<typeof normalizeLuggageImagePayload>;
+  try {
+    normalized = normalizeLuggageImagePayload(payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+
+  const imageColumn = kind === "id" ? "id_image_url" : "luggage_image_url";
+  const imageKey = await c.env.DB.prepare(
+    `SELECT ${imageColumn} AS imageKey FROM luggage_orders WHERE order_id = ?`,
+  ).bind(orderId).first<{ imageKey: string | null }>();
+  if (!imageKey?.imageKey?.trim()) return c.json({ error: "Image not found" }, 404);
+
+  const image = await downloadImage(c.env.IMAGES, imageKey.imageKey);
+  if (!image || !isAllowedImageContentType(image.contentType)) {
+    return c.json({ error: "Image not found" }, 404);
+  }
+
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+       VALUES (?, NULL, 'unified-admin', ?, ?, datetime('now'))`,
+    ).bind(
+      orderId,
+      kind === "id" ? "UNIFIED_ADMIN_VIEW_ID_IMAGE" : "UNIFIED_ADMIN_VIEW_LUGGAGE_IMAGE",
+      JSON.stringify({ actor: normalized.actor, kind }),
+    ).run();
+  } catch {
+    return c.json({ error: "Unable to record image access" }, 500);
+  }
+
+  return new Response(image.body, {
+    headers: {
+      "Cache-Control": "private, no-store, max-age=0",
+      "Content-Disposition": "inline",
+      "Content-Type": image.contentType,
+      "Pragma": "no-cache",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+});
 
 // POST /internal/luggage-orders/:orderId/extensions — One-day manual extension for the unified admin.
 // This stays separate from the staff HTML route so the existing /staff behavior is unchanged.
@@ -760,7 +853,8 @@ internalApi.post("/internal/luggage-orders/:orderId/extensions", async (c) => {
                    in_warehouse AS inWarehouse, flying_pass_tier AS flyingPassTier,
                    flying_pass_discount_amount AS flyingPassDiscountAmount,
                    staff_prepaid_override_amount AS staffPrepaidOverrideAmount,
-                   0 AS paymentCashAmount, 0 AS paymentQrAmount`,
+                   0 AS paymentCashAmount, 0 AS paymentQrAmount,
+                   0 AS hasIdImage, 0 AS hasLuggageImage`,
       ).bind(
         extensionOrderId, nowIso, nowIso, parent.name, parent.phone, parent.email, parent.companionCount,
         parent.suitcaseQty, parent.backpackQty, setQty, expectedPickupAt, pricePerDay, pricePerDay,
