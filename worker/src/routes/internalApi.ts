@@ -6,10 +6,10 @@ import {
   paymentAllocationStatements,
   payableAmountFromOrder,
 } from "../lib/payments";
-import { FLYING_PASS_TIERS, calculateExtraAmount, calculatePricePerDay, normalizeFlyingPassTier, recalculateOrderPrepaid } from "../services/pricing";
-import { buildOrderId } from "../services/orderNumber";
+import { FLYING_PASS_TIERS, calculateExtraAmount, calculatePrepaidAmount, calculatePricePerDay, flyingPassDiscountAmount, normalizeFlyingPassTier, recalculateOrderPrepaid } from "../services/pricing";
+import { buildOrderId, buildOvernightTag, buildSameDayTag } from "../services/orderNumber";
 import { downloadImage } from "../lib/r2";
-import { calculateExtraDays, calculateStorageDays } from "../services/storage";
+import { calculateExtraDays, calculateStorageDays, toJST, validatePickupTimeWindow } from "../services/storage";
 
 const internalApi = new Hono<AppType>();
 // Mounted via `app.route("/", internalApi)` in index.tsx, so a bare "/*" here
@@ -422,6 +422,22 @@ type LuggageExtensionCreateResponse = {
   parentUpdatedAt: string;
 };
 
+type LuggageManualOrderCreatePayload = {
+  name: string;
+  phone: string;
+  suitcaseQty: number;
+  backpackQty: number;
+  companionCount: number;
+  expectedPickupAt: string;
+  flyingPassTier: "NONE" | "BLUE" | "SILVER" | "GOLD" | "PLATINUM" | "BLACK";
+  freeReason: "" | "지인 접수" | "블로거 방문" | "쿠폰" | "기타";
+  freeReasonText: string;
+  note: string;
+  actor: LuggageNoteActor;
+};
+
+class LuggageManualOrderActorForbiddenError extends Error {}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -669,6 +685,91 @@ function normalizeLuggageExtensionCreatePayload(payload: unknown): {
   };
 }
 
+function requiredText(value: unknown, field: string, maxLength: number): string {
+  if (typeof value !== "string") throw new Error(`${field} must be a string`);
+  const normalized = value.trim();
+  if (!normalized) throw new Error(`${field} is required`);
+  if (normalized.length > maxLength) throw new Error(`${field} exceeds ${maxLength} characters`);
+  return normalized;
+}
+
+function requiredInteger(value: unknown, field: string, minimum: number, maximum: number): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${field} must be an integer from ${minimum} to ${maximum}`);
+  }
+  return value;
+}
+
+function formatBusinessDateFromJst(date: Date): string {
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("");
+}
+
+function isSameJstDate(first: Date, second: Date): boolean {
+  return first.getUTCFullYear() === second.getUTCFullYear()
+    && first.getUTCMonth() === second.getUTCMonth()
+    && first.getUTCDate() === second.getUTCDate();
+}
+
+function normalizeLuggageManualOrderCreatePayload(payload: unknown, serverNow: Date): LuggageManualOrderCreatePayload {
+  const payloadKeys = new Set([
+    "name", "phone", "suitcaseQty", "backpackQty", "companionCount", "expectedPickupAt",
+    "flyingPassTier", "freeReason", "freeReasonText", "note", "actor",
+  ]);
+  if (!isPlainRecord(payload) || !hasOnlyKeys(payload, payloadKeys)
+    || !["name", "phone", "suitcaseQty", "backpackQty", "companionCount", "expectedPickupAt", "flyingPassTier", "freeReason", "freeReasonText", "note", "actor"].every((key) => key in payload)) {
+    throw new Error("Body must contain only the manual order fields and actor");
+  }
+
+  const actorKeys = new Set(["userId", "name", "email", "role"]);
+  if (!isPlainRecord(payload.actor) || !hasOnlyKeys(payload.actor, actorKeys)) {
+    throw new Error("actor must contain only userId, name, email, and role");
+  }
+  const role = requiredActorText(payload.actor.role, "role", 50);
+  if (!LUGGAGE_NOTE_ACTOR_ROLES.has(role)) throw new LuggageManualOrderActorForbiddenError("actor.role is not allowed");
+
+  const suitcaseQty = requiredInteger(payload.suitcaseQty, "suitcaseQty", 0, 99);
+  const backpackQty = requiredInteger(payload.backpackQty, "backpackQty", 0, 99);
+  if (suitcaseQty === 0 && backpackQty === 0) throw new Error("At least one luggage item is required");
+  const expectedPickupAt = parseTimezoneIso(requiredText(payload.expectedPickupAt, "expectedPickupAt", 100));
+  const expectedPickupDate = new Date(expectedPickupAt);
+  if (expectedPickupDate.getTime() < serverNow.getTime()) throw new Error("expectedPickupAt must not be in the past");
+  const pickupWindow = validatePickupTimeWindow(expectedPickupDate);
+  if (!pickupWindow.valid) throw new Error(pickupWindow.error ?? "expectedPickupAt is outside business hours");
+  if (typeof payload.flyingPassTier !== "string" || !FLYING_PASS_TIERS.includes(payload.flyingPassTier as typeof FLYING_PASS_TIERS[number])) {
+    throw new Error("flyingPassTier is invalid");
+  }
+  if (payload.freeReason !== "" && payload.freeReason !== "지인 접수" && payload.freeReason !== "블로거 방문" && payload.freeReason !== "쿠폰" && payload.freeReason !== "기타") {
+    throw new Error("freeReason is invalid");
+  }
+  if (typeof payload.freeReasonText !== "string" || payload.freeReasonText.trim().length > 100) throw new Error("freeReasonText exceeds 100 characters");
+  const freeReasonText = payload.freeReasonText.trim();
+  if (payload.freeReason === "기타" && !freeReasonText) throw new Error("freeReasonText is required when freeReason is 기타");
+  if (typeof payload.note !== "string" || payload.note.trim().length > 500) throw new Error("note exceeds 500 characters");
+
+  return {
+    name: requiredText(payload.name, "name", 100),
+    phone: requiredText(payload.phone, "phone", 50),
+    suitcaseQty,
+    backpackQty,
+    companionCount: requiredInteger(payload.companionCount, "companionCount", 0, 99),
+    expectedPickupAt,
+    flyingPassTier: normalizeFlyingPassTier(payload.flyingPassTier),
+    freeReason: payload.freeReason,
+    freeReasonText,
+    note: payload.note.trim(),
+    actor: {
+      userId: requiredActorText(payload.actor.userId, "userId", 200),
+      name: requiredActorText(payload.actor.name, "name", 100),
+      email: requiredActorText(payload.actor.email, "email", 254),
+      role: role as LuggageNoteActor["role"],
+    },
+  };
+}
+
 type LuggageImageActor = Omit<LuggageNoteActor, "role"> & { role: "center_staff" | "manager" | "super_admin" | "viewer" };
 
 function normalizeLuggageImagePayload(payload: unknown): { actor: LuggageImageActor } {
@@ -766,6 +867,150 @@ internalApi.post("/internal/luggage-orders/:orderId/images/:kind", async (c) => 
       "X-Content-Type-Options": "nosniff",
     },
   });
+});
+
+// POST /internal/luggage-orders/manual — Manual order creation for the unified admin.
+// This intentionally does not call the staff HTML route; it reuses the same order,
+// tag, storage, and pricing services while keeping the staff session contract intact.
+internalApi.post("/internal/luggage-orders/manual", async (c) => {
+  const serverNow = new Date();
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  let input: LuggageManualOrderCreatePayload;
+  try {
+    input = normalizeLuggageManualOrderCreatePayload(payload, serverNow);
+  } catch (error) {
+    if (error instanceof LuggageManualOrderActorForbiddenError) {
+      return c.json({ error: error.message }, 403);
+    }
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+
+  const receivedJst = toJST(serverNow);
+  const expectedPickupDate = new Date(input.expectedPickupAt);
+  const expectedPickupJst = toJST(expectedPickupDate);
+  const isOvernight = !isSameJstDate(receivedJst, expectedPickupJst);
+  const businessDate = formatBusinessDateFromJst(receivedJst);
+  const orderId = await buildOrderId(c.env.DB, serverNow, isOvernight);
+  const tagNo = isOvernight
+    ? await buildOvernightTag(c.env.DB, businessDate)
+    : await buildSameDayTag(c.env.DB, businessDate);
+  if (tagNo === null) return c.json({ error: "당일 태그(1-90)가 모두 사용 중입니다." }, 409);
+
+  const { setQty, pricePerDay } = calculatePricePerDay(input.suitcaseQty, input.backpackQty);
+  const expectedStorageDays = calculateStorageDays(serverNow, expectedPickupDate);
+  const { discountRate, prepaidAmount: rawPrepaidAmount } = calculatePrepaidAmount(pricePerDay, expectedStorageDays);
+  const isFree = input.freeReason !== "";
+  const prepaidAmount = isFree ? 0 : rawPrepaidAmount;
+  const flyingPassDiscount = isFree ? 0 : flyingPassDiscountAmount(prepaidAmount, input.flyingPassTier);
+  const finalAmount = Math.max(0, prepaidAmount - flyingPassDiscount);
+  const finalPricePerDay = isFree ? 0 : pricePerDay;
+  const freeLabel = input.freeReason === "기타" ? input.freeReasonText : input.freeReason;
+  const note = isFree
+    ? `[무료: ${freeLabel}]${input.note ? ` ${input.note}` : ""}`
+    : input.note;
+  const nowIso = serverNow.toISOString();
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    actor: input.actor,
+    suitcaseQty: input.suitcaseQty,
+    backpackQty: input.backpackQty,
+    expectedPickupAt: input.expectedPickupAt,
+    tagNo,
+    isOvernight,
+    freeReason: input.freeReason,
+    amounts: {
+      pricePerDay: finalPricePerDay,
+      expectedStorageDays,
+      discountRate,
+      prepaidAmount,
+      flyingPassDiscountAmount: flyingPassDiscount,
+      finalAmount,
+    },
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO luggage_orders (
+           order_id, created_at, updated_at, name, phone, companion_count,
+           suitcase_qty, backpack_qty, set_qty, expected_pickup_at, expected_storage_days,
+           actual_storage_days, extra_days, price_per_day, discount_rate, prepaid_amount,
+           flying_pass_tier, flying_pass_discount_amount, extra_amount, final_amount,
+           payment_method, status, tag_no, note, manual_entry, staff_id,
+           consent_checked, parent_order_id, in_warehouse, id_image_url, luggage_image_url
+         ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 0, ?, NULL, 'PAYMENT_PENDING', ?, ?, 1, NULL, 1, NULL, 0, NULL, NULL
+           WHERE ? = 1 OR NOT EXISTS (
+             SELECT 1 FROM luggage_orders
+             WHERE CAST(tag_no AS INTEGER) = CAST(? AS INTEGER)
+               AND order_id LIKE ? || '-%'
+               AND status IN ('PAYMENT_PENDING', 'PAID')
+           )
+           RETURNING order_id`,
+      ).bind(
+        orderId, nowIso, nowIso, input.name, input.phone, input.companionCount,
+        input.suitcaseQty, input.backpackQty, setQty, input.expectedPickupAt, expectedStorageDays,
+        finalPricePerDay, discountRate, prepaidAmount, input.flyingPassTier, flyingPassDiscount,
+        finalAmount, tagNo, note || null, isOvernight ? 1 : 0, tagNo, businessDate,
+      ),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_MANUAL_CREATE', ?, ?
+         WHERE EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ?)`,
+      ).bind(orderId, auditDetails, nowIso, orderId),
+    ]);
+    if (!results[0]?.results?.[0]) {
+      return c.json({ error: "당일 태그가 다른 요청에 먼저 배정되었습니다. 다시 시도해 주세요." }, 409);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : "";
+    if (message.includes("unique") || message.includes("constraint")) {
+      return c.json({ error: "주문 생성이 다른 요청과 충돌했습니다. 다시 시도해 주세요." }, 409);
+    }
+    return c.json({ error: "Manual luggage order creation failed" }, 500);
+  }
+
+  const order: LuggageOrderDto = {
+    orderId,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    name: input.name,
+    phone: input.phone,
+    email: null,
+    suitcaseQty: input.suitcaseQty,
+    backpackQty: input.backpackQty,
+    setQty,
+    expectedPickupAt: input.expectedPickupAt,
+    actualPickupAt: null,
+    expectedStorageDays,
+    actualStorageDays: 0,
+    extraDays: 0,
+    prepaidAmount,
+    finalAmount,
+    extraAmount: 0,
+    pricePerDay: finalPricePerDay,
+    paymentMethod: null,
+    status: "PAYMENT_PENDING",
+    tagNo,
+    note: note || null,
+    manualEntry: 1,
+    parentOrderId: null,
+    inWarehouse: 0,
+    flyingPassTier: input.flyingPassTier,
+    flyingPassDiscountAmount: flyingPassDiscount,
+    staffPrepaidOverrideAmount: null,
+    paymentCashAmount: 0,
+    paymentQrAmount: 0,
+    hasIdImage: false,
+    hasLuggageImage: false,
+    extensions: [],
+  };
+  return c.json({ order }, 201);
 });
 
 // POST /internal/luggage-orders/:orderId/extensions — One-day manual extension for the unified admin.
