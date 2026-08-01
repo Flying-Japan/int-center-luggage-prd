@@ -23,6 +23,7 @@ internalApi.use("/internal/*", internalAuth);
 const EXPERIENCE_STATUSES = new Set(["SCHEDULED", "VISITED", "RECEIVED", "CANCELLED"]);
 const EXPERIENCE_VISITOR_TYPES = new Set(["BLOGGER", "INFLUENCER", "YOUTUBER", "OTHER"]);
 const EXPERIENCE_BENEFIT_TYPES = new Set(["GIFT_CARD", "CASH", "PRODUCT", "OTHER", "REVIEWER_EXPERIENCE"]);
+const EXPERIENCE_VISIT_SORTS = new Set(["newest", "oldest"]);
 const LUGGAGE_NOTE_ACTOR_ROLES = new Set(["center_staff", "manager", "super_admin"]);
 const LUGGAGE_IMAGE_ACTOR_ROLES = new Set(["center_staff", "manager", "super_admin", "viewer"]);
 const LUGGAGE_ORDER_ID_PATTERN = /^(?:EXT-)?\d{8}-\d{3,10}$/;
@@ -78,6 +79,50 @@ function serializeVisit(row: Record<string, unknown> | null): ExperienceVisitDto
     visitorType: str(row.visitor_type),
   };
 }
+
+type LuggageExperienceVisitDto = {
+  visitId: number;
+  visitorName: string | null;
+  visitorType: string | null;
+  scheduledDate: string | null;
+  scheduledTime: string | null;
+  benefitType: string | null;
+  benefitLabel: string | null;
+  benefitAmount: string | null;
+  externalId: string | null;
+  status: string | null;
+  note: string | null;
+  registeredByStaffId: string | null;
+  registeredByStaffName: string;
+  processedByStaffId: string | null;
+  processedByStaffName: string;
+  receivedBy: string | null;
+  receivedAt: string | null;
+  piiMaskedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
+type LuggageExperienceVisitRow = {
+  visitId: number;
+  visitorName: string | null;
+  visitorType: string | null;
+  scheduledDate: string | null;
+  scheduledTime: string | null;
+  benefitType: string | null;
+  benefitLabel: string | null;
+  benefitAmount: string | null;
+  externalId: string | null;
+  status: string | null;
+  note: string | null;
+  createdByStaffId: string | null;
+  processedByStaffId: string | null;
+  receivedBy: string | null;
+  receivedAt: string | null;
+  piiMaskedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
 
 type LuggageOrderDto = {
   orderId: string;
@@ -2232,6 +2277,91 @@ function normalizeUpsertPayload(payload: ExperienceUpsertPayload) {
       asOptionalEnum(payload.visitorType, EXPERIENCE_VISITOR_TYPES, "visitorType") ?? "OTHER",
   };
 }
+
+// GET /internal/luggage-experience-visits — Read-only experience visit list for the integrated admin.
+internalApi.get("/internal/luggage-experience-visits", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const search = c.req.query("search")?.trim() ?? "";
+  const status = c.req.query("status")?.trim() ?? "";
+  const visitorType = c.req.query("visitorType")?.trim() ?? "";
+  const benefitType = c.req.query("benefitType")?.trim() ?? "";
+  const sortQuery = c.req.query("sort")?.trim() ?? "newest";
+  if ((status && !EXPERIENCE_STATUSES.has(status))
+    || (visitorType && !EXPERIENCE_VISITOR_TYPES.has(visitorType))
+    || (benefitType && !EXPERIENCE_BENEFIT_TYPES.has(benefitType))
+    || !EXPERIENCE_VISIT_SORTS.has(sortQuery)) {
+    return c.json({ error: "invalid experience visit query" }, 400);
+  }
+  const limitQuery = c.req.query("limit");
+  const limit = limitQuery?.trim() === "0" ? 50 : parsePaginationQuery(limitQuery, 50, 200);
+  const offset = parsePaginationQuery(c.req.query("offset"), 0);
+  const clauses: string[] = [];
+  const params: string[] = [];
+
+  if (search) {
+    const like = `%${escapeLike(search)}%`;
+    clauses.push("(visitor_name LIKE ? ESCAPE '\\' OR benefit_label LIKE ? ESCAPE '\\' OR benefit_amount LIKE ? ESCAPE '\\' OR note LIKE ? ESCAPE '\\' OR received_by LIKE ? ESCAPE '\\' OR external_id LIKE ? ESCAPE '\\')");
+    params.push(like, like, like, like, like, like);
+  }
+  if (status) { clauses.push("status = ?"); params.push(status); }
+  if (visitorType) { clauses.push("visitor_type = ?"); params.push(visitorType); }
+  if (benefitType) { clauses.push("benefit_type = ?"); params.push(benefitType); }
+
+  const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
+  const direction = sortQuery === "oldest" ? "ASC" : "DESC";
+  const orderBy = `scheduled_date ${direction}, scheduled_time ${direction}, created_at ${direction}, visit_id ${direction}`;
+  const [visitsResult, totalResult] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT visit_id AS visitId, visitor_name AS visitorName, visitor_type AS visitorType,
+              scheduled_date AS scheduledDate, scheduled_time AS scheduledTime,
+              benefit_type AS benefitType, benefit_label AS benefitLabel, benefit_amount AS benefitAmount,
+              external_id AS externalId, status, note, created_by_staff_id AS createdByStaffId,
+              processed_by_staff_id AS processedByStaffId, received_by AS receivedBy,
+              received_at AS receivedAt, pii_masked_at AS piiMaskedAt,
+              created_at AS createdAt, updated_at AS updatedAt
+       FROM luggage_experience_visits${where}
+       ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+    ).bind(...params, limit, offset).all<LuggageExperienceVisitRow>(),
+    c.env.DB.prepare(`SELECT COUNT(*) AS total FROM luggage_experience_visits${where}`)
+      .bind(...params).first<{ total: number }>(),
+  ]);
+  let staffNames = new Map<string, string>();
+  try {
+    staffNames = await fetchStaffNamesByIds(
+      c.env,
+      visitsResult.results.flatMap((visit) => [visit.createdByStaffId, visit.processedByStaffId]),
+    );
+  } catch {
+    // Profile enrichment is optional; the visit rows remain available with ID-based fallbacks.
+  }
+  const visits: LuggageExperienceVisitDto[] = visitsResult.results.map((visit) => ({
+    visitId: visit.visitId,
+    visitorName: visit.visitorName,
+    visitorType: visit.visitorType,
+    scheduledDate: visit.scheduledDate,
+    scheduledTime: visit.scheduledTime,
+    benefitType: visit.benefitType,
+    benefitLabel: visit.benefitLabel,
+    benefitAmount: visit.benefitAmount,
+    externalId: visit.externalId,
+    status: visit.status,
+    note: visit.note,
+    registeredByStaffId: visit.createdByStaffId,
+    registeredByStaffName: visit.createdByStaffId
+      ? staffNames.get(visit.createdByStaffId) ?? visit.createdByStaffId
+      : "작성자 미상",
+    processedByStaffId: visit.processedByStaffId,
+    processedByStaffName: visit.processedByStaffId
+      ? staffNames.get(visit.processedByStaffId) ?? visit.receivedBy ?? visit.processedByStaffId
+      : visit.receivedBy ?? "—",
+    receivedBy: visit.receivedBy,
+    receivedAt: visit.receivedAt,
+    piiMaskedAt: visit.piiMaskedAt,
+    createdAt: visit.createdAt,
+    updatedAt: visit.updatedAt,
+  }));
+  return c.json({ visits, total: totalResult?.total ?? 0, limit, offset });
+});
 
 internalApi.get("/internal/experience/:externalId", async (c) => {
   const externalId = c.req.param("externalId");
