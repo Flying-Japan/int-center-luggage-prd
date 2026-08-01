@@ -10,6 +10,7 @@ import { FLYING_PASS_TIERS, calculateExtraAmount, calculatePrepaidAmount, calcul
 import { buildOrderId, buildOvernightTag, buildSameDayTag } from "../services/orderNumber";
 import { downloadImage } from "../lib/r2";
 import { fetchStaffNamesByIds } from "../lib/staffProfiles";
+import { createSupabaseAdmin } from "../lib/supabase";
 import { CASH_CLOSING_STARTING_FLOAT, resolveAutoSalesSummariesByDate, type AutoSalesSummary } from "../services/cashClosingSales";
 import { calculateExtraDays, calculateStorageDays, toJST, validatePickupTimeWindow } from "../services/storage";
 
@@ -25,6 +26,8 @@ const EXPERIENCE_BENEFIT_TYPES = new Set(["GIFT_CARD", "CASH", "PRODUCT", "OTHER
 const LUGGAGE_NOTE_ACTOR_ROLES = new Set(["center_staff", "manager", "super_admin"]);
 const LUGGAGE_IMAGE_ACTOR_ROLES = new Set(["center_staff", "manager", "super_admin", "viewer"]);
 const LUGGAGE_ORDER_ID_PATTERN = /^(?:EXT-)?\d{8}-\d{3,10}$/;
+const LUGGAGE_HANDOVER_CATEGORIES = new Set(["HANDOVER", "NOTICE", "URGENT", "EXPERIENCE", "OTHER"]);
+const LUGGAGE_HANDOVER_SORTS = new Set(["newest", "oldest", "pinned"]);
 
 // Stable response shape for callers. Prevents raw D1 columns from leaking
 // into the contract — future schema additions stay internal unless we
@@ -140,6 +143,56 @@ function parseJstDateQuery(value: string | undefined): string | null {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
   const parsed = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value) ? value : null;
+}
+
+type LuggageHandoverNoteDto = {
+  noteId: number;
+  category: string;
+  title: string;
+  content: string;
+  isPinned: boolean;
+  authorId: string | null;
+  authorName: string;
+  createdAt: string;
+  readers: Array<{ staffId: string; staffName: string; readAt: string }>;
+  comments: Array<{ commentId: number; staffId: string; staffName: string; content: string; createdAt: string }>;
+  editCount: number;
+  lastEditedAt: string | null;
+  mentionedStaff: Array<{ staffId: string; staffName: string }>;
+};
+
+type LuggageHandoverAuthorDto = { staffId: string; staffName: string };
+
+type LuggageHandoverNoteRow = {
+  noteId: number;
+  category: string | null;
+  title: string | null;
+  content: string | null;
+  isPinned: number | null;
+  authorId: string | null;
+  createdAt: string | null;
+};
+
+function handoverStaffName(staffId: string | null, names: Map<string, string>): string {
+  if (staffId === "SYSTEM") return "시스템";
+  return staffId ? names.get(staffId) ?? staffId.slice(0, 8) : "작성자 미상";
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+async function fetchActiveHandoverAuthorNames(env: AppType["Bindings"]): Promise<Map<string, string>> {
+  const { data } = await createSupabaseAdmin(env)
+    .from("user_profiles")
+    .select("id, display_name, username")
+    .eq("is_active", true);
+  const names = new Map<string, string>();
+  for (const profile of data ?? []) {
+    const name = (profile.display_name || profile.username || "").trim();
+    if (profile.id && name) names.set(profile.id, name);
+  }
+  return names;
 }
 
 type LuggageCashClosingType = "MORNING_HANDOVER" | "FINAL_CLOSE" | "UNKNOWN";
@@ -335,6 +388,158 @@ internalApi.get("/internal/luggage-cash-closings/:closingId", async (c) => {
     .first<LuggageCashClosingRow>();
   if (!row) return c.json({ error: "cash closing not found" }, 404);
   return c.json({ closing: (await serializeCashClosings(c.env, [row]))[0] });
+});
+
+// GET /internal/luggage-handovers — Read-only handover notes for the integrated admin.
+// Related rows are deliberately constrained to the current page of notes so this endpoint
+// does not turn into a full-table read as the staff handover history grows.
+internalApi.get("/internal/luggage-handovers", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const search = c.req.query("search")?.trim() ?? "";
+  const categoryQuery = c.req.query("category")?.trim() ?? "";
+  const authorId = c.req.query("authorId")?.trim() ?? "";
+  const sortQuery = c.req.query("sort")?.trim() ?? "newest";
+  const category = LUGGAGE_HANDOVER_CATEGORIES.has(categoryQuery) ? categoryQuery : "";
+  const sort = LUGGAGE_HANDOVER_SORTS.has(sortQuery) ? sortQuery : "newest";
+  const limitQuery = c.req.query("limit");
+  const limit = limitQuery?.trim() === "0" ? 50 : parsePaginationQuery(limitQuery, 50, 200);
+  const offset = parsePaginationQuery(c.req.query("offset"), 0);
+  const clauses: string[] = [];
+  const params: string[] = [];
+
+  if (search) {
+    const like = `%${escapeLike(search)}%`;
+    clauses.push("(title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')");
+    params.push(like, like);
+  }
+  if (category) {
+    clauses.push("category = ?");
+    params.push(category);
+  }
+  if (authorId) {
+    clauses.push("staff_id = ?");
+    params.push(authorId);
+  }
+
+  const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
+  const orderBy = sort === "oldest"
+    ? "created_at ASC, note_id ASC"
+    : sort === "pinned"
+      ? "is_pinned DESC, created_at DESC, note_id DESC"
+      : "created_at DESC, note_id DESC";
+  const [notesResult, totalResult, authorIdsResult, activeAuthorNames] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT note_id AS noteId, category, title, content, is_pinned AS isPinned, staff_id AS authorId, created_at AS createdAt
+       FROM luggage_handover_notes${where}
+       ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+    ).bind(...params, limit, offset).all<LuggageHandoverNoteRow>(),
+    c.env.DB.prepare(`SELECT COUNT(*) AS total FROM luggage_handover_notes${where}`)
+      .bind(...params).first<{ total: number }>(),
+    c.env.DB.prepare(
+      `SELECT DISTINCT staff_id AS staffId FROM luggage_handover_notes
+       WHERE staff_id IS NOT NULL AND trim(staff_id) <> ''`,
+    ).all<{ staffId: string }>(),
+    fetchActiveHandoverAuthorNames(c.env),
+  ]);
+  const notes = notesResult.results;
+  const noteIds = notes.map((note) => note.noteId);
+  const actualAuthorIds = authorIdsResult.results.map((author) => author.staffId);
+  const authorProfileNames = await fetchStaffNamesByIds(c.env, actualAuthorIds);
+  const authorNames = new Map(activeAuthorNames);
+  for (const [staffId, staffName] of authorProfileNames) authorNames.set(staffId, staffName);
+  if (actualAuthorIds.includes("SYSTEM")) authorNames.set("SYSTEM", "시스템");
+  for (const staffId of actualAuthorIds) {
+    if (!authorNames.has(staffId)) authorNames.set(staffId, handoverStaffName(staffId, authorNames));
+  }
+  const authors: LuggageHandoverAuthorDto[] = [...authorNames.entries()]
+    .map(([staffId, staffName]) => ({ staffId, staffName }))
+    .sort((first, second) => first.staffName.localeCompare(second.staffName, "ko") || first.staffId.localeCompare(second.staffId));
+  if (noteIds.length === 0) {
+    return c.json({ notes: [], authors, total: totalResult?.total ?? 0, limit, offset });
+  }
+
+  const placeholders = noteIds.map(() => "?").join(",");
+  const [readsResult, commentsResult, editsResult, mentionsResult] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT note_id AS noteId, staff_id AS staffId, read_at AS readAt
+       FROM luggage_handover_reads WHERE note_id IN (${placeholders})
+       ORDER BY read_at ASC, read_id ASC`,
+    ).bind(...noteIds).all<{ noteId: number; staffId: string; readAt: string }>(),
+    c.env.DB.prepare(
+      `SELECT comment_id AS commentId, note_id AS noteId, staff_id AS staffId, content, created_at AS createdAt
+       FROM luggage_handover_comments WHERE note_id IN (${placeholders})
+       ORDER BY created_at ASC, comment_id ASC`,
+    ).bind(...noteIds).all<{ commentId: number; noteId: number; staffId: string; content: string | null; createdAt: string }>(),
+    c.env.DB.prepare(
+      `SELECT note_id AS noteId, COUNT(*) AS editCount, MAX(created_at) AS lastEditedAt
+       FROM luggage_handover_edits WHERE note_id IN (${placeholders}) GROUP BY note_id`,
+    ).bind(...noteIds).all<{ noteId: number; editCount: number; lastEditedAt: string | null }>(),
+    c.env.DB.prepare(
+      `SELECT note_id AS noteId, staff_id AS staffId
+       FROM luggage_handover_mentions WHERE note_id IN (${placeholders})
+       ORDER BY created_at ASC, mention_id ASC`,
+    ).bind(...noteIds).all<{ noteId: number; staffId: string }>(),
+  ]);
+
+  const readersByNote = new Map<number, Array<{ staffId: string; staffName: string; readAt: string }>>();
+  const commentsByNote = new Map<number, Array<{ commentId: number; staffId: string; staffName: string; content: string; createdAt: string }>>();
+  const editsByNote = new Map<number, { editCount: number; lastEditedAt: string | null }>();
+  const mentionsByNote = new Map<number, Array<{ staffId: string; staffName: string }>>();
+  const staffIds = [
+    ...actualAuthorIds,
+    ...notes.map((note) => note.authorId),
+    ...readsResult.results.map((read) => read.staffId),
+    ...commentsResult.results.map((comment) => comment.staffId),
+    ...mentionsResult.results.map((mention) => mention.staffId),
+  ];
+  const staffNames = await fetchStaffNamesByIds(c.env, staffIds);
+  for (const [staffId, staffName] of authorNames) staffNames.set(staffId, staffName);
+  staffNames.set("SYSTEM", "시스템");
+
+  for (const read of readsResult.results) {
+    const readers = readersByNote.get(read.noteId) ?? [];
+    readers.push({ staffId: read.staffId, staffName: handoverStaffName(read.staffId, staffNames), readAt: read.readAt });
+    readersByNote.set(read.noteId, readers);
+  }
+  for (const comment of commentsResult.results) {
+    const comments = commentsByNote.get(comment.noteId) ?? [];
+    comments.push({
+      commentId: comment.commentId,
+      staffId: comment.staffId,
+      staffName: handoverStaffName(comment.staffId, staffNames),
+      content: comment.content ?? "",
+      createdAt: comment.createdAt,
+    });
+    commentsByNote.set(comment.noteId, comments);
+  }
+  for (const edit of editsResult.results) editsByNote.set(edit.noteId, edit);
+  for (const mention of mentionsResult.results) {
+    const mentions = mentionsByNote.get(mention.noteId) ?? [];
+    if (!mentions.some((item) => item.staffId === mention.staffId)) {
+      mentions.push({ staffId: mention.staffId, staffName: handoverStaffName(mention.staffId, staffNames) });
+    }
+    mentionsByNote.set(mention.noteId, mentions);
+  }
+
+  const serialized: LuggageHandoverNoteDto[] = notes.map((note) => {
+    const edit = editsByNote.get(note.noteId);
+    return {
+      noteId: note.noteId,
+      category: LUGGAGE_HANDOVER_CATEGORIES.has(note.category ?? "") ? note.category! : "OTHER",
+      title: note.title ?? "",
+      content: note.content ?? "",
+      isPinned: Boolean(note.isPinned),
+      authorId: note.authorId,
+      authorName: handoverStaffName(note.authorId, staffNames),
+      createdAt: note.createdAt ?? "",
+      readers: readersByNote.get(note.noteId) ?? [],
+      comments: commentsByNote.get(note.noteId) ?? [],
+      editCount: edit?.editCount ?? 0,
+      lastEditedAt: edit?.lastEditedAt ?? null,
+      mentionedStaff: mentionsByNote.get(note.noteId) ?? [],
+    };
+  });
+  return c.json({ notes: serialized, authors, total: totalResult?.total ?? 0, limit, offset });
 });
 
 // GET /internal/luggage-orders — Read-only order list for the integrated admin.
