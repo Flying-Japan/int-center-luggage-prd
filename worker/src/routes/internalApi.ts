@@ -6,7 +6,9 @@ import {
   paymentAllocationStatements,
   payableAmountFromOrder,
 } from "../lib/payments";
-import { FLYING_PASS_TIERS, normalizeFlyingPassTier, recalculateOrderPrepaid } from "../services/pricing";
+import { FLYING_PASS_TIERS, calculateExtraAmount, calculatePricePerDay, normalizeFlyingPassTier, recalculateOrderPrepaid } from "../services/pricing";
+import { buildOrderId } from "../services/orderNumber";
+import { calculateExtraDays, calculateStorageDays } from "../services/storage";
 
 const internalApi = new Hono<AppType>();
 // Mounted via `app.route("/", internalApi)` in index.tsx, so a bare "/*" here
@@ -82,6 +84,7 @@ type LuggageOrderDto = {
   actualPickupAt: string | null;
   expectedStorageDays: number;
   actualStorageDays: number;
+  extraDays: number;
   prepaidAmount: number;
   finalAmount: number | null;
   extraAmount: number;
@@ -96,6 +99,19 @@ type LuggageOrderDto = {
   flyingPassTier: string;
   flyingPassDiscountAmount: number;
   staffPrepaidOverrideAmount: number | null;
+  paymentCashAmount: number;
+  paymentQrAmount: number;
+  extensions: LuggageExtensionSummaryDto[];
+};
+
+type LuggageExtensionSummaryDto = {
+  orderId: string;
+  parentOrderId: string;
+  status: string;
+  createdAt: string;
+  prepaidAmount: number;
+  finalAmount: number | null;
+  pricePerDay: number;
   paymentCashAmount: number;
   paymentQrAmount: number;
 };
@@ -185,6 +201,7 @@ internalApi.get("/internal/luggage-orders", async (c) => {
             o.actual_pickup_at AS actualPickupAt,
             o.expected_storage_days AS expectedStorageDays,
             o.actual_storage_days AS actualStorageDays,
+            o.extra_days AS extraDays,
             o.prepaid_amount AS prepaidAmount,
             o.final_amount AS finalAmount,
             o.extra_amount AS extraAmount,
@@ -218,8 +235,40 @@ internalApi.get("/internal/luggage-orders", async (c) => {
      FROM luggage_orders o${countClauses.length ? ` WHERE ${countClauses.join(" AND ")}` : ""}`,
   ).bind(...countParams).first<LuggageStatusCounts>();
 
+  const parentOrderIds = result.results
+    .filter((order) => order.parentOrderId === null)
+    .map((order) => order.orderId);
+  const extensionsByParent = new Map<string, LuggageExtensionSummaryDto[]>();
+  if (parentOrderIds.length > 0) {
+    const placeholders = parentOrderIds.map(() => "?").join(",");
+    const extensionResult = await c.env.DB.prepare(
+      `SELECT o.order_id AS orderId,
+              o.parent_order_id AS parentOrderId,
+              o.status AS status,
+              o.created_at AS createdAt,
+              o.prepaid_amount AS prepaidAmount,
+              o.final_amount AS finalAmount,
+              o.price_per_day AS pricePerDay,
+              COALESCE(SUM(CASE WHEN p.tender_type = 'CASH' THEN p.amount ELSE 0 END), 0) AS paymentCashAmount,
+              COALESCE(SUM(CASE WHEN p.tender_type = 'PAY_QR' THEN p.amount ELSE 0 END), 0) AS paymentQrAmount
+       FROM luggage_orders o
+       LEFT JOIN luggage_order_payments p ON p.order_id = o.order_id
+       WHERE o.parent_order_id IN (${placeholders})
+       GROUP BY o.order_id
+       ORDER BY o.created_at DESC, o.order_id DESC`,
+    ).bind(...parentOrderIds).all<LuggageExtensionSummaryDto>();
+    for (const extension of extensionResult.results) {
+      const current = extensionsByParent.get(extension.parentOrderId) ?? [];
+      current.push(extension);
+      extensionsByParent.set(extension.parentOrderId, current);
+    }
+  }
+
   return c.json({
-    orders: result.results,
+    orders: result.results.map((order) => ({
+      ...order,
+      extensions: extensionsByParent.get(order.orderId) ?? [],
+    })),
     total: countResult?.total ?? 0,
     limit,
     offset,
@@ -312,6 +361,57 @@ type LuggagePaymentStatusResponse = {
     paymentCashAmount: number;
     paymentQrAmount: number;
   };
+};
+
+type LuggagePickupStatusAction = "mark_picked_up" | "undo_picked_up";
+
+type LuggagePickupStatusActor = {
+  userId: string;
+  name: string;
+  role: LuggageNoteActor["role"];
+};
+
+type LuggagePickupStatusOrder = {
+  orderId: string;
+  status: string;
+  createdAt: string;
+  expectedPickupAt: string | null;
+  actualPickupAt: string | null;
+  pricePerDay: number;
+  actualStorageDays: number;
+  extraDays: number;
+  extraAmount: number;
+  updatedAt: string;
+};
+
+type LuggagePickupStatusUpdateDto = {
+  orderId: string;
+  status: "PAID" | "PICKED_UP";
+  actualPickupAt: string | null;
+  actualStorageDays: number;
+  extraDays: number;
+  extraAmount: number;
+  updatedAt: string;
+};
+
+type LuggageExtensionParentOrder = {
+  orderId: string;
+  parentOrderId: string | null;
+  updatedAt: string;
+  status: string;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  companionCount: number;
+  suitcaseQty: number;
+  backpackQty: number;
+  tagNo: string | null;
+  inWarehouse: number;
+};
+
+type LuggageExtensionCreateResponse = {
+  order: LuggageOrderDto;
+  parentUpdatedAt: string;
 };
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -509,6 +609,58 @@ function normalizeLuggagePaymentStatusPayload(payload: unknown): {
   return { actor: actorPayload, targetStatus: payload.targetStatus, payment: { cashAmount, qrAmount } };
 }
 
+function normalizeLuggagePickupStatusPayload(payload: unknown): {
+  action: LuggagePickupStatusAction;
+  expectedUpdatedAt: string;
+  actor: LuggagePickupStatusActor;
+} {
+  const payloadKeys = new Set(["action", "expectedUpdatedAt", "actor"]);
+  if (!isPlainRecord(payload) || !hasOnlyKeys(payload, payloadKeys)
+    || !("action" in payload) || !("expectedUpdatedAt" in payload) || !("actor" in payload)) {
+    throw new Error("Body must contain only action, expectedUpdatedAt, and actor");
+  }
+  if (payload.action !== "mark_picked_up" && payload.action !== "undo_picked_up") {
+    throw new Error("action must be mark_picked_up or undo_picked_up");
+  }
+  if (typeof payload.expectedUpdatedAt !== "string" || !payload.expectedUpdatedAt.trim() || payload.expectedUpdatedAt.length > 100) {
+    throw new Error("expectedUpdatedAt must be a non-empty string");
+  }
+  const actorKeys = new Set(["userId", "name", "role"]);
+  if (!isPlainRecord(payload.actor) || !hasOnlyKeys(payload.actor, actorKeys)
+    || !("userId" in payload.actor) || !("name" in payload.actor) || !("role" in payload.actor)) {
+    throw new Error("actor must contain only userId, name, and role");
+  }
+  const role = requiredActorText(payload.actor.role, "role", 50);
+  if (!LUGGAGE_NOTE_ACTOR_ROLES.has(role)) throw new Error("actor.role is not allowed");
+  return {
+    action: payload.action,
+    expectedUpdatedAt: payload.expectedUpdatedAt,
+    actor: {
+      userId: requiredActorText(payload.actor.userId, "userId", 200),
+      name: requiredActorText(payload.actor.name, "name", 100),
+      role: role as LuggageNoteActor["role"],
+    },
+  };
+}
+
+function normalizeLuggageExtensionCreatePayload(payload: unknown): {
+  expectedUpdatedAt: string;
+  actor: LuggageNoteActor;
+} {
+  const payloadKeys = new Set(["expectedUpdatedAt", "actor"]);
+  if (!isPlainRecord(payload) || !hasOnlyKeys(payload, payloadKeys)
+    || !("expectedUpdatedAt" in payload) || !("actor" in payload)) {
+    throw new Error("Body must contain only expectedUpdatedAt and actor");
+  }
+  if (typeof payload.expectedUpdatedAt !== "string" || !payload.expectedUpdatedAt.trim() || payload.expectedUpdatedAt.length > 100) {
+    throw new Error("expectedUpdatedAt must be a non-empty string");
+  }
+  return {
+    expectedUpdatedAt: payload.expectedUpdatedAt,
+    actor: normalizeLuggageNotePayload({ note: null, actor: payload.actor }).actor,
+  };
+}
+
 function serializePaymentStatusOrder(order: LuggagePaymentStatusOrder): LuggagePaymentStatusResponse["order"] {
   return {
     orderId: order.orderId,
@@ -522,6 +674,122 @@ function serializePaymentStatusOrder(order: LuggagePaymentStatusOrder): LuggageP
 function serializePaymentAuditActor(actor: LuggageNoteActor) {
   return { id: actor.userId, name: actor.name, email: actor.email };
 }
+
+// POST /internal/luggage-orders/:orderId/extensions — One-day manual extension for the unified admin.
+// This stays separate from the staff HTML route so the existing /staff behavior is unchanged.
+internalApi.post("/internal/luggage-orders/:orderId/extensions", async (c) => {
+  const orderId = c.req.param("orderId");
+  if (orderId.length > 32 || !LUGGAGE_ORDER_ID_PATTERN.test(orderId)) {
+    return c.json({ error: "Invalid orderId" }, 400);
+  }
+
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  let normalized: ReturnType<typeof normalizeLuggageExtensionCreatePayload>;
+  try {
+    normalized = normalizeLuggageExtensionCreatePayload(payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+
+  const parent = await c.env.DB.prepare(
+    `SELECT order_id AS orderId, parent_order_id AS parentOrderId, updated_at AS updatedAt, status, name, phone, email,
+            companion_count AS companionCount, suitcase_qty AS suitcaseQty,
+            backpack_qty AS backpackQty, tag_no AS tagNo, in_warehouse AS inWarehouse
+     FROM luggage_orders WHERE order_id = ?`,
+  ).bind(orderId).first<LuggageExtensionParentOrder>();
+  if (!parent) return c.json({ error: "Luggage order not found" }, 404);
+  if (parent.parentOrderId !== null) return c.json({ error: "Extension orders cannot be extended" }, 409);
+  if (parent.status !== "PAYMENT_PENDING" && parent.status !== "PAID") {
+    return c.json({ error: "Extension creation is not allowed for the current order status" }, 409);
+  }
+  if (parent.updatedAt !== normalized.expectedUpdatedAt) {
+    return c.json({ error: "Luggage order was changed by another request" }, 409);
+  }
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const expectedPickupAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+  const extensionOrderId = `EXT-${await buildOrderId(c.env.DB, now, false, "ext")}`;
+  const { setQty, pricePerDay } = calculatePricePerDay(parent.suitcaseQty, parent.backpackQty);
+  const extensionNote = `연장 주문 (원본: ${orderId})`;
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    action: "create_manual_extension",
+    parentOrderId: orderId,
+    extensionOrderId,
+    actor: normalized.actor,
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `UPDATE luggage_orders
+         SET updated_at = ?
+         WHERE order_id = ?
+           AND parent_order_id IS NULL
+           AND status IN ('PAYMENT_PENDING', 'PAID')
+           AND updated_at = ?
+         RETURNING updated_at AS updatedAt`,
+      ).bind(nowIso, orderId, normalized.expectedUpdatedAt),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_orders (
+           order_id, created_at, updated_at, name, phone, email, companion_count,
+           suitcase_qty, backpack_qty, set_qty, expected_pickup_at, expected_storage_days,
+           actual_storage_days, extra_days, price_per_day, discount_rate, prepaid_amount,
+           flying_pass_tier, flying_pass_discount_amount, staff_prepaid_override_amount,
+           extra_amount, final_amount, payment_method, status, tag_no, note,
+           manual_entry, staff_id, parent_order_id, in_warehouse
+         )
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, ?, 0, ?, 'NONE', 0, NULL,
+                0, ?, NULL, 'PAYMENT_PENDING', ?, ?, 1, NULL, ?, ?
+         WHERE changes() = 1
+         RETURNING order_id AS orderId, created_at AS createdAt, updated_at AS updatedAt,
+                   name, phone, email, suitcase_qty AS suitcaseQty, backpack_qty AS backpackQty,
+                   set_qty AS setQty, expected_pickup_at AS expectedPickupAt,
+                   actual_pickup_at AS actualPickupAt, expected_storage_days AS expectedStorageDays,
+                   actual_storage_days AS actualStorageDays, extra_days AS extraDays,
+                   prepaid_amount AS prepaidAmount, final_amount AS finalAmount,
+                   extra_amount AS extraAmount, price_per_day AS pricePerDay,
+                   payment_method AS paymentMethod, status, tag_no AS tagNo, note,
+                   manual_entry AS manualEntry, parent_order_id AS parentOrderId,
+                   in_warehouse AS inWarehouse, flying_pass_tier AS flyingPassTier,
+                   flying_pass_discount_amount AS flyingPassDiscountAmount,
+                   staff_prepaid_override_amount AS staffPrepaidOverrideAmount,
+                   0 AS paymentCashAmount, 0 AS paymentQrAmount`,
+      ).bind(
+        extensionOrderId, nowIso, nowIso, parent.name, parent.phone, parent.email, parent.companionCount,
+        parent.suitcaseQty, parent.backpackQty, setQty, expectedPickupAt, pricePerDay, pricePerDay,
+        pricePerDay, parent.tagNo ?? "", extensionNote, orderId, parent.inWarehouse,
+      ),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_CREATE_EXTENSION', ?, datetime('now')
+         WHERE EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ?)`,
+      ).bind(extensionOrderId, auditDetails, extensionOrderId),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_CREATE_EXTENSION', ?, datetime('now')
+         WHERE EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ?)`,
+      ).bind(orderId, auditDetails, extensionOrderId),
+    ]);
+    const parentUpdate = results[0].results?.[0] as { updatedAt?: string } | undefined;
+    const extension = results[1].results?.[0] as LuggageOrderDto | undefined;
+    if (!parentUpdate || !extension) {
+      return c.json({ error: "Luggage order was changed by another request" }, 409);
+    }
+    return c.json<LuggageExtensionCreateResponse>({
+      parentUpdatedAt: parentUpdate.updatedAt ?? nowIso,
+      order: { ...extension, extensions: [] },
+    }, 201);
+  } catch {
+    return c.json({ error: "Unable to create luggage extension" }, 500);
+  }
+});
 
 // PATCH /internal/luggage-orders/:orderId/payment-status — Explicit payment transition for the unified admin.
 internalApi.patch("/internal/luggage-orders/:orderId/payment-status", async (c) => {
@@ -624,6 +892,128 @@ internalApi.patch("/internal/luggage-orders/:orderId/payment-status", async (c) 
     return c.json({ error: "Unable to update payment status" }, 500);
   }
   return c.json<LuggagePaymentStatusResponse>({ success: true, changed: true, order: after });
+});
+
+// PATCH /internal/luggage-orders/:orderId/pickup-status — Pickup transition for the unified admin.
+internalApi.patch("/internal/luggage-orders/:orderId/pickup-status", async (c) => {
+  const orderId = c.req.param("orderId");
+  if (orderId.length > 32 || !LUGGAGE_ORDER_ID_PATTERN.test(orderId)) {
+    return c.json({ error: "Invalid orderId" }, 400);
+  }
+
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  let normalized: ReturnType<typeof normalizeLuggagePickupStatusPayload>;
+  try {
+    normalized = normalizeLuggagePickupStatusPayload(payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+
+  const current = await c.env.DB.prepare(
+    `SELECT order_id AS orderId, status, created_at AS createdAt,
+            expected_pickup_at AS expectedPickupAt, actual_pickup_at AS actualPickupAt,
+            price_per_day AS pricePerDay, actual_storage_days AS actualStorageDays,
+            extra_days AS extraDays, extra_amount AS extraAmount, updated_at AS updatedAt
+     FROM luggage_orders WHERE order_id = ?`,
+  ).bind(orderId).first<LuggagePickupStatusOrder>();
+  if (!current) return c.json({ error: "Luggage order not found" }, 404);
+  if (current.updatedAt !== normalized.expectedUpdatedAt) {
+    return c.json({ error: "Luggage order was changed by another request" }, 409);
+  }
+
+  const expectedStatus = normalized.action === "mark_picked_up" ? "PAID" : "PICKED_UP";
+  const targetStatus: LuggagePickupStatusUpdateDto["status"] = normalized.action === "mark_picked_up" ? "PICKED_UP" : "PAID";
+  if (current.status !== expectedStatus) {
+    return c.json({ error: "Pickup status transition is not allowed" }, 409);
+  }
+
+  const now = new Date().toISOString();
+  const actualPickupAt = normalized.action === "mark_picked_up" ? now : null;
+  const actualStorageDays = normalized.action === "mark_picked_up"
+    ? calculateStorageDays(current.createdAt, now)
+    : 0;
+  const extraDays = normalized.action === "mark_picked_up" && current.expectedPickupAt
+    ? calculateExtraDays(current.expectedPickupAt, now)
+    : 0;
+  const extraAmount = normalized.action === "mark_picked_up"
+    ? calculateExtraAmount(current.pricePerDay, extraDays)
+    : 0;
+  const before = {
+    orderId,
+    status: current.status,
+    actualPickupAt: current.actualPickupAt,
+    actualStorageDays: current.actualStorageDays,
+    extraDays: current.extraDays,
+    extraAmount: current.extraAmount,
+  };
+  const after = { orderId, status: targetStatus, actualPickupAt, actualStorageDays, extraDays, extraAmount };
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    action: normalized.action,
+    before,
+    after,
+    actor: normalized.actor,
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      normalized.action === "mark_picked_up"
+        ? c.env.DB.prepare(
+          `UPDATE luggage_orders
+           SET status = 'PICKED_UP', actual_pickup_at = ?, actual_storage_days = ?,
+               extra_days = ?, extra_amount = ?, updated_at = datetime('now')
+           WHERE order_id = ? AND status = 'PAID' AND updated_at = ?
+           RETURNING order_id AS orderId, status, actual_pickup_at AS actualPickupAt,
+                     actual_storage_days AS actualStorageDays, extra_days AS extraDays,
+                     extra_amount AS extraAmount, updated_at AS updatedAt`,
+        ).bind(now, actualStorageDays, extraDays, extraAmount, orderId, current.updatedAt)
+        : c.env.DB.prepare(
+          `UPDATE luggage_orders
+           SET status = 'PAID', actual_pickup_at = NULL, actual_storage_days = 0,
+               extra_days = 0, extra_amount = 0, updated_at = datetime('now')
+           WHERE order_id = ? AND status = 'PICKED_UP' AND updated_at = ?
+           RETURNING order_id AS orderId, status, actual_pickup_at AS actualPickupAt,
+                     actual_storage_days AS actualStorageDays, extra_days AS extraDays,
+                     extra_amount AS extraAmount, updated_at AS updatedAt`,
+        ).bind(orderId, current.updatedAt),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_PICKUP_STATUS_UPDATE', ?, datetime('now')
+         WHERE changes() = 1
+           AND EXISTS (
+             SELECT 1 FROM luggage_orders
+             WHERE order_id = ? AND status = ? AND updated_at = datetime('now')
+               AND actual_pickup_at IS ? AND actual_storage_days = ?
+               AND extra_days = ? AND extra_amount = ?
+           )`,
+      ).bind(orderId, auditDetails, orderId, targetStatus, actualPickupAt, actualStorageDays, extraDays, extraAmount),
+    ]);
+    const updatedRows = results[0].results ?? [];
+    if (updatedRows.length !== 1) {
+      return c.json({ error: "Luggage order was changed by another request" }, 409);
+    }
+    if (results[1].meta.changes !== 1) {
+      return c.json({ error: "Unable to write pickup status audit log" }, 500);
+    }
+    const updated = updatedRows[0] as LuggagePickupStatusUpdateDto;
+    return c.json({
+      changed: true,
+      orderId: updated.orderId,
+      status: updated.status,
+      actualPickupAt: updated.actualPickupAt,
+      actualStorageDays: updated.actualStorageDays,
+      extraDays: updated.extraDays,
+      extraAmount: updated.extraAmount,
+      updatedAt: updated.updatedAt,
+    });
+  } catch {
+    return c.json({ error: "Unable to update pickup status" }, 500);
+  }
 });
 
 // PATCH /internal/luggage-orders/:orderId/operations-fields — Limited operational field mutation for the unified admin.
