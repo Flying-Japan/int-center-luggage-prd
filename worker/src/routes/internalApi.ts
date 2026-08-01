@@ -28,6 +28,8 @@ const LUGGAGE_IMAGE_ACTOR_ROLES = new Set(["center_staff", "manager", "super_adm
 const LUGGAGE_ORDER_ID_PATTERN = /^(?:EXT-)?\d{8}-\d{3,10}$/;
 const LUGGAGE_HANDOVER_CATEGORIES = new Set(["HANDOVER", "NOTICE", "URGENT", "EXPERIENCE", "OTHER"]);
 const LUGGAGE_HANDOVER_SORTS = new Set(["newest", "oldest", "pinned"]);
+const LUGGAGE_LOST_FOUND_STATUSES = new Set(["UNCLAIMED", "CLAIMED", "DISPOSED", "RETURNED"]);
+const LUGGAGE_LOST_FOUND_SORTS = new Set(["newest", "oldest"]);
 
 // Stable response shape for callers. Prevents raw D1 columns from leaking
 // into the contract — future schema additions stay internal unless we
@@ -171,6 +173,33 @@ type LuggageHandoverNoteRow = {
   isPinned: number | null;
   authorId: string | null;
   createdAt: string | null;
+};
+
+type LuggageLostFoundDto = {
+  entryId: number;
+  foundAt: string | null;
+  itemName: string | null;
+  quantity: number;
+  foundLocation: string | null;
+  status: string;
+  claimedBy: string | null;
+  note: string | null;
+  registeredByStaffId: string | null;
+  registeredByStaffName: string;
+  createdAt: string;
+};
+
+type LuggageLostFoundRow = {
+  entryId: number;
+  foundAt: string | null;
+  itemName: string | null;
+  quantity: number;
+  foundLocation: string | null;
+  status: string;
+  claimedBy: string | null;
+  note: string | null;
+  staffId: string | null;
+  createdAt: string;
 };
 
 function handoverStaffName(staffId: string | null, names: Map<string, string>): string {
@@ -388,6 +417,67 @@ internalApi.get("/internal/luggage-cash-closings/:closingId", async (c) => {
     .first<LuggageCashClosingRow>();
   if (!row) return c.json({ error: "cash closing not found" }, 404);
   return c.json({ closing: (await serializeCashClosings(c.env, [row]))[0] });
+});
+
+// GET /internal/luggage-lost-found — Read-only lost-and-found list for the integrated admin.
+internalApi.get("/internal/luggage-lost-found", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const search = c.req.query("search")?.trim() ?? "";
+  const statusQuery = c.req.query("status")?.trim() ?? "";
+  const sortQuery = c.req.query("sort")?.trim() ?? "newest";
+  if (statusQuery && !LUGGAGE_LOST_FOUND_STATUSES.has(statusQuery)) {
+    return c.json({ error: "invalid lost-found status" }, 400);
+  }
+  const sort = LUGGAGE_LOST_FOUND_SORTS.has(sortQuery) ? sortQuery : "newest";
+  const limitQuery = c.req.query("limit");
+  const limit = limitQuery?.trim() === "0" ? 50 : parsePaginationQuery(limitQuery, 50, 200);
+  const offset = parsePaginationQuery(c.req.query("offset"), 0);
+  const clauses: string[] = [];
+  const params: string[] = [];
+
+  if (search) {
+    const like = `%${escapeLike(search)}%`;
+    clauses.push("(item_name LIKE ? ESCAPE '\\' OR found_location LIKE ? ESCAPE '\\' OR claimed_by LIKE ? ESCAPE '\\' OR note LIKE ? ESCAPE '\\')");
+    params.push(like, like, like, like);
+  }
+  if (statusQuery) {
+    clauses.push("status = ?");
+    params.push(statusQuery);
+  }
+
+  const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
+  const orderBy = sort === "oldest" ? "created_at ASC, entry_id ASC" : "created_at DESC, entry_id DESC";
+  const [entriesResult, totalResult] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT entry_id AS entryId, found_at AS foundAt, item_name AS itemName, quantity,
+              found_location AS foundLocation, status, claimed_by AS claimedBy, note,
+              staff_id AS staffId, created_at AS createdAt
+       FROM luggage_lost_found_entries${where}
+       ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+    ).bind(...params, limit, offset).all<LuggageLostFoundRow>(),
+    c.env.DB.prepare(`SELECT COUNT(*) AS total FROM luggage_lost_found_entries${where}`)
+      .bind(...params).first<{ total: number }>(),
+  ]);
+  let staffNames = new Map<string, string>();
+  try {
+    staffNames = await fetchStaffNamesByIds(c.env, entriesResult.results.map((entry) => entry.staffId));
+  } catch {
+    // Lost-and-found data must remain readable even when the optional profile lookup is unavailable.
+  }
+  const entries: LuggageLostFoundDto[] = entriesResult.results.map((entry) => ({
+    entryId: entry.entryId,
+    foundAt: entry.foundAt,
+    itemName: entry.itemName,
+    quantity: entry.quantity,
+    foundLocation: entry.foundLocation,
+    status: entry.status,
+    claimedBy: entry.claimedBy,
+    note: entry.note,
+    registeredByStaffId: entry.staffId,
+    registeredByStaffName: handoverStaffName(entry.staffId, staffNames),
+    createdAt: entry.createdAt,
+  }));
+  return c.json({ entries, total: totalResult?.total ?? 0, limit, offset });
 });
 
 // GET /internal/luggage-handovers — Read-only handover notes for the integrated admin.
