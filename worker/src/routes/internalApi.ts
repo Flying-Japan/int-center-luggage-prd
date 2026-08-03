@@ -32,6 +32,25 @@ const LUGGAGE_HANDOVER_SORTS = new Set(["newest", "oldest", "pinned"]);
 const LUGGAGE_LOST_FOUND_STATUSES = new Set(["UNCLAIMED", "CLAIMED", "DISPOSED", "RETURNED"]);
 const LUGGAGE_LOST_FOUND_SORTS = new Set(["newest", "oldest"]);
 
+type LuggageWorkScheduleDto = {
+  calendarEmbedUrl: string | null;
+  configured: boolean;
+};
+
+function normalizeGoogleCalendarEmbedUrl(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const url = new URL(value.trim());
+    const isEmbedPath = /^\/calendar\/embed\/?$/.test(url.pathname)
+      || /^\/calendar\/u\/\d+\/embed\/?$/.test(url.pathname);
+    return url.protocol === "https:" && url.hostname === "calendar.google.com" && isEmbedPath
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 // Stable response shape for callers. Prevents raw D1 columns from leaking
 // into the contract — future schema additions stay internal unless we
 // explicitly surface them here.
@@ -421,6 +440,24 @@ async function serializeCashClosings(env: AppType["Bindings"], rows: LuggageCash
   ]);
   return rows.map((row) => serializeCashClosing(row, authorNames, autoSalesByDate));
 }
+
+// GET /internal/luggage-work-schedule — Read-only projection of the existing staff calendar setting.
+internalApi.get("/internal/luggage-work-schedule", async (c) => {
+  c.header("Cache-Control", "no-store");
+  try {
+    const setting = await c.env.DB.prepare(
+      "SELECT setting_value FROM luggage_app_settings WHERE setting_key = 'calendar_embed_url'",
+    ).first<{ setting_value: string | null }>();
+    const calendarEmbedUrl = normalizeGoogleCalendarEmbedUrl(setting?.setting_value);
+    const response: LuggageWorkScheduleDto = {
+      calendarEmbedUrl,
+      configured: calendarEmbedUrl !== null,
+    };
+    return c.json(response);
+  } catch {
+    return c.json({ error: "failed to read luggage work schedule setting" }, 500);
+  }
+});
 
 // GET /internal/luggage-cash-closings — Read-only cash-closing list for the integrated admin.
 internalApi.get("/internal/luggage-cash-closings", async (c) => {
