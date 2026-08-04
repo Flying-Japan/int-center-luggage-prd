@@ -32,6 +32,17 @@ const LUGGAGE_HANDOVER_CATEGORIES = new Set(["HANDOVER", "NOTICE", "URGENT", "EX
 const LUGGAGE_HANDOVER_SORTS = new Set(["newest", "oldest", "pinned"]);
 const LUGGAGE_LOST_FOUND_STATUSES = new Set(["UNCLAIMED", "CLAIMED", "DISPOSED", "RETURNED"]);
 const LUGGAGE_LOST_FOUND_SORTS = new Set(["newest", "oldest"]);
+const LUGGAGE_ACTIVITY_LOG_SORTS = new Set(["newest", "oldest"]);
+const LUGGAGE_ACTIVITY_LOG_SOURCES = new Set(["staff", "unified-admin", "system"]);
+const LUGGAGE_AUDIT_ACTION_LABELS: Record<string, string> = {
+  INLINE_UPDATE: "수정", TOGGLE_PAYMENT: "결제변경", PICKUP: "수령완료",
+  UNDO_PICKUP: "수령취소", CANCEL: "취소", TOGGLE_WAREHOUSE: "창고",
+  UPDATE_PRICE: "요금변경", MARK_PAID: "결제완료", MARK_PICKED_UP: "수령완료",
+  UNDO_PICKED_UP: "수령취소", MANUAL_CREATE: "수기접수", UPDATE: "수정",
+  VIEW_ID_IMAGE: "신분증조회", VIEW_LUGGAGE_IMAGE: "짐사진조회",
+  VIEW_ID: "신분증조회", VIEW_LUGGAGE: "짐사진조회",
+  CREATE_EXTENSION: "연장접수", BULK_CANCEL: "일괄취소", BULK_MARK_PAID: "일괄결제",
+};
 
 type LuggageWorkScheduleDto = {
   calendarEmbedUrl: string | null;
@@ -646,6 +657,113 @@ internalApi.get("/internal/luggage-cash-closings/:closingId", async (c) => {
     .first<LuggageCashClosingRow>();
   if (!row) return c.json({ error: "cash closing not found" }, 404);
   return c.json({ closing: (await serializeCashClosings(c.env, [row]))[0] });
+});
+
+type LuggageActivityLogSource = "staff" | "unified-admin" | "system";
+type LuggageActivityLogRow = {
+  logId: number;
+  orderId: string | null;
+  staffId: string | null;
+  deviceId: string | null;
+  action: string;
+  details: string | null;
+  timestamp: string;
+};
+
+function activityLogSource(staffId: string | null, deviceId: string | null): LuggageActivityLogSource {
+  if (deviceId === "unified-admin") return "unified-admin";
+  return staffId ? "staff" : "system";
+}
+
+// GET /internal/luggage-activity-logs — Read-only audit log projection for the integrated admin.
+internalApi.get("/internal/luggage-activity-logs", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const dateFromRaw = c.req.query("dateFrom");
+  const dateToRaw = c.req.query("dateTo");
+  let dateFrom: string;
+  let dateTo: string;
+  if (!dateFromRaw && !dateToRaw) {
+    dateTo = jstToday();
+    dateFrom = addCalendarDays(dateTo, -6);
+  } else {
+    const parsedFrom = parseJstDateQuery(dateFromRaw);
+    const parsedTo = parseJstDateQuery(dateToRaw);
+    if (!parsedFrom || !parsedTo || parsedFrom > parsedTo) return c.json({ error: "invalid JST date range" }, 400);
+    const span = Math.round((new Date(`${parsedTo}T00:00:00Z`).getTime() - new Date(`${parsedFrom}T00:00:00Z`).getTime()) / 86400000);
+    if (span > 365) return c.json({ error: "JST date range exceeds one year" }, 400);
+    dateFrom = parsedFrom;
+    dateTo = parsedTo;
+  }
+
+  const search = c.req.query("search")?.trim() ?? "";
+  const action = c.req.query("action")?.trim() ?? "";
+  const staffId = c.req.query("staffId")?.trim() ?? "";
+  const sourceQuery = c.req.query("source")?.trim() ?? "";
+  const sortQuery = c.req.query("sort")?.trim() ?? "newest";
+  const sort = LUGGAGE_ACTIVITY_LOG_SORTS.has(sortQuery) ? sortQuery : "newest";
+  const source = LUGGAGE_ACTIVITY_LOG_SOURCES.has(sourceQuery) ? sourceQuery : "";
+  const limit = parsePaginationQuery(c.req.query("limit"), 50, 200);
+  const offset = parsePaginationQuery(c.req.query("offset"), 0);
+  const clauses = ["date(a.timestamp, '+9 hours') BETWEEN ? AND ?"];
+  const params: Array<string | number> = [dateFrom, dateTo];
+
+  if (search) {
+    const like = `%${escapeLike(search)}%`;
+    clauses.push("(a.order_id LIKE ? ESCAPE '\\' OR a.action LIKE ? ESCAPE '\\' OR a.details LIKE ? ESCAPE '\\' OR a.device_id LIKE ? ESCAPE '\\')");
+    params.push(like, like, like, like);
+  }
+  if (action) { clauses.push("a.action = ?"); params.push(action); }
+  if (staffId) { clauses.push("a.staff_id = ?"); params.push(staffId); }
+  if (source === "unified-admin") clauses.push("a.device_id = 'unified-admin'");
+  if (source === "staff") clauses.push("a.staff_id IS NOT NULL AND (a.device_id IS NULL OR a.device_id != 'unified-admin')");
+  if (source === "system") clauses.push("a.staff_id IS NULL AND (a.device_id IS NULL OR a.device_id != 'unified-admin')");
+
+  const where = ` WHERE ${clauses.join(" AND ")}`;
+  const orderBy = sort === "oldest" ? "a.timestamp ASC, a.log_id ASC" : "a.timestamp DESC, a.log_id DESC";
+  const [logsResult, totalResult, actionResult, staffResult] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT a.log_id AS logId, a.order_id AS orderId, a.staff_id AS staffId, a.device_id AS deviceId,
+              a.action, a.details, a.timestamp
+       FROM luggage_audit_logs a${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+    ).bind(...params, limit, offset).all<LuggageActivityLogRow>(),
+    c.env.DB.prepare(`SELECT COUNT(*) AS total FROM luggage_audit_logs a${where}`)
+      .bind(...params).first<{ total: number }>(),
+    c.env.DB.prepare("SELECT DISTINCT action FROM luggage_audit_logs WHERE action IS NOT NULL AND action != '' ORDER BY action ASC")
+      .all<{ action: string }>(),
+    c.env.DB.prepare("SELECT DISTINCT staff_id AS staffId FROM luggage_audit_logs WHERE staff_id IS NOT NULL AND staff_id != '' ORDER BY staff_id ASC")
+      .all<{ staffId: string }>(),
+  ]);
+
+  const allStaffIds = [...new Set([
+    ...logsResult.results.map((log) => log.staffId).filter((value): value is string => Boolean(value)),
+    ...staffResult.results.map((entry) => entry.staffId),
+  ])];
+  let staffNames = new Map<string, string>();
+  try {
+    staffNames = await fetchStaffNamesByIds(c.env, allStaffIds);
+  } catch {
+    // Audit history remains available when the optional profile lookup is unavailable.
+  }
+  const logs = logsResult.results.map((log) => {
+    const sourceValue = activityLogSource(log.staffId, log.deviceId);
+    return {
+      logId: log.logId,
+      orderId: log.orderId,
+      staffId: log.staffId,
+      staffName: log.staffId ? staffNames.get(log.staffId) ?? log.staffId : sourceValue === "system" ? "시스템" : "알 수 없음",
+      deviceId: log.deviceId,
+      source: sourceValue,
+      action: log.action,
+      actionLabel: LUGGAGE_AUDIT_ACTION_LABELS[log.action] ?? log.action,
+      details: log.details,
+      timestamp: log.timestamp,
+    };
+  });
+  const actions = actionResult.results.map((entry) => ({ value: entry.action, label: LUGGAGE_AUDIT_ACTION_LABELS[entry.action] ?? entry.action }));
+  const staff = staffResult.results
+    .map((entry) => ({ staffId: entry.staffId, staffName: staffNames.get(entry.staffId) ?? entry.staffId }))
+    .sort((left, right) => left.staffName.localeCompare(right.staffName, "ko"));
+  return c.json({ logs, filters: { actions, staff }, total: totalResult?.total ?? 0, limit, offset });
 });
 
 // GET /internal/luggage-lost-found — Read-only lost-and-found list for the integrated admin.
