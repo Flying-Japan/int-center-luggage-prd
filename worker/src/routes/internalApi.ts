@@ -13,6 +13,7 @@ import { fetchStaffNamesByIds } from "../lib/staffProfiles";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { CASH_CLOSING_STARTING_FLOAT, resolveAutoSalesSummariesByDate, type AutoSalesSummary } from "../services/cashClosingSales";
 import { calculateExtraDays, calculateStorageDays, toJST, validatePickupTimeWindow } from "../services/storage";
+import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
 
 const internalApi = new Hono<AppType>();
 // Mounted via `app.route("/", internalApi)` in index.tsx, so a bare "/*" here
@@ -210,6 +211,152 @@ function parseJstDateQuery(value: string | undefined): string | null {
   const parsed = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(value) ? value : null;
 }
+
+const SALES_ANALYTICS_MAX_DAYS = 365;
+const SALES_STARTING_FLOAT = 40000;
+
+function jstToday(): string {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function addCalendarDays(date: string, days: number): string {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function resolveAnalyticsRange(startRaw: string | undefined, endRaw: string | undefined): { startDate: string; endDate: string } | null {
+  if (!startRaw && !endRaw) {
+    const endDate = jstToday();
+    return { startDate: addCalendarDays(endDate, -29), endDate };
+  }
+  const startDate = parseJstDateQuery(startRaw);
+  const endDate = parseJstDateQuery(endRaw);
+  if (!startDate || !endDate || startDate > endDate) return null;
+  const dayCount = Math.round((new Date(`${endDate}T00:00:00Z`).getTime() - new Date(`${startDate}T00:00:00Z`).getTime()) / 86400000);
+  return dayCount <= SALES_ANALYTICS_MAX_DAYS ? { startDate, endDate } : null;
+}
+
+function emptyWeekHourGrid(): number[][] {
+  return Array.from({ length: 7 }, () => Array(24).fill(0));
+}
+
+function emptyHourGrid(): number[][] {
+  return Array.from({ length: 24 }, () => Array(24).fill(0));
+}
+
+function gridMax(grid: number[][]): number {
+  return grid.reduce((maximum, row) => Math.max(maximum, ...row), 0);
+}
+
+function weekHourTotals(grid: number[][]) {
+  return {
+    byDay: grid.map((row) => row.reduce((total, value) => total + value, 0)),
+    byHour: Array.from({ length: 24 }, (_, hour) => grid.reduce((total, row) => total + row[hour], 0)),
+  };
+}
+
+// GET /internal/luggage-sales-analytics — read-only sales projection for the integrated admin.
+internalApi.get("/internal/luggage-sales-analytics", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const range = resolveAnalyticsRange(c.req.query("startDate"), c.req.query("endDate"));
+  if (!range) return c.json({ status: "error", error: "invalid JST date range" }, 400);
+
+  try {
+    const [sheetRows, rentalRows, actualRows, closingRows] = await Promise.all([
+      c.env.DB.prepare("SELECT sale_date, people, cash, qr, luggage_total FROM luggage_daily_sales WHERE sale_date BETWEEN ? AND ?")
+        .bind(range.startDate, range.endDate).all<{ sale_date: string; people: number; cash: number; qr: number; luggage_total: number }>(),
+      c.env.DB.prepare("SELECT business_date AS sale_date, revenue_amount AS rental_total FROM luggage_rental_daily_sales WHERE business_date BETWEEN ? AND ?")
+        .bind(range.startDate, range.endDate).all<{ sale_date: string; rental_total: number }>(),
+      c.env.DB.prepare(
+        `WITH payment_allocations AS (
+          SELECT order_id, SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) AS cash_amount,
+                 SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) AS qr_amount, COUNT(*) AS payment_count
+          FROM luggage_order_payments GROUP BY order_id
+        )
+        SELECT date(o.created_at, '+9 hours') AS sale_date, SUM(1 + o.companion_count) AS people,
+               SUM(o.suitcase_qty) AS suitcase_total, SUM(o.backpack_qty) AS backpack_total,
+               SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN o.payment_method = 'CASH' OR o.payment_method IS NULL THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) AS cash,
+               SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) AS qr
+        FROM luggage_orders o LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
+        WHERE o.status IN ('PAID', 'PICKED_UP') AND date(o.created_at, '+9 hours') BETWEEN ? AND ? GROUP BY sale_date`
+      ).bind(range.startDate, range.endDate).all<{ sale_date: string; people: number; suitcase_total: number; backpack_total: number; cash: number; qr: number }>(),
+      c.env.DB.prepare("SELECT business_date AS sale_date, total_amount, paypay_amount, actual_qr_amount FROM luggage_cash_closings WHERE closing_type = 'FINAL_CLOSE' AND business_date BETWEEN ? AND ?")
+        .bind(range.startDate, range.endDate).all<{ sale_date: string; total_amount: number; paypay_amount: number; actual_qr_amount: number }>(),
+    ]);
+
+    const sheetByDate = new Map(sheetRows.results.map((row) => [row.sale_date, row]));
+    const rentalByDate = new Map(rentalRows.results.map((row) => [row.sale_date, Number(row.rental_total) || 0]));
+    const actualByDate = new Map(actualRows.results.map((row) => [row.sale_date, row]));
+    const closingByDate = new Map(closingRows.results.map((row) => {
+      const cash = Math.max(0, (Number(row.total_amount) || 0) - SALES_STARTING_FLOAT);
+      const qr = Number(row.actual_qr_amount) || Number(row.paypay_amount) || 0;
+      return [row.sale_date, { cash, qr, luggage: cash + qr }] as const;
+    }));
+    const today = jstToday();
+    const dates = new Set([...sheetByDate.keys(), ...rentalByDate.keys(), ...actualByDate.keys(), ...closingByDate.keys()]);
+    if (today >= range.startDate && today <= range.endDate) dates.add(today);
+    const dailyRows = [...dates].sort((a, b) => b.localeCompare(a)).map((date) => {
+      const actual = actualByDate.get(date);
+      const sheet = sheetByDate.get(date);
+      const closing = closingByDate.get(date);
+      const settled = Boolean(closing) && date !== today;
+      const cash = settled ? closing!.cash : actual ? Number(actual.cash) || 0 : Number(sheet?.cash) || 0;
+      const qr = settled ? closing!.qr : actual ? Number(actual.qr) || 0 : Number(sheet?.qr) || 0;
+      const luggage = settled ? closing!.luggage : cash + qr;
+      const flags = getSalesHolidayFlags(date);
+      return {
+        date, weekdayJst: JST_DOW_JP[new Date(`${date}T12:00:00Z`).getUTCDay()], isWeekend: flags.isWeekend,
+        japaneseHoliday: flags.jp, koreanHoliday: flags.kr, people: Math.max(Number(actual?.people) || 0, Number(sheet?.people) || 0),
+        suitcases: Number(actual?.suitcase_total) || 0, backpacks: Number(actual?.backpack_total) || 0, cash, qr, luggage,
+        rental: rentalByDate.get(date) ?? 0, combined: luggage + (rentalByDate.get(date) ?? 0), realtime: date === today,
+        settled, luggageSource: settled ? "final_close" : actual ? "orders" : sheet ? "daily_sales_fallback" : "none",
+      };
+    });
+    const todayRow = dailyRows.find((row) => row.date === today);
+    const todayOrders = await c.env.DB.prepare(
+      `WITH payment_allocations AS (SELECT order_id, SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) AS cash_amount, SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) AS qr_amount, COUNT(*) AS payment_count FROM luggage_order_payments GROUP BY order_id)
+       SELECT COUNT(*) AS order_count, SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN 1 ELSE 0 END) AS paid_count, SUM(CASE WHEN o.status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) AS pending_count, SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN 1 + o.companion_count ELSE 0 END) AS people,
+              SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN o.status IN ('PAID','PICKED_UP') AND (o.payment_method = 'CASH' OR o.payment_method IS NULL) THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) AS cash,
+              SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.status IN ('PAID','PICKED_UP') AND o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) AS qr,
+              SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) AS luggage,
+              SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN o.suitcase_qty ELSE 0 END) AS suitcases, SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN o.backpack_qty ELSE 0 END) AS backpacks
+       FROM luggage_orders o LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id WHERE date(o.created_at, '+9 hours') = ?`
+    ).bind(today).first<{ order_count: number; paid_count: number; pending_count: number; people: number; cash: number; qr: number; luggage: number; suitcases: number; backpacks: number }>();
+    const rows = todayRow ? dailyRows.map((row) => row.date === today ? { ...row, people: Number(todayOrders?.people) || 0, suitcases: Number(todayOrders?.suitcases) || 0, backpacks: Number(todayOrders?.backpacks) || 0, cash: Number(todayOrders?.cash) || 0, qr: Number(todayOrders?.qr) || 0, luggage: Number(todayOrders?.luggage) || 0, combined: (Number(todayOrders?.luggage) || 0) + row.rental, realtime: true, settled: false, luggageSource: "orders" } : row) : dailyRows;
+    const total = (key: "cash" | "qr" | "luggage" | "rental" | "combined" | "people" | "suitcases" | "backpacks") => rows.reduce((sum, row) => sum + row[key], 0);
+    const activeRows = rows.filter((row) => row.combined > 0);
+    const historical = activeRows.filter((row) => row.date !== today);
+    const historicalAverage = historical.length ? Math.round(historical.reduce((sum, row) => sum + row.combined, 0) / historical.length) : 0;
+    const minRows = historical.length ? historical : activeRows;
+    const totalCash = total("cash"); const totalQr = total("qr"); const totalCombined = total("combined");
+    return c.json({ status: "ok", range, today: { date: today, orders: Number(todayOrders?.order_count) || 0, paid: Number(todayOrders?.paid_count) || 0, pending: Number(todayOrders?.pending_count) || 0, cash: Number(todayOrders?.cash) || 0, qr: Number(todayOrders?.qr) || 0, luggage: Number(todayOrders?.luggage) || 0, suitcases: Number(todayOrders?.suitcases) || 0, backpacks: Number(todayOrders?.backpacks) || 0, versusHistoricalAverage: { amount: (Number(todayOrders?.luggage) || 0) - historicalAverage, percent: historicalAverage ? Math.round(((Number(todayOrders?.luggage) || 0) - historicalAverage) / historicalAverage * 100) : 0 } }, summary: { luggage: total("luggage"), rental: total("rental"), combined: totalCombined, cash: totalCash, qr: totalQr, cashPercent: totalCash + totalQr ? Math.round(totalCash / (totalCash + totalQr) * 100) : 0, qrPercent: totalCash + totalQr ? Math.round(totalQr / (totalCash + totalQr) * 100) : 0, people: total("people"), suitcases: total("suitcases"), backpacks: total("backpacks"), dailyAverage: historicalAverage, activeMin: minRows.length ? Math.min(...minRows.map((row) => row.combined)) : null, activeMax: activeRows.length ? Math.max(...activeRows.map((row) => row.combined)) : null }, dailyRows: rows });
+  } catch {
+    return c.json({ status: "error", error: "failed to read luggage sales analytics" }, 500);
+  }
+});
+
+// GET /internal/luggage-sales-heatmap — read-only storage and pickup time projections.
+internalApi.get("/internal/luggage-sales-heatmap", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const range = resolveAnalyticsRange(c.req.query("startDate"), c.req.query("endDate"));
+  if (!range) return c.json({ status: "error", error: "invalid JST date range" }, 400);
+  try {
+    const [storageRows, pickupRows, cycleRows, stats] = await Promise.all([
+      c.env.DB.prepare("SELECT CAST(strftime('%w', created_at, '+9 hours') AS INTEGER) AS dow, CAST(strftime('%H', created_at, '+9 hours') AS INTEGER) AS hour, COUNT(*) AS count FROM luggage_orders WHERE status IN ('PAID','PICKED_UP','PAYMENT_PENDING') AND date(created_at, '+9 hours') BETWEEN ? AND ? GROUP BY dow, hour").bind(range.startDate, range.endDate).all<{ dow: number; hour: number; count: number }>(),
+      c.env.DB.prepare("SELECT CAST(strftime('%w', actual_pickup_at, '+9 hours') AS INTEGER) AS dow, CAST(strftime('%H', actual_pickup_at, '+9 hours') AS INTEGER) AS hour, COUNT(*) AS count FROM luggage_orders WHERE actual_pickup_at IS NOT NULL AND status IN ('PAID','PICKED_UP') AND date(actual_pickup_at, '+9 hours') BETWEEN ? AND ? GROUP BY dow, hour").bind(range.startDate, range.endDate).all<{ dow: number; hour: number; count: number }>(),
+      c.env.DB.prepare("SELECT CAST(strftime('%H', created_at, '+9 hours') AS INTEGER) AS storage_hour, CAST(strftime('%H', actual_pickup_at, '+9 hours') AS INTEGER) AS pickup_hour, COUNT(*) AS count FROM luggage_orders WHERE status = 'PICKED_UP' AND actual_pickup_at IS NOT NULL AND date(created_at, '+9 hours') BETWEEN ? AND ? GROUP BY storage_hour, pickup_hour").bind(range.startDate, range.endDate).all<{ storage_hour: number; pickup_hour: number; count: number }>(),
+      c.env.DB.prepare("SELECT COUNT(*) AS total_orders, MIN(date(created_at, '+9 hours')) AS earliest_date, MAX(date(created_at, '+9 hours')) AS latest_date FROM luggage_orders WHERE date(created_at, '+9 hours') BETWEEN ? AND ?").bind(range.startDate, range.endDate).first<{ total_orders: number; earliest_date: string | null; latest_date: string | null }>(),
+    ]);
+    const storage = emptyWeekHourGrid(); const pickup = emptyWeekHourGrid(); const cycle = emptyHourGrid();
+    for (const row of storageRows.results) if (row.dow >= 0 && row.dow < 7 && row.hour >= 0 && row.hour < 24) storage[row.dow][row.hour] = Number(row.count) || 0;
+    for (const row of pickupRows.results) if (row.dow >= 0 && row.dow < 7 && row.hour >= 0 && row.hour < 24) pickup[row.dow][row.hour] = Number(row.count) || 0;
+    for (const row of cycleRows.results) if (row.storage_hour >= 0 && row.storage_hour < 24 && row.pickup_hour >= 0 && row.pickup_hour < 24) cycle[row.storage_hour][row.pickup_hour] = Number(row.count) || 0;
+    return c.json({ status: "ok", range, totalDataCount: Number(stats?.total_orders) || 0, dataDateRange: { min: stats?.earliest_date ?? null, max: stats?.latest_date ?? null }, grids: { storage, pickup, cycle }, maximums: { storage: gridMax(storage), pickup: gridMax(pickup), cycle: gridMax(cycle) }, totals: { storage: weekHourTotals(storage), pickup: weekHourTotals(pickup), cycle: { byStorageHour: cycle.map((row) => row.reduce((sum, value) => sum + value, 0)), byPickupHour: Array.from({ length: 24 }, (_, hour) => cycle.reduce((sum, row) => sum + row[hour], 0)) } } });
+  } catch {
+    return c.json({ status: "error", error: "failed to read luggage sales heatmap" }, 500);
+  }
+});
 
 type LuggageHandoverNoteDto = {
   noteId: number;

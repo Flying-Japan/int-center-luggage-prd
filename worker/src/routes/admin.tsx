@@ -8,6 +8,7 @@ import { adminAuth, editorAuth, getStaff } from "../middleware/auth";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
+import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
 
 const admin = new Hono<AppType>();
 admin.use("/staff/admin/sales/*", editorAuth);
@@ -96,41 +97,6 @@ admin.get("/staff/admin/sales", async (c) => {
     finalClosingByDate.set(row.sale_date, { cash, qr, luggage_total: cash + qr });
   }
 
-  const DOW_JP = ["日", "月", "火", "水", "木", "金", "土"];
-
-  // Japanese public holidays 2026
-  const JP_HOLIDAYS: Record<string, string> = {
-    "01-01": "元日", "01-12": "成人の日", "02-11": "建国記念の日", "02-23": "天皇誕生日",
-    "03-20": "春分の日", "04-29": "昭和の日", "05-03": "憲法記念日", "05-04": "みどりの日",
-    "05-05": "こどもの日", "05-06": "振替休日", "07-20": "海の日", "08-11": "山の日",
-    "09-21": "敬老の日", "09-23": "秋分の日", "10-12": "スポーツの日", "11-03": "文化の日",
-    "11-23": "勤労感謝の日",
-  };
-
-  // Korean public holidays 2025-2026 (MM-DD, with year-specific ones keyed as YYYY-MM-DD)
-  const KR_HOLIDAYS: Record<string, string> = {
-    "01-01": "신정", "03-01": "삼일절", "05-05": "어린이날", "06-06": "현충일",
-    "08-15": "광복절", "10-03": "개천절", "10-09": "한글날", "12-25": "성탄절",
-    // 2025 lunar holidays
-    "2025-01-28": "설날", "2025-01-29": "설날", "2025-01-30": "설날",
-    "2025-05-06": "석가탄신일",
-    "2025-10-05": "추석", "2025-10-06": "추석", "2025-10-07": "추석", "2025-10-08": "대체휴일",
-    // 2026 lunar holidays
-    "2026-02-16": "설날", "2026-02-17": "설날", "2026-02-18": "설날",
-    "2026-05-24": "석가탄신일",
-    "2026-09-24": "추석", "2026-09-25": "추석", "2026-09-26": "추석",
-  };
-
-  function getHolidayFlags(dateStr: string): { isWeekend: boolean; jp: string | null; kr: string | null } {
-    const d = new Date(dateStr + "T12:00:00Z");
-    const dayOfWeek = d.getUTCDay();
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-    const mmdd = dateStr.slice(5); // MM-DD
-    const jp = JP_HOLIDAYS[mmdd] || null;
-    const kr = KR_HOLIDAYS[dateStr] || KR_HOLIDAYS[mmdd] || null;
-    return { isWeekend, jp, kr };
-  }
-
   // Sheet data lookup (fallback for luggage on pre-migration dates)
   const sheetByDate = new Map<string, { people: number; cash: number; qr: number; luggage_total: number; rental_total: number }>();
   for (const r of dailyRows.results) {
@@ -146,8 +112,8 @@ admin.get("/staff/admin/sales", async (c) => {
     ...finalClosingRows.results.map(r => r.sale_date),
   ]);
   const mergedRows: MergedRow[] = [...allDates].sort((a, b) => b.localeCompare(a)).map(date => {
-    const dow = DOW_JP[new Date(date + "T12:00:00Z").getUTCDay()];
-    const flags = getHolidayFlags(date);
+    const dow = JST_DOW_JP[new Date(date + "T12:00:00Z").getUTCDay()];
+    const flags = getSalesHolidayFlags(date);
     const actual = actualByDate.get(date);
     const sheet = sheetByDate.get(date);
     const finalClosing = finalClosingByDate.get(date);
@@ -234,8 +200,8 @@ admin.get("/staff/admin/sales", async (c) => {
 
   // Override or insert today's row in mergedRows with real-time data
   const todayIdx = mergedRows.findIndex(r => r.date === todayJST);
-  const todayDow = DOW_JP[new Date(todayJST + "T12:00:00Z").getUTCDay()];
-  const todayFlags = getHolidayFlags(todayJST);
+  const todayDow = JST_DOW_JP[new Date(todayJST + "T12:00:00Z").getUTCDay()];
+  const todayFlags = getSalesHolidayFlags(todayJST);
   const todayRental = rentalByDate.get(todayJST) || 0;
   const todayRTRow: MergedRow & { isRealtime?: boolean } = {
     date: todayJST,
