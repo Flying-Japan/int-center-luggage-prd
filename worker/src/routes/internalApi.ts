@@ -14,6 +14,7 @@ import { createSupabaseAdmin } from "../lib/supabase";
 import { CASH_CLOSING_STARTING_FLOAT, resolveAutoSalesSummariesByDate, type AutoSalesSummary } from "../services/cashClosingSales";
 import { calculateExtraDays, calculateStorageDays, toJST, validatePickupTimeWindow } from "../services/storage";
 import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
+import { hmacSha256Hex } from "../lib/hmac";
 
 const internalApi = new Hono<AppType>();
 // Mounted via `app.route("/", internalApi)` in index.tsx, so a bare "/*" here
@@ -34,6 +35,8 @@ const LUGGAGE_LOST_FOUND_STATUSES = new Set(["UNCLAIMED", "CLAIMED", "DISPOSED",
 const LUGGAGE_LOST_FOUND_SORTS = new Set(["newest", "oldest"]);
 const LUGGAGE_ACTIVITY_LOG_SORTS = new Set(["newest", "oldest"]);
 const LUGGAGE_ACTIVITY_LOG_SOURCES = new Set(["staff", "unified-admin", "system"]);
+const LUGGAGE_CUSTOMER_SORTS = new Set(["recent", "oldest", "visits_desc", "spent_desc"]);
+const LUGGAGE_CUSTOMER_LIMITS = new Set([20, 50, 100]);
 const LUGGAGE_AUDIT_ACTION_LABELS: Record<string, string> = {
   INLINE_UPDATE: "수정", TOGGLE_PAYMENT: "결제변경", PICKUP: "수령완료",
   UNDO_PICKUP: "수령취소", CANCEL: "취소", TOGGLE_WAREHOUSE: "창고",
@@ -433,6 +436,14 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
 }
 
+function maskLuggageCustomerName(value: string | null): string {
+  const characters = Array.from(value?.trim() ?? "");
+  if (characters.length === 0) return "—";
+  if (characters.length === 1) return "*";
+  if (characters.length === 2) return `${characters[0]}*`;
+  return `${characters[0]}${"*".repeat(characters.length - 2)}${characters[characters.length - 1]}`;
+}
+
 async function fetchActiveHandoverAuthorNames(env: AppType["Bindings"]): Promise<Map<string, string>> {
   const { data } = await createSupabaseAdmin(env)
     .from("user_profiles")
@@ -764,6 +775,101 @@ internalApi.get("/internal/luggage-activity-logs", async (c) => {
     .map((entry) => ({ staffId: entry.staffId, staffName: staffNames.get(entry.staffId) ?? entry.staffId }))
     .sort((left, right) => left.staffName.localeCompare(right.staffName, "ko"));
   return c.json({ logs, filters: { actions, staff }, total: totalResult?.total ?? 0, limit, offset });
+});
+
+type LuggageCustomerAggregateRow = {
+  customerIdentity: string;
+  name: string | null;
+  orderCount: number;
+  totalSpent: number;
+  firstVisitAt: string;
+  lastVisitAt: string;
+  totalSuitcases: number;
+  totalBackpacks: number;
+};
+
+// GET /internal/luggage-customers — Read-only, privacy-reduced customer aggregates.
+internalApi.get("/internal/luggage-customers", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const q = c.req.query("q")?.trim() ?? "";
+  const sortQuery = c.req.query("sort")?.trim() ?? "recent";
+  const sort = LUGGAGE_CUSTOMER_SORTS.has(sortQuery) ? sortQuery : "recent";
+  const parsedLimit = Number(c.req.query("limit")?.trim() ?? "50");
+  const limit = LUGGAGE_CUSTOMER_LIMITS.has(parsedLimit) ? parsedLimit : 50;
+  const offset = parsePaginationQuery(c.req.query("offset"), 0);
+  const clauses = [
+    "status != 'CANCELLED'",
+    "COALESCE(NULLIF(TRIM(phone), ''), NULLIF(TRIM(email), '')) IS NOT NULL",
+  ];
+  const params: string[] = [];
+
+  if (q) {
+    const like = `%${escapeLike(q)}%`;
+    clauses.push("(name LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\')");
+    params.push(like, like, like);
+  }
+
+  const filteredSql = `SELECT order_id AS orderId,
+      COALESCE(NULLIF(TRIM(phone), ''), NULLIF(TRIM(email), '')) AS customerIdentity,
+      name, created_at AS createdAt, COALESCE(final_amount, 0) AS finalAmount,
+      COALESCE(suitcase_qty, 0) AS suitcaseQty, COALESCE(backpack_qty, 0) AS backpackQty
+    FROM luggage_orders WHERE ${clauses.join(" AND ")}`;
+  const orderBy = sort === "oldest"
+    ? "lastVisitAt ASC, firstVisitAt ASC, customerIdentity ASC"
+    : sort === "visits_desc"
+      ? "orderCount DESC, lastVisitAt DESC, customerIdentity ASC"
+      : sort === "spent_desc"
+        ? "totalSpent DESC, lastVisitAt DESC, customerIdentity ASC"
+        : "lastVisitAt DESC, customerIdentity ASC";
+
+  try {
+    const [totalResult, rowsResult] = await Promise.all([
+      c.env.DB.prepare(
+        `WITH filtered AS (${filteredSql}),
+         grouped AS (SELECT customerIdentity FROM filtered GROUP BY customerIdentity)
+         SELECT COUNT(*) AS total FROM grouped`,
+      ).bind(...params).first<{ total: number }>(),
+      c.env.DB.prepare(
+        `WITH filtered AS (${filteredSql}),
+         grouped AS (
+           SELECT customerIdentity, COUNT(*) AS orderCount,
+             SUM(finalAmount) AS totalSpent, MIN(createdAt) AS firstVisitAt,
+             MAX(createdAt) AS lastVisitAt, SUM(suitcaseQty) AS totalSuitcases,
+             SUM(backpackQty) AS totalBackpacks
+           FROM filtered GROUP BY customerIdentity
+         )
+         SELECT grouped.*,
+           (SELECT recent.name FROM filtered recent
+            WHERE recent.customerIdentity IS grouped.customerIdentity
+            ORDER BY recent.createdAt DESC, recent.orderId DESC LIMIT 1) AS name
+         FROM grouped ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+      ).bind(...params, limit, offset).all<LuggageCustomerAggregateRow>(),
+    ]);
+
+    const customers = await Promise.all(rowsResult.results.map(async (row) => ({
+      customerKey: `lc_${await hmacSha256Hex(
+        c.env.INTERNAL_API_SECRET,
+        `luggage-customer:value:${row.customerIdentity}`,
+      )}`,
+      maskedName: maskLuggageCustomerName(row.name),
+      orderCount: Math.max(0, Number(row.orderCount) || 0),
+      totalSpent: Math.max(0, Number(row.totalSpent) || 0),
+      firstVisitAt: row.firstVisitAt,
+      lastVisitAt: row.lastVisitAt,
+      totalSuitcases: Math.max(0, Number(row.totalSuitcases) || 0),
+      totalBackpacks: Math.max(0, Number(row.totalBackpacks) || 0),
+    })));
+
+    return c.json({
+      status: "ok",
+      customers,
+      total: Math.max(0, Number(totalResult?.total) || 0),
+      limit,
+      offset,
+    });
+  } catch {
+    return c.json({ status: "error", error: "failed to read luggage customers" }, 500);
+  }
 });
 
 // GET /internal/luggage-lost-found — Read-only lost-and-found list for the integrated admin.
