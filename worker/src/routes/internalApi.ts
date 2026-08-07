@@ -15,6 +15,7 @@ import { CASH_CLOSING_STARTING_FLOAT, resolveAutoSalesSummariesByDate, type Auto
 import { calculateExtraDays, calculateStorageDays, toJST, validatePickupTimeWindow } from "../services/storage";
 import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
 import { hmacSha256Hex } from "../lib/hmac";
+import { loadCompletionMessages } from "../services/completionMessages";
 
 const internalApi = new Hono<AppType>();
 // Mounted via `app.route("/", internalApi)` in index.tsx, so a bare "/*" here
@@ -50,6 +51,17 @@ const LUGGAGE_AUDIT_ACTION_LABELS: Record<string, string> = {
 type LuggageWorkScheduleDto = {
   calendarEmbedUrl: string | null;
   configured: boolean;
+};
+
+type LuggageCompletionMessageSetDto = {
+  ko: string;
+  en: string;
+  ja: string;
+};
+
+type LuggageCompletionMessagesDto = {
+  primary: LuggageCompletionMessageSetDto;
+  secondary: LuggageCompletionMessageSetDto;
 };
 
 type LuggageStaffAccountRole = "admin" | "editor" | "viewer";
@@ -689,6 +701,29 @@ internalApi.get("/internal/luggage-work-schedule", async (c) => {
     return c.json(response);
   } catch {
     return c.json({ error: "failed to read luggage work schedule setting" }, 500);
+  }
+});
+
+// GET /internal/luggage-completion-messages — Read-only effective completion messages.
+internalApi.get("/internal/luggage-completion-messages", async (c) => {
+  c.header("Cache-Control", "no-store");
+  try {
+    const messages = await loadCompletionMessages(c.env.DB);
+    const response: LuggageCompletionMessagesDto = {
+      primary: {
+        ko: messages.primary.ko,
+        en: messages.primary.en,
+        ja: messages.primary.ja,
+      },
+      secondary: {
+        ko: messages.secondary.ko,
+        en: messages.secondary.en,
+        ja: messages.secondary.ja,
+      },
+    };
+    return c.json(response);
+  } catch {
+    return c.json({ error: "failed to read luggage completion messages" }, 500);
   }
 });
 
