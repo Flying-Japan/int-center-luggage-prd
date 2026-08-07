@@ -52,6 +52,18 @@ type LuggageWorkScheduleDto = {
   configured: boolean;
 };
 
+type LuggageStaffAccountRole = "admin" | "editor" | "viewer";
+
+type LuggageStaffAccountDto = {
+  id: string;
+  displayName: string | null;
+  username: string | null;
+  email: string | null;
+  role: LuggageStaffAccountRole;
+  isActive: boolean;
+  createdAt: string;
+};
+
 function normalizeGoogleCalendarEmbedUrl(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) return null;
   try {
@@ -609,6 +621,58 @@ async function serializeCashClosings(env: AppType["Bindings"], rows: LuggageCash
   ]);
   return rows.map((row) => serializeCashClosing(row, authorNames, autoSalesByDate));
 }
+
+// GET /internal/luggage-staff-accounts — Read-only projection of existing Supabase staff profiles.
+internalApi.get("/internal/luggage-staff-accounts", async (c) => {
+  c.header("Cache-Control", "no-store");
+  try {
+    const { data, error } = await createSupabaseAdmin(c.env)
+      .from("user_profiles")
+      .select("id, display_name, username, email, role, is_active, created_at")
+      .order("is_active", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (error || !Array.isArray(data)) {
+      return c.json({ status: "error", error: "failed to read luggage staff accounts" }, 500);
+    }
+
+    const accounts: LuggageStaffAccountDto[] = [];
+    for (const row of data) {
+      if (typeof row.id !== "string" || !row.id.trim()
+        || (row.display_name !== null && typeof row.display_name !== "string")
+        || (row.username !== null && typeof row.username !== "string")
+        || (row.email !== null && typeof row.email !== "string")
+        || (row.role !== "admin" && row.role !== "editor" && row.role !== "viewer")
+        || typeof row.is_active !== "boolean"
+        || typeof row.created_at !== "string" || !row.created_at) {
+        return c.json({ status: "error", error: "failed to read luggage staff accounts" }, 500);
+      }
+      accounts.push({
+        id: row.id,
+        displayName: row.display_name,
+        username: row.username,
+        email: row.email,
+        role: row.role,
+        isActive: row.is_active,
+        createdAt: row.created_at,
+      });
+    }
+
+    const active = accounts.filter((account) => account.isActive).length;
+    return c.json({
+      status: "ok",
+      accounts,
+      summary: {
+        total: accounts.length,
+        active,
+        inactive: accounts.length - active,
+        admins: accounts.filter((account) => account.role === "admin").length,
+      },
+    });
+  } catch {
+    return c.json({ status: "error", error: "failed to read luggage staff accounts" }, 500);
+  }
+});
 
 // GET /internal/luggage-work-schedule — Read-only projection of the existing staff calendar setting.
 internalApi.get("/internal/luggage-work-schedule", async (c) => {
