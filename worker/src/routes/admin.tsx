@@ -175,7 +175,16 @@ admin.get("/staff/admin/sales", async (c) => {
     cash_total: number; qr_total: number; revenue_total: number;
     suitcase_total: number; backpack_total: number;
   }>();
-  const ts = todaySales || { order_count: 0, paid_count: 0, pending_count: 0, cash_total: 0, qr_total: 0, revenue_total: 0, suitcase_total: 0, backpack_total: 0 };
+  const ts = {
+    order_count: Number(todaySales?.order_count ?? 0),
+    paid_count: Number(todaySales?.paid_count ?? 0),
+    pending_count: Number(todaySales?.pending_count ?? 0),
+    cash_total: Number(todaySales?.cash_total ?? 0),
+    qr_total: Number(todaySales?.qr_total ?? 0),
+    revenue_total: Number(todaySales?.revenue_total ?? 0),
+    suitcase_total: Number(todaySales?.suitcase_total ?? 0),
+    backpack_total: Number(todaySales?.backpack_total ?? 0),
+  };
 
   // Real-time luggage breakdown for today (for mergedRows override)
   const todayLuggageRT = await c.env.DB.prepare(
@@ -196,7 +205,12 @@ admin.get("/staff/admin/sales", async (c) => {
      LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
      WHERE date(o.created_at, '+9 hours') = ? AND o.status != 'CANCELLED'`
   ).bind(todayJST).first<{ people: number; cash: number; qr: number; luggage_total: number }>();
-  const tlrt = todayLuggageRT || { people: 0, cash: 0, qr: 0, luggage_total: 0 };
+  const tlrt = {
+    people: Number(todayLuggageRT?.people ?? 0),
+    cash: Number(todayLuggageRT?.cash ?? 0),
+    qr: Number(todayLuggageRT?.qr ?? 0),
+    luggage_total: Number(todayLuggageRT?.luggage_total ?? 0),
+  };
 
   // Override or insert today's row in mergedRows with real-time data
   const todayIdx = mergedRows.findIndex(r => r.date === todayJST);
