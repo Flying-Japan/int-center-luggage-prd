@@ -1256,15 +1256,29 @@ const worker = {
           }
 
           // Daily maintenance (0 18 * * * = 03:00 JST)
-          const result = await runRetentionCleanup(env.DB, env.IMAGES);
-          console.log(`Retention cleanup complete: ${JSON.stringify(result)}`);
-          if (env.GOOGLE_SHEETS_CREDENTIALS) {
-            const syncResult = await syncDailySales(env.DB, env.GOOGLE_SHEETS_CREDENTIALS);
-            console.log(`Daily sales sync complete: ${JSON.stringify(syncResult)}`);
+          try {
+            const result = await runRetentionCleanup(env.DB, env.IMAGES);
+            console.log(`Retention cleanup complete: ${JSON.stringify(result)}`);
+          } catch (error) {
+            captureScheduledTaskFailure(error, "retention", event.cron);
           }
+
+          if (env.GOOGLE_SHEETS_CREDENTIALS) {
+            try {
+              const syncResult = await syncDailySales(env.DB, env.GOOGLE_SHEETS_CREDENTIALS);
+              console.log(`Daily sales sync complete: ${JSON.stringify(syncResult)}`);
+            } catch (error) {
+              captureScheduledTaskFailure(error, "daily_sales_sync", event.cron);
+            }
+          }
+
           if (env.NAVER_ORDERS_SUPABASE_URL && env.NAVER_ORDERS_SUPABASE_KEY) {
-            const rentalResult = await syncRentalRevenue(env.DB, env.NAVER_ORDERS_SUPABASE_URL, env.NAVER_ORDERS_SUPABASE_KEY);
-            console.log(`Rental revenue sync complete: ${JSON.stringify(rentalResult)}`);
+            try {
+              const rentalResult = await syncRentalRevenue(env.DB, env.NAVER_ORDERS_SUPABASE_URL, env.NAVER_ORDERS_SUPABASE_KEY);
+              console.log(`Rental revenue sync complete: ${JSON.stringify(rentalResult)}`);
+            } catch (error) {
+              captureScheduledTaskFailure(error, "rental_revenue_sync", event.cron);
+            }
           }
           if (env.AUTO_EXTENSION_ENABLED === "true") {
             // Auto-extend overdue orders + email + handover note
@@ -1297,6 +1311,18 @@ const worker = {
     );
   },
 };
+
+function captureScheduledTaskFailure(error: unknown, task: string, cron: string): void {
+  Sentry.captureException(error, {
+    tags: {
+      app: "int-center-luggage-prd",
+      job: "scheduled",
+      task,
+      cron,
+    },
+  });
+  console.error(`Scheduled ${task} task failed:`, error);
+}
 
 export default Sentry.withSentry(
   (env: Env) => ({
