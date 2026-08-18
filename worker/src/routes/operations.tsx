@@ -9,7 +9,7 @@ import { formatDateJST } from "../services/storage";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { fetchStaffNamesByIds, fetchStaffProfilesByIds } from "../lib/staffProfiles";
 import { createSupabaseAdmin } from "../lib/supabase";
-import { CASH_CLOSING_STARTING_FLOAT as STARTING_FLOAT, resolveAutoSalesSummariesByDate, resolveAutoSalesSummaryForDate } from "../services/cashClosingSales";
+import { CASH_CLOSING_STARTING_FLOAT as STARTING_FLOAT, resolveAutoSalesSummaryForDate } from "../services/cashClosingSales";
 
 const ops = new Hono<AppType>();
 ops.use("/*", staffAuth);
@@ -100,11 +100,6 @@ ops.get("/staff/cash-closing", async (c) => {
       : (closing.owner_name as string) || null,
     has_multi: ((closing.closing_count as number) || 0) > 1,
   }));
-  const autoSalesByDate = await resolveAutoSalesSummariesByDate(
-    c.env.DB,
-    closingRows.map((cl) => String(cl.business_date || ""))
-  );
-
   const staff = getStaff(c);
   return c.html(
     <html lang="ko">
@@ -213,9 +208,8 @@ ops.get("/staff/cash-closing", async (c) => {
                     const noteStr = (cl.note as string) || "";
                     const businessDate = cl.business_date as string;
                     const dateDisplay = formatClosingDate(businessDate);
-                    const autoAmount = autoSalesByDate.get(businessDate)?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
-                    const actualQr = ((cl.actual_qr_amount as number) || 0) || ((cl.paypay_amount as number) || 0);
-                    const diff = (((cl.total_amount as number) || 0) - STARTING_FLOAT + actualQr) - autoAmount;
+                    const autoAmount = (cl.check_auto_amount as number) || 0;
+                    const diff = (cl.difference_amount as number) || 0;
                     return (
                       <tr style="border-bottom:1px solid #e2e8f0">
                         <td style={`padding:2px 6px;white-space:nowrap;${dateDisplay.style}`} title={dateDisplay.title}><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:inherit;font-weight:600">{dateDisplay.label}{dateDisplay.suffix}</a>{(cl as Record<string, unknown> & { has_multi: boolean }).has_multi && <span style="margin-left:4px;font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:3px;vertical-align:middle">+1</span>}</td>
@@ -248,13 +242,12 @@ ops.get("/staff/cash-closing", async (c) => {
                 {closingRows.length > 0 && (() => {
                   const todayJST = formatDateJST(new Date());
                   const rows = closingRows.map((cl) => {
-                    const auto = autoSalesByDate.get(cl.business_date as string)?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
                     return {
                       date: cl.business_date as string,
                       total: (cl.total_amount as number) || 0,
                       paypay: (cl.paypay_amount as number) || 0,
-                      auto,
-                      diff: ((cl.total_amount as number) || 0) - STARTING_FLOAT + (((cl.actual_qr_amount as number) || 0) || ((cl.paypay_amount as number) || 0)) - auto,
+                      auto: (cl.check_auto_amount as number) || 0,
+                      diff: (cl.difference_amount as number) || 0,
                       f4: (cl.floor_4f_count as number) || 0,
                       f8: (cl.floor_8f_count as number) || 0,
                     };
@@ -398,7 +391,6 @@ ops.get("/staff/cash-closing/:id", async (c) => {
 
   if (!closing) return c.html(<p>Not found</p>, 404);
   const staff = getStaff(c);
-  const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, String((closing as Record<string, unknown>).business_date || ""));
 
   // Fetch morning handover for the same date (if this is FINAL_CLOSE)
   const morningClosing = closing.closing_type === "FINAL_CLOSE"
@@ -431,9 +423,8 @@ ops.get("/staff/cash-closing/:id", async (c) => {
   }));
 
   const cl = closing as Record<string, unknown>;
-  const autoAmount = autoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
-  const actualQrForTotal = ((cl.actual_qr_amount as number) || 0) || ((cl.paypay_amount as number) || 0);
-  const differenceAmount = (((cl.total_amount as number) || 0) - STARTING_FLOAT + actualQrForTotal) - autoAmount;
+  const autoAmount = (cl.check_auto_amount as number) || 0;
+  const differenceAmount = (cl.difference_amount as number) || 0;
   const closingStaffName = (cl.staff_id as string | null)
     ? cashClosingStaffNameMap.get(cl.staff_id as string) || (cl.owner_name as string) || "-"
     : (cl.owner_name as string) || "-";
@@ -458,7 +449,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
                 <p class="stat-value">¥{(cl.actual_qr_amount as number).toLocaleString()}</p>
               </div>
               <div class="card stat-card">
-                <p class="stat-label">자동매출 <span title="Daily 시트(짐보관 신청서 합계)를 우선 사용하고, 당일 시트 미반영 시 실시간 신청서 주문을 사용합니다." style="cursor:help;color:#94a3b8;font-size:10px">(?)</span></p>
+                <p class="stat-label">자동매출 <span title="정산마감 생성 시 저장된 자동매출입니다." style="cursor:help;color:#94a3b8;font-size:10px">(?)</span></p>
                 <p class="stat-value">¥{autoAmount.toLocaleString()}</p>
               </div>
               <div class="card stat-card">
@@ -468,7 +459,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
             </div>
 
             <p style="margin-bottom:12px;font-size:11px;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:6px 10px">
-              ※ 자동매출은 Daily 시트의 짐보관 신청서 합계를 우선 사용합니다. 당일 시트가 아직 비어 있으면 실시간 신청서 주문 합계로 표시됩니다.
+              ※ 자동매출과 차액은 정산마감 생성 시 저장된 값입니다.
             </p>
 
             <div style="margin-bottom:16px;overflow-x:auto">
@@ -697,14 +688,16 @@ ops.post("/staff/cash-closing/:id/edit", async (c) => {
   const wandRefund = parseInt(String(body.wand_refund || "0"), 10) || 0;
   const floor4fCount = parseInt(String(body.floor_4f_count || "0"), 10) || 0;
   const floor8fCount = parseInt(String(body.floor_8f_count || "0"), 10) || 0;
-  // 차액 = (현금Total - 시제40000) + 실제 QR - 자동매출
+  // Preserve the auto-sales snapshots captured when the closing was created.
   const cl = existing as Record<string, unknown>;
-  const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, cl.business_date as string);
-  const expectedAmount = autoSales?.totalAmount ?? ((cl.expected_amount as number) || 0);
+  const checkAutoAmount = (cl.check_auto_amount as number) || 0;
+  const expectedAmount = (cl.expected_amount as number) || 0;
   const actualQrForTotal = actualQrAmount || paypayAmount;
   const actualAmount = (totalAmount - STARTING_FLOAT) + actualQrForTotal;
   const differenceAmount = actualAmount - expectedAmount;
-  const qrDiff = actualQrForTotal - (autoSales?.qrAmount ?? 0);
+  const previousActualQrAmount = ((cl.actual_qr_amount as number) || 0) || ((cl.paypay_amount as number) || 0);
+  const expectedQrAmount = previousActualQrAmount - ((cl.qr_difference_amount as number) || 0);
+  const qrDiff = actualQrForTotal - expectedQrAmount;
 
   await c.env.DB.prepare(
     `UPDATE luggage_cash_closings SET
@@ -719,7 +712,7 @@ ops.post("/staff/cash-closing/:id/edit", async (c) => {
   )
     .bind(
       ...denomValues, totalAmount, paypayAmount, actualQrForTotal,
-      actualAmount, expectedAmount, expectedAmount, differenceAmount, qrDiff,
+      actualAmount, checkAutoAmount, expectedAmount, differenceAmount, qrDiff,
       rentalCash, wandRefund,
       floor4fCount, floor8fCount,
       String(body.note || "") || null, closingId
