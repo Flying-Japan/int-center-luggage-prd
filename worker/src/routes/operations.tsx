@@ -9,7 +9,7 @@ import { formatDateJST } from "../services/storage";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { fetchStaffNamesByIds, fetchStaffProfilesByIds } from "../lib/staffProfiles";
 import { createSupabaseAdmin } from "../lib/supabase";
-import { CASH_CLOSING_STARTING_FLOAT as STARTING_FLOAT, resolveAutoSalesSummaryForDate } from "../services/cashClosingSales";
+import { CASH_CLOSING_STARTING_FLOAT as STARTING_FLOAT, resolveAutoSalesSummariesByDate, resolveAutoSalesSummaryForDate } from "../services/cashClosingSales";
 
 const ops = new Hono<AppType>();
 ops.use("/*", staffAuth);
@@ -100,6 +100,10 @@ ops.get("/staff/cash-closing", async (c) => {
       : (closing.owner_name as string) || null,
     has_multi: ((closing.closing_count as number) || 0) > 1,
   }));
+  const autoSalesByDate = await resolveAutoSalesSummariesByDate(
+    c.env.DB,
+    closingRows.map((cl) => String(cl.business_date || "")),
+  );
   const staff = getStaff(c);
   return c.html(
     <html lang="ko">
@@ -208,8 +212,11 @@ ops.get("/staff/cash-closing", async (c) => {
                     const noteStr = (cl.note as string) || "";
                     const businessDate = cl.business_date as string;
                     const dateDisplay = formatClosingDate(businessDate);
-                    const autoAmount = (cl.check_auto_amount as number) || 0;
-                    const diff = (cl.difference_amount as number) || 0;
+                    const currentAutoSales = autoSalesByDate.get(businessDate);
+                    const autoAmount = currentAutoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
+                    const diff = currentAutoSales
+                      ? ((cl.actual_amount as number) || 0) - currentAutoSales.totalAmount
+                      : ((cl.difference_amount as number) || 0);
                     return (
                       <tr style="border-bottom:1px solid #e2e8f0">
                         <td style={`padding:2px 6px;white-space:nowrap;${dateDisplay.style}`} title={dateDisplay.title}><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:inherit;font-weight:600">{dateDisplay.label}{dateDisplay.suffix}</a>{(cl as Record<string, unknown> & { has_multi: boolean }).has_multi && <span style="margin-left:4px;font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:3px;vertical-align:middle">+1</span>}</td>
@@ -242,12 +249,15 @@ ops.get("/staff/cash-closing", async (c) => {
                 {closingRows.length > 0 && (() => {
                   const todayJST = formatDateJST(new Date());
                   const rows = closingRows.map((cl) => {
+                    const currentAutoSales = autoSalesByDate.get(cl.business_date as string);
                     return {
                       date: cl.business_date as string,
                       total: (cl.total_amount as number) || 0,
                       paypay: (cl.paypay_amount as number) || 0,
-                      auto: (cl.check_auto_amount as number) || 0,
-                      diff: (cl.difference_amount as number) || 0,
+                      auto: currentAutoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0),
+                      diff: currentAutoSales
+                        ? ((cl.actual_amount as number) || 0) - currentAutoSales.totalAmount
+                        : ((cl.difference_amount as number) || 0),
                       f4: (cl.floor_4f_count as number) || 0,
                       f8: (cl.floor_8f_count as number) || 0,
                     };
@@ -391,6 +401,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
 
   if (!closing) return c.html(<p>Not found</p>, 404);
   const staff = getStaff(c);
+  const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, String(closing.business_date || ""));
 
   // Fetch morning handover for the same date (if this is FINAL_CLOSE)
   const morningClosing = closing.closing_type === "FINAL_CLOSE"
@@ -423,8 +434,14 @@ ops.get("/staff/cash-closing/:id", async (c) => {
   }));
 
   const cl = closing as Record<string, unknown>;
-  const autoAmount = (cl.check_auto_amount as number) || 0;
-  const differenceAmount = (cl.difference_amount as number) || 0;
+  const autoAmount = autoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
+  const differenceAmount = autoSales
+    ? ((cl.actual_amount as number) || 0) - autoSales.totalAmount
+    : ((cl.difference_amount as number) || 0);
+  const effectiveActualQrAmount = ((cl.actual_qr_amount as number) || 0) || ((cl.paypay_amount as number) || 0);
+  const qrDifferenceAmount = autoSales
+    ? effectiveActualQrAmount - autoSales.qrAmount
+    : ((cl.qr_difference_amount as number) || 0);
   const closingStaffName = (cl.staff_id as string | null)
     ? cashClosingStaffNameMap.get(cl.staff_id as string) || (cl.owner_name as string) || "-"
     : (cl.owner_name as string) || "-";
@@ -446,10 +463,10 @@ ops.get("/staff/cash-closing/:id", async (c) => {
               </div>
               <div class="card stat-card">
                 <p class="stat-label">QR 실제</p>
-                <p class="stat-value">¥{(cl.actual_qr_amount as number).toLocaleString()}</p>
+                <p class="stat-value">¥{effectiveActualQrAmount.toLocaleString()}</p>
               </div>
               <div class="card stat-card">
-                <p class="stat-label">자동매출 <span title="정산마감 생성 시 저장된 자동매출입니다." style="cursor:help;color:#94a3b8;font-size:10px">(?)</span></p>
+                <p class="stat-label">자동매출 <span title="현재 짐보관 매출 집계 기준 자동매출입니다." style="cursor:help;color:#94a3b8;font-size:10px">(?)</span></p>
                 <p class="stat-value">¥{autoAmount.toLocaleString()}</p>
               </div>
               <div class="card stat-card">
@@ -459,7 +476,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
             </div>
 
             <p style="margin-bottom:12px;font-size:11px;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:6px 10px">
-              ※ 자동매출과 차액은 정산마감 생성 시 저장된 값입니다.
+              ※ 자동매출과 차액은 현재 짐보관 매출 집계 기준으로 표시되며, 집계값이 없으면 마감 저장값을 표시합니다.
             </p>
 
             <div style="margin-bottom:16px;overflow-x:auto">
@@ -496,7 +513,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
               <p><strong>지팡이 환불</strong><span>¥{((cl.wand_refund as number) || 0).toLocaleString()}</span></p>
               <p><strong>4층 위탁</strong><span>{((cl.floor_4f_count as number) || 0)}건</span></p>
               <p><strong>8층 위탁</strong><span>{((cl.floor_8f_count as number) || 0)}건</span></p>
-              <p><strong>QR 차액</strong><span style={`color:${(cl.qr_difference_amount as number) === 0 ? '#166534' : '#dc2626'}`}>¥{(cl.qr_difference_amount as number).toLocaleString()}</span></p>
+              <p><strong>QR 차액</strong><span style={`color:${qrDifferenceAmount === 0 ? '#166534' : '#dc2626'}`}>¥{qrDifferenceAmount.toLocaleString()}</span></p>
               <p><strong>작성자</strong><span>{closingStaffName}</span></p>
               <p><strong>메모</strong><span>{(cl.note as string) || "-"}</span></p>
             </div>

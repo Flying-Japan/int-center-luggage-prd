@@ -11,6 +11,7 @@ import { buildOrderId, buildOvernightTag, buildSameDayTag } from "../services/or
 import { downloadImage } from "../lib/r2";
 import { fetchStaffNamesByIds } from "../lib/staffProfiles";
 import { createSupabaseAdmin } from "../lib/supabase";
+import { resolveAutoSalesSummariesByDate, type AutoSalesSummary } from "../services/cashClosingSales";
 import { calculateExtraDays, calculateStorageDays, toJST, validatePickupTimeWindow } from "../services/storage";
 import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
 import { hmacSha256Hex } from "../lib/hmac";
@@ -531,6 +532,7 @@ function normalizeCashClosingType(value: unknown): LuggageCashClosingType {
 function serializeCashClosing(
   row: LuggageCashClosingRow,
   authorNames: Map<string, string>,
+  autoSalesByDate: Map<string, AutoSalesSummary>,
 ): LuggageCashClosingDto {
   const authorId = nullableString(row.staffId);
   const morningAuthorId = nullableString(row.morningStaffId);
@@ -543,10 +545,17 @@ function serializeCashClosing(
   const businessDate = nullableString(row.businessDate);
   const paypayAmount = nullableFiniteNumber(row.paypayAmount);
   const rawActualQrAmount = nullableFiniteNumber(row.rawActualQrAmount);
-  const actualQrAmount = rawActualQrAmount === 0 ? paypayAmount : rawActualQrAmount;
-  const autoSalesAmount = nullableFiniteNumber(row.storedAutoSalesAmount);
+  const actualQrAmount = rawActualQrAmount === null || rawActualQrAmount === 0 ? paypayAmount : rawActualQrAmount;
+  const actualAmount = nullableFiniteNumber(row.actualAmount);
+  const currentAutoSales = businessDate ? autoSalesByDate.get(businessDate) : undefined;
+  const autoSalesAmount = currentAutoSales?.totalAmount ?? nullableFiniteNumber(row.storedAutoSalesAmount);
   const cashTotal = nullableFiniteNumber(row.cashTotal);
-  const differenceAmount = nullableFiniteNumber(row.differenceAmount);
+  const differenceAmount = currentAutoSales
+    ? (actualAmount === null ? null : actualAmount - currentAutoSales.totalAmount)
+    : nullableFiniteNumber(row.differenceAmount);
+  const qrDifferenceAmount = currentAutoSales
+    ? (actualQrAmount === null ? null : actualQrAmount - currentAutoSales.qrAmount)
+    : nullableFiniteNumber(row.qrDifferenceAmount);
   return {
     closingId: nullableFiniteNumber(row.closingId) ?? 0,
     businessDate,
@@ -556,8 +565,8 @@ function serializeCashClosing(
     cashTotal,
     paypayAmount,
     actualQrAmount,
-    actualAmount: nullableFiniteNumber(row.actualAmount),
-    qrDifferenceAmount: nullableFiniteNumber(row.qrDifferenceAmount),
+    actualAmount,
+    qrDifferenceAmount,
     rentalCashAmount: nullableFiniteNumber(row.rentalCashAmount),
     wandRefundAmount: nullableFiniteNumber(row.wandRefundAmount),
     floor4fCount: nullableFiniteNumber(row.floor4fCount),
@@ -621,8 +630,12 @@ const CASH_CLOSING_SELECT = `
 
 async function serializeCashClosings(env: AppType["Bindings"], rows: LuggageCashClosingRow[]): Promise<LuggageCashClosingDto[]> {
   const staffIds = rows.flatMap((row) => [nullableString(row.staffId), nullableString(row.morningStaffId)]);
-  const authorNames = await fetchStaffNamesByIds(env, staffIds);
-  return rows.map((row) => serializeCashClosing(row, authorNames));
+  const businessDates = rows.map((row) => nullableString(row.businessDate)).filter((value): value is string => value !== null);
+  const [authorNames, autoSalesByDate] = await Promise.all([
+    fetchStaffNamesByIds(env, staffIds),
+    resolveAutoSalesSummariesByDate(env.DB, businessDates),
+  ]);
+  return rows.map((row) => serializeCashClosing(row, authorNames, autoSalesByDate));
 }
 
 // GET /internal/luggage-staff-accounts — Read-only projection of existing Supabase staff profiles.
