@@ -4,7 +4,7 @@
  */
 import { Hono } from "hono";
 import type { AppType } from "../types";
-import { staffAuth, getStaff } from "../middleware/auth";
+import { editorAuth, staffAuth, getStaff } from "../middleware/auth";
 import { formatDateJST } from "../services/storage";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { fetchStaffNamesByIds, fetchStaffProfilesByIds } from "../lib/staffProfiles";
@@ -105,6 +105,7 @@ ops.get("/staff/cash-closing", async (c) => {
     closingRows.map((cl) => String(cl.business_date || "")),
   );
   const staff = getStaff(c);
+  const canEdit = staff.role === "admin" || staff.role === "editor";
   return c.html(
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>정산 마감</title></head>
@@ -114,7 +115,7 @@ ops.get("/staff/cash-closing", async (c) => {
 
           <section class="hero"><div><p class="hero-kicker">Operations</p><h2 class="hero-title">정산 마감</h2></div></section>
 
-          <section class="card">
+          {canEdit && <section class="card">
             <h3 class="card-title">새 마감</h3>
             <form method="post" action="/staff/cash-closing">
               <label class="field">
@@ -177,7 +178,7 @@ ops.get("/staff/cash-closing", async (c) => {
               </label>
               <button class="btn btn-primary" type="submit">정산마감 제출</button>
             </form>
-          </section>
+          </section>}
 
           <section class="card" style="padding:12px">
             <h3 class="card-title" style="margin-bottom:8px">최근 마감</h3>
@@ -239,7 +240,7 @@ ops.get("/staff/cash-closing", async (c) => {
                         <td style="padding:2px 4px;white-space:nowrap">{(cl.staff_name as string) || "-"}</td>
                         <td style="padding:2px 4px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b">{noteStr.length > 20 ? noteStr.slice(0, 20) + "…" : noteStr || "-"}</td>
                         <td style="padding:2px 4px;white-space:nowrap">
-                          <a href={`/staff/cash-closing/${cl.closing_id}/edit`} style="color:var(--primary);font-size:10px;margin-right:4px">수정</a>
+                          {canEdit && <a href={`/staff/cash-closing/${cl.closing_id}/edit`} style="color:var(--primary);font-size:10px;margin-right:4px">수정</a>}
                           <a href={`/staff/cash-closing/${cl.closing_id}`} style="color:#64748b;font-size:10px">상세</a>
                         </td>
                       </tr>
@@ -316,7 +317,7 @@ ops.get("/staff/cash-closing", async (c) => {
 });
 
 // POST /staff/cash-closing — Create cash closing
-ops.post("/staff/cash-closing", async (c) => {
+ops.post("/staff/cash-closing", editorAuth, async (c) => {
   const body = await c.req.parseBody();
   const staff = getStaff(c);
   const businessDate = formatDateJST(new Date());
@@ -401,6 +402,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
 
   if (!closing) return c.html(<p>Not found</p>, 404);
   const staff = getStaff(c);
+  const canEdit = staff.role === "admin" || staff.role === "editor";
   const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, String(closing.business_date || ""));
 
   // Fetch morning handover for the same date (if this is FINAL_CLOSE)
@@ -525,7 +527,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
               })()}
             </div>
 
-            {cl.workflow_status === "SUBMITTED" && (
+            {canEdit && cl.workflow_status === "SUBMITTED" && (
               <div style="margin-top:12px">
                 <a href={`/staff/cash-closing/${closingId}/edit`} class="btn btn-primary">수정</a>
               </div>
@@ -594,7 +596,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
 });
 
 // GET /staff/cash-closing/:id/edit — Edit form for existing closing
-ops.get("/staff/cash-closing/:id/edit", async (c) => {
+ops.get("/staff/cash-closing/:id/edit", editorAuth, async (c) => {
   const closingId = c.req.param("id");
   const closing = await c.env.DB.prepare("SELECT * FROM luggage_cash_closings WHERE closing_id = ?")
     .bind(closingId)
@@ -680,7 +682,7 @@ ops.get("/staff/cash-closing/:id/edit", async (c) => {
 });
 
 // POST /staff/cash-closing/:id/edit — Update existing closing
-ops.post("/staff/cash-closing/:id/edit", async (c) => {
+ops.post("/staff/cash-closing/:id/edit", editorAuth, async (c) => {
   const closingId = c.req.param("id");
   const staff = getStaff(c);
   const body = await c.req.parseBody();
@@ -769,6 +771,7 @@ const NOTE_CATEGORY_LABELS: Record<string, string> = {
 // GET /staff/handover — Handover notes list
 ops.get("/staff/handover", async (c) => {
   const staff = getStaff(c);
+  const canEdit = staff.role === "admin" || staff.role === "editor";
   const handoverQ = c.req.query("handover_q") || "";
   const filterCat = c.req.query("cat") || "";  // category filter
   const filterStatus = c.req.query("status") || "";  // "unread", "pinned"
@@ -1123,7 +1126,7 @@ details[open]>.hw-summary .hw-chevron{transform:rotate(90deg);color:#475569}
           })()}
 
           {/* Collapsible compose */}
-          <div class="hw-compose">
+          {canEdit && <div class="hw-compose">
             <div id="compose-trigger" class="hw-compose-trigger">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
               <span>새 노트 작성</span>
@@ -1154,7 +1157,7 @@ details[open]>.hw-summary .hw-chevron{transform:rotate(90deg);color:#475569}
                 </div>
               </form>
             </div>
-          </div>
+          </div>}
 
           {/* Expand/Collapse all */}
           {filteredNoteRows.length > 0 && (
@@ -1217,12 +1220,12 @@ details[open]>.hw-summary .hw-chevron{transform:rotate(90deg);color:#475569}
                           )}
                           {noteEdits.length > 0 && <span class="hw-edits">수정 {noteEdits.length}회</span>}
                           <div class="hw-actions">
-                            {isUnread && (
+                            {canEdit && isUnread && (
                               <form method="post" action={`/staff/handover/${noteId}/read`} style="display:inline;margin:0">
                                 <button class="hw-read-btn" type="submit"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> 읽음</button>
                               </form>
                             )}
-                            {(isMine || staff.role === "admin") && (
+                            {canEdit && (isMine || staff.role === "admin") && (
                               <>
                                 <a href={`/staff/handover/${noteId}/edit`} class="hw-action-link">수정</a>
                                 <form method="post" action={`/staff/handover/${noteId}/delete`} style="display:inline;margin:0" onsubmit="return confirm('삭제하시겠습니까?')">
@@ -1244,10 +1247,10 @@ details[open]>.hw-summary .hw-chevron{transform:rotate(90deg);color:#475569}
                             ))}
                           </div>
                         )}
-                        <form method="post" action={`/staff/handover/${noteId}/comments`} class="hw-comment-form" style="margin:0">
+                        {canEdit && <form method="post" action={`/staff/handover/${noteId}/comments`} class="hw-comment-form" style="margin:0">
                           <input class="hw-comment-input" type="text" name="content" placeholder="댓글 추가... (@이름 멘션)" list="hw-staff-list" required />
                           <button class="hw-comment-submit" type="submit">전송</button>
-                        </form>
+                        </form>}
                       </div>
                     </details>
                   );
@@ -1267,6 +1270,7 @@ details[open]>.hw-summary .hw-chevron{transform:rotate(90deg);color:#475569}
 // GET /staff/experience — Experience visits list
 ops.get("/staff/experience", async (c) => {
   const staff = getStaff(c);
+  const canEdit = staff.role === "admin" || staff.role === "editor";
 
   const expVisits = await c.env.DB.prepare(
     `SELECT *
@@ -1300,7 +1304,7 @@ ops.get("/staff/experience", async (c) => {
         <main class="container">
           <section class="card">
             <h3 class="card-title">체험단 관리</h3>
-            <form method="post" action="/staff/handover/experience" style="margin-bottom:16px">
+            {canEdit && <form method="post" action="/staff/handover/experience" style="margin-bottom:16px">
               <div class="grid2">
                 <label class="field">
                   <span class="field-label">방문자 이름</span>
@@ -1343,7 +1347,7 @@ ops.get("/staff/experience", async (c) => {
                 </label>
               </div>
               <button class="btn btn-primary" type="submit">등록</button>
-            </form>
+            </form>}
 
             <div class="table-wrap" style="overflow-x:auto">
               <table style="font-size:12px;border-collapse:collapse;width:100%;min-width:860px">
@@ -1396,26 +1400,30 @@ ops.get("/staff/experience", async (c) => {
                               <p style="margin:2px 0"><strong>수정일시:</strong> {v.updated_at ? new Date(v.updated_at as string + "Z").toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}</p>
                             </div>
                           </details>
-                          <a href={`/staff/handover/experience/${v.visit_id}/edit`} class="btn btn-sm" style="font-size:10px;margin-right:2px;text-decoration:none">수정</a>
-                          {st === "SCHEDULED" && (
-                            <form method="post" action={`/staff/handover/experience/${v.visit_id}/visit`} style="display:inline">
-                              <button class="btn btn-sm" type="submit" style="font-size:10px">방문확인</button>
-                            </form>
-                          )}
-                          {(st === "SCHEDULED" || st === "VISITED") && (
-                            <form method="post" action={`/staff/handover/experience/${v.visit_id}/receive`} style="display:inline;margin-left:2px">
-                              <button class="btn btn-sm btn-primary" type="submit" style="font-size:10px">수령처리</button>
-                            </form>
-                          )}
-                          {st !== "CANCELLED" && st !== "RECEIVED" && (
-                            <form method="post" action={`/staff/handover/experience/${v.visit_id}/cancel`} style="display:inline;margin-left:2px">
-                              <button class="btn btn-sm btn-secondary" type="submit" style="font-size:10px">취소</button>
-                            </form>
-                          )}
-                          {(staff.role === "admin" || staff.role === "editor") && (
-                            <form method="post" action={`/staff/handover/experience/${v.visit_id}/delete`} style="display:inline;margin-left:2px" onsubmit="return confirm('이 체험단 명단을 삭제하시겠습니까? 되돌릴 수 없습니다.')">
-                              <button class="btn btn-sm" type="submit" style="font-size:10px;background:#dc2626;border-color:#dc2626;color:#fff">삭제</button>
-                            </form>
+                          {canEdit && (
+                            <>
+                              <a href={`/staff/handover/experience/${v.visit_id}/edit`} class="btn btn-sm" style="font-size:10px;margin-right:2px;text-decoration:none">수정</a>
+                              {st === "SCHEDULED" && (
+                                <form method="post" action={`/staff/handover/experience/${v.visit_id}/visit`} style="display:inline">
+                                  <button class="btn btn-sm" type="submit" style="font-size:10px">방문확인</button>
+                                </form>
+                              )}
+                              {(st === "SCHEDULED" || st === "VISITED") && (
+                                <form method="post" action={`/staff/handover/experience/${v.visit_id}/receive`} style="display:inline;margin-left:2px">
+                                  <button class="btn btn-sm btn-primary" type="submit" style="font-size:10px">수령처리</button>
+                                </form>
+                              )}
+                              {st !== "CANCELLED" && st !== "RECEIVED" && (
+                                <form method="post" action={`/staff/handover/experience/${v.visit_id}/cancel`} style="display:inline;margin-left:2px">
+                                  <button class="btn btn-sm btn-secondary" type="submit" style="font-size:10px">취소</button>
+                                </form>
+                              )}
+                              {(staff.role === "admin" || staff.role === "editor") && (
+                                <form method="post" action={`/staff/handover/experience/${v.visit_id}/delete`} style="display:inline;margin-left:2px" onsubmit="return confirm('이 체험단 명단을 삭제하시겠습니까? 되돌릴 수 없습니다.')">
+                                  <button class="btn btn-sm" type="submit" style="font-size:10px;background:#dc2626;border-color:#dc2626;color:#fff">삭제</button>
+                                </form>
+                              )}
+                            </>
                           )}
                         </td>
                       </tr>
@@ -1499,7 +1507,7 @@ function renderWithMentions(text: string, knownNames: Set<string>): unknown[] {
 }
 
 // POST /staff/handover — Create note
-ops.post("/staff/handover", async (c) => {
+ops.post("/staff/handover", editorAuth, async (c) => {
   const body = await c.req.parseBody();
   const staff = getStaff(c);
   const content = String(body.content || "");
@@ -1537,7 +1545,7 @@ ops.post("/staff/handover", async (c) => {
 });
 
 // POST /staff/handover/:id/read — Mark note as read
-ops.post("/staff/handover/:id/read", async (c) => {
+ops.post("/staff/handover/:id/read", editorAuth, async (c) => {
   const noteId = c.req.param("id");
   const staff = getStaff(c);
 
@@ -1555,7 +1563,7 @@ ops.post("/staff/handover/:id/read", async (c) => {
 });
 
 // POST /staff/handover/:id/comments — Add comment
-ops.post("/staff/handover/:id/comments", async (c) => {
+ops.post("/staff/handover/:id/comments", editorAuth, async (c) => {
   const noteId = c.req.param("id");
   const body = await c.req.parseBody();
   const staff = getStaff(c);
@@ -1590,7 +1598,7 @@ ops.post("/staff/handover/:id/comments", async (c) => {
 });
 
 // GET /staff/handover/:id/edit — Edit form
-ops.get("/staff/handover/:id/edit", async (c) => {
+ops.get("/staff/handover/:id/edit", editorAuth, async (c) => {
   const noteId = c.req.param("id");
   const staff = getStaff(c);
   const note = await c.env.DB.prepare(
@@ -1646,7 +1654,7 @@ ops.get("/staff/handover/:id/edit", async (c) => {
 });
 
 // POST /staff/handover/:id/edit — Update note with edit history
-ops.post("/staff/handover/:id/edit", async (c) => {
+ops.post("/staff/handover/:id/edit", editorAuth, async (c) => {
   const noteId = c.req.param("id");
   const staff = getStaff(c);
   const body = await c.req.parseBody();
@@ -1678,7 +1686,7 @@ ops.post("/staff/handover/:id/edit", async (c) => {
 });
 
 // POST /staff/handover/:id/update — Update note
-ops.post("/staff/handover/:id/update", async (c) => {
+ops.post("/staff/handover/:id/update", editorAuth, async (c) => {
   const noteId = c.req.param("id");
   const staff = getStaff(c);
   const body = await c.req.parseBody();
@@ -1703,7 +1711,7 @@ ops.post("/staff/handover/:id/update", async (c) => {
 });
 
 // POST /staff/handover/:id/delete — Delete note (author only)
-ops.post("/staff/handover/:id/delete", async (c) => {
+ops.post("/staff/handover/:id/delete", editorAuth, async (c) => {
   const noteId = c.req.param("id");
   const staff = getStaff(c);
 
@@ -1721,7 +1729,7 @@ ops.post("/staff/handover/:id/delete", async (c) => {
 });
 
 // POST /staff/handover/comments/:id/delete — Delete comment (author only)
-ops.post("/staff/handover/comments/:id/delete", async (c) => {
+ops.post("/staff/handover/comments/:id/delete", editorAuth, async (c) => {
   const commentId = c.req.param("id");
   const staff = getStaff(c);
 
@@ -1737,7 +1745,7 @@ ops.post("/staff/handover/comments/:id/delete", async (c) => {
 // ============================================================
 
 // POST /staff/handover/experience — Create visit
-ops.post("/staff/handover/experience", async (c) => {
+ops.post("/staff/handover/experience", editorAuth, async (c) => {
   const body = await c.req.parseBody();
   const staff = getStaff(c);
 
@@ -1758,7 +1766,7 @@ ops.post("/staff/handover/experience", async (c) => {
 });
 
 // POST /staff/handover/experience/:id/visit — Mark as visited
-ops.post("/staff/handover/experience/:id/visit", async (c) => {
+ops.post("/staff/handover/experience/:id/visit", editorAuth, async (c) => {
   const visitId = c.req.param("id");
   await c.env.DB.prepare(
     "UPDATE luggage_experience_visits SET status = 'VISITED', updated_at = datetime('now') WHERE visit_id = ? AND status = 'SCHEDULED'"
@@ -1767,7 +1775,7 @@ ops.post("/staff/handover/experience/:id/visit", async (c) => {
 });
 
 // POST /staff/handover/experience/:id/receive — Mark as received
-ops.post("/staff/handover/experience/:id/receive", async (c) => {
+ops.post("/staff/handover/experience/:id/receive", editorAuth, async (c) => {
   const visitId = c.req.param("id");
   const staff = getStaff(c);
   await c.env.DB.prepare(
@@ -1778,7 +1786,7 @@ ops.post("/staff/handover/experience/:id/receive", async (c) => {
 });
 
 // POST /staff/handover/experience/:id/cancel — Cancel visit
-ops.post("/staff/handover/experience/:id/cancel", async (c) => {
+ops.post("/staff/handover/experience/:id/cancel", editorAuth, async (c) => {
   const visitId = c.req.param("id");
   await c.env.DB.prepare(
     "UPDATE luggage_experience_visits SET status = 'CANCELLED', updated_at = datetime('now') WHERE visit_id = ? AND status IN ('SCHEDULED', 'VISITED')"
@@ -1787,7 +1795,7 @@ ops.post("/staff/handover/experience/:id/cancel", async (c) => {
 });
 
 // GET /staff/handover/experience/:id/edit — Edit form for experience visit
-ops.get("/staff/handover/experience/:id/edit", async (c) => {
+ops.get("/staff/handover/experience/:id/edit", editorAuth, async (c) => {
   const visitId = c.req.param("id");
   const staff = getStaff(c);
   const visit = await c.env.DB.prepare(
@@ -1858,7 +1866,7 @@ ops.get("/staff/handover/experience/:id/edit", async (c) => {
 });
 
 // POST /staff/handover/experience/:id/update — Update experience visit
-ops.post("/staff/handover/experience/:id/update", async (c) => {
+ops.post("/staff/handover/experience/:id/update", editorAuth, async (c) => {
   const visitId = c.req.param("id");
   const body = await c.req.parseBody();
 
@@ -1882,7 +1890,7 @@ ops.post("/staff/handover/experience/:id/update", async (c) => {
 });
 
 // POST /staff/handover/experience/:id/delete — Delete experience visit (editor/admin only)
-ops.post("/staff/handover/experience/:id/delete", async (c) => {
+ops.post("/staff/handover/experience/:id/delete", editorAuth, async (c) => {
   const staff = getStaff(c);
   if (staff.role !== "admin" && staff.role !== "editor") {
     return c.redirect("/staff/experience");
@@ -1924,6 +1932,7 @@ ops.get("/staff/lost-found", async (c) => {
   const entries = await c.env.DB.prepare(sql).bind(...params).all();
 
   const staff = getStaff(c);
+  const canEdit = staff.role === "admin" || staff.role === "editor";
   return c.html(
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><title>분실물</title></head>
@@ -1931,7 +1940,7 @@ ops.get("/staff/lost-found", async (c) => {
         <StaffTopbar staff={staff} active="/staff/lost-found" />
         <main class="container">
 
-          <section class="card">
+          {canEdit && <section class="card">
             <h3 class="card-title">분실물 등록</h3>
             <form method="post" action="/staff/lost-found">
               <div class="grid2">
@@ -1960,7 +1969,7 @@ ops.get("/staff/lost-found", async (c) => {
               </label>
               <button class="btn btn-primary" type="submit">등록</button>
             </form>
-          </section>
+          </section>}
 
           <section class="card">
             <h3 class="card-title">분실물 목록</h3>
@@ -1980,26 +1989,30 @@ ops.get("/staff/lost-found", async (c) => {
                       <td style="font-size:12px;color:#666">{(e.note as string) || "-"}</td>
                       <td style="white-space:nowrap">{e.created_at ? new Date(e.created_at as string).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
                       <td>
-                        {e.status === "UNCLAIMED" && (
-                          <form method="post" action={`/staff/lost-found/${e.entry_id}/update`} style="display:inline">
-                            <input type="hidden" name="status" value="CLAIMED" />
-                            <input class="table-control" type="text" name="claimed_by" placeholder="인수자" />
-                            <button class="btn btn-sm" type="submit">인계</button>
-                          </form>
+                        {canEdit && (
+                          <>
+                            {e.status === "UNCLAIMED" && (
+                              <form method="post" action={`/staff/lost-found/${e.entry_id}/update`} style="display:inline">
+                                <input type="hidden" name="status" value="CLAIMED" />
+                                <input class="table-control" type="text" name="claimed_by" placeholder="인수자" />
+                                <button class="btn btn-sm" type="submit">인계</button>
+                              </form>
+                            )}
+                            {(e.status === "UNCLAIMED" || e.status === "CLAIMED") && (
+                              <form method="post" action={`/staff/lost-found/${e.entry_id}/update`} style="display:inline;margin-left:4px">
+                                <select name="status" class="table-control">
+                                  <option value="">상태변경</option>
+                                  <option value="DISPOSED">폐기</option>
+                                  <option value="RETURNED">반환</option>
+                                </select>
+                                <button class="btn btn-sm" type="submit">변경</button>
+                              </form>
+                            )}
+                            <form method="post" action={`/staff/lost-found/${e.entry_id}/delete`} style="display:inline;margin-left:4px" onsubmit="return confirm('삭제하시겠습니까?')">
+                              <button class="btn btn-sm btn-secondary" type="submit">삭제</button>
+                            </form>
+                          </>
                         )}
-                        {(e.status === "UNCLAIMED" || e.status === "CLAIMED") && (
-                          <form method="post" action={`/staff/lost-found/${e.entry_id}/update`} style="display:inline;margin-left:4px">
-                            <select name="status" class="table-control">
-                              <option value="">상태변경</option>
-                              <option value="DISPOSED">폐기</option>
-                              <option value="RETURNED">반환</option>
-                            </select>
-                            <button class="btn btn-sm" type="submit">변경</button>
-                          </form>
-                        )}
-                        <form method="post" action={`/staff/lost-found/${e.entry_id}/delete`} style="display:inline;margin-left:4px" onsubmit="return confirm('삭제하시겠습니까?')">
-                          <button class="btn btn-sm btn-secondary" type="submit">삭제</button>
-                        </form>
                       </td>
                     </tr>
                     );
@@ -2016,7 +2029,7 @@ ops.get("/staff/lost-found", async (c) => {
 });
 
 // POST /staff/lost-found — Create entry
-ops.post("/staff/lost-found", async (c) => {
+ops.post("/staff/lost-found", editorAuth, async (c) => {
   const body = await c.req.parseBody();
   const staff = getStaff(c);
 
@@ -2037,8 +2050,9 @@ ops.post("/staff/lost-found", async (c) => {
 });
 
 // POST /staff/lost-found/:id/update — Update entry status
-ops.post("/staff/lost-found/:id/update", async (c) => {
+ops.post("/staff/lost-found/:id/update", editorAuth, async (c) => {
   const entryId = c.req.param("id");
+  if (!entryId) return c.redirect("/staff/lost-found");
   const body = await c.req.parseBody();
 
   const VALID_STATUSES = ["UNCLAIMED", "CLAIMED", "DISPOSED", "RETURNED"];
@@ -2072,7 +2086,7 @@ ops.post("/staff/lost-found/:id/update", async (c) => {
 });
 
 // POST /staff/lost-found/:id/delete — Delete entry (editor/admin only)
-ops.post("/staff/lost-found/:id/delete", async (c) => {
+ops.post("/staff/lost-found/:id/delete", editorAuth, async (c) => {
   const staff = getStaff(c);
   if (staff.role !== "admin" && staff.role !== "editor") {
     return c.redirect("/staff/lost-found");

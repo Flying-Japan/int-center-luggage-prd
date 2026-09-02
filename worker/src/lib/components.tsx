@@ -5,8 +5,10 @@ function getStaffNavLinks(role: string) {
     { href: "/staff/dashboard", label: "짐보관 신청" },
     { href: "/staff/cash-closing", label: "정산마감" },
   ];
-  const editorLinks = [
+  const salesLinks = [
     { href: "/staff/admin/sales", label: "매출관리" },
+  ];
+  const editorLinks = [
     { href: "/staff/admin/completion-message", label: "완료메시지" },
   ];
   const secondaryLinks = [
@@ -24,6 +26,7 @@ function getStaffNavLinks(role: string) {
 
   return [
     ...primaryLinks,
+    ...(["admin", "editor", "viewer"].includes(role) ? salesLinks : []),
     ...(role === "admin" || role === "editor" ? editorLinks : []),
     ...secondaryLinks,
     ...(role === "admin" ? adminOnlyLinks : []),

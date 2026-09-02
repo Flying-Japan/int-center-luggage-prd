@@ -4,15 +4,13 @@
  */
 import { Hono } from "hono";
 import type { AppType } from "../types";
-import { adminAuth, editorAuth, getStaff } from "../middleware/auth";
+import { adminAuth, editorAuth, getStaff, staffAuth } from "../middleware/auth";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
 import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
 
 const admin = new Hono<AppType>();
-admin.use("/staff/admin/sales/*", editorAuth);
-admin.use("/staff/admin/sales", editorAuth);
 admin.use("/staff/admin/completion-message*", editorAuth);
 admin.use("/staff/admin/staff-accounts*", adminAuth);
 admin.use("/staff/admin/customers*", adminAuth);
@@ -21,7 +19,7 @@ admin.use("/staff/admin/retention*", adminAuth);
 admin.use("/staff/admin/extensions*", adminAuth);
 
 // GET /staff/admin/sales — Sales analytics
-admin.get("/staff/admin/sales", async (c) => {
+admin.get("/staff/admin/sales", staffAuth, async (c) => {
   const startDate = c.req.query("start_date") || "2025-10-01";
   const endDate = c.req.query("end_date") || new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const todayJST = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -1247,7 +1245,7 @@ admin.post("/staff/admin/completion-message", async (c) => {
 });
 
 // POST /staff/admin/sales/backfill — One-time full backfill from Google Sheets
-admin.post("/staff/admin/sales/backfill", async (c) => {
+admin.post("/staff/admin/sales/backfill", editorAuth, async (c) => {
   return c.redirect("/staff/admin/sales?error=시트 백필은 비활성화되었습니다. 현재 SOT는 서비스 DB입니다.");
 });
 
@@ -1385,7 +1383,7 @@ admin.get("/staff/admin/customers", async (c) => {
 });
 
 // GET /staff/admin/sales/heatmap — Storage & Pickup time heatmap
-admin.get("/staff/admin/sales/heatmap", async (c) => {
+admin.get("/staff/admin/sales/heatmap", staffAuth, async (c) => {
   const startDate = c.req.query("start_date") || "";
   const endDate = c.req.query("end_date") || "";
 
