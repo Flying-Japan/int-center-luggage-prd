@@ -150,7 +150,7 @@ const TRANSLATIONS: Record<Lang, TranslationKeys> = {
     required: "Required",
   },
   ja: {
-    name: "お名前",
+    name: "お名前（フリガナ）",
     phone: "電話番号",
     companion_count: "同行人数",
     suitcase_qty: "スーツケース数",

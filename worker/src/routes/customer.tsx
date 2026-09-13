@@ -772,8 +772,8 @@ form { margin-top: 16px; }
               {/* name */}
               <label class="field">
                 <span class="field-label">{t("name", lang)} <span style="color:#dc2626">*</span></span>
-                <input class="control" type="text" name="name" required maxlength={120} autocomplete="off" placeholder={lang === "ja" ? "例: 田中太郎" : lang === "en" ? "e.g. John Smith" : "예: 홍길동"} />
-                <span class="field-hint">{lang === "ja" ? "本名をフルネームで入力してください" : lang === "en" ? "Please enter your full name" : "한글 이름을 입력해주세요 (예: 홍길동)"}</span>
+                <input class="control" type="text" name="name" required maxlength={120} autocomplete="off" placeholder={lang === "ja" ? "例: タナカ タロウ" : lang === "en" ? "e.g. John Smith" : "예: 홍길동"} />
+                <span class="field-hint">{lang === "ja" ? "カタカナでご入力ください" : lang === "en" ? "Please enter your full name" : "한글 이름을 입력해주세요 (예: 홍길동)"}</span>
               </label>
 
               {/* phone */}
@@ -1434,7 +1434,7 @@ form { margin-top: 16px; }
     var cEl=formEl.querySelector('[name="consent_checked"]');
     var m=[];
     syncPickupHiddenValue();
-    if(!nEl||!nEl.value.trim())m.push({el:nEl,msg:'${lang === "ja" ? "お名前を入力してください" : lang === "en" ? "Enter your name" : "이름을 입력해주세요"}'});
+    if(!nEl||!nEl.value.trim())m.push({el:nEl,msg:'${lang === "ja" ? "お名前（フリガナ）を入力してください" : lang === "en" ? "Enter your name" : "이름을 입력해주세요"}'});
     if(!pEl||!pEl.value.trim())m.push({el:pEl,msg:'${lang === "ja" ? "電話番号を入力してください" : lang === "en" ? "Enter your phone number" : "전화번호를 입력해주세요"}'});
     if(!eEl||!eEl.value.trim()||(eEl.validity&&!eEl.validity.valid))m.push({el:eEl,msg:'${lang === "ja" ? "メールアドレスを正しく入力してください" : lang === "en" ? "Enter a valid email address" : "이메일을 정확히 입력해주세요"}'});
     var sVal=Number(suitcaseEl&&suitcaseEl.value||0),bVal=Number(backpackEl&&backpackEl.value||0);
