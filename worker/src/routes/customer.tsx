@@ -2085,7 +2085,7 @@ a { color: inherit; text-decoration: none; }
               })() }} />
               <div style="margin:0;padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;text-align:center">
                 <p style="margin:0;font-size:12px;font-weight:700;color:#dc2626">{lang === "ja" ? "⚠️ クレジットカード・デビットカード不可" : lang === "en" ? "⚠️ Credit/debit cards NOT accepted" : "⚠️ 신용카드/체크카드 결제 불가"}</p>
-                <p style="margin:4px 0 0;font-size:11px;font-weight:600;color:#166534;line-height:1.6">{lang === "ja" ? "✅ 現金 / PayPay / 楽天Pay" : lang === "en" ? "✅ Cash / KakaoPay / NaverPay" : "✅ 현금 / 카카오페이 / 네이버페이"}<br/>{lang === "ja" ? "d払い / auPay / メルペイ" : lang === "en" ? "TossPay / PayPay" : "토스페이 / PayPay"}</p>
+                <p style="margin:4px 0 0;font-size:11px;font-weight:600;color:#166534;line-height:1.6">{lang === "ja" ? "✅ 現金 / PayPay" : lang === "en" ? "✅ Cash / KakaoPay / NaverPay" : "✅ 현금 / 카카오페이 / 네이버페이"}{lang !== "ja" && <><br/>{lang === "en" ? "TossPay / PayPay" : "토스페이 / PayPay"}</>}</p>
               </div>
               {order.payment_method === "PAY_QR" && (
                 <div style="margin-top:8px">
@@ -2110,10 +2110,6 @@ a { color: inherit; text-decoration: none; }
                   <div style="display:flex;gap:7px;flex-wrap:wrap">
                     {[
                       { label: "PayPay",   bg: "#FF0033", color: "#fff" },
-                      { label: "楽天Pay",  bg: "#BF0000", color: "#fff" },
-                      { label: "d払い",    bg: "#B40068", color: "#fff" },
-                      { label: "auPay",    bg: "#EA5504", color: "#fff" },
-                      { label: "メルペイ", bg: "#1DAEEC", color: "#fff" },
                     ].map(({ label, bg, color }) => (
                       <span style={`display:inline-flex;align-items:center;padding:6px 12px;border-radius:20px;background:${bg};color:${color};font-size:12px;font-weight:700;letter-spacing:-0.01em;white-space:nowrap`}>{label}</span>
                     ))}
