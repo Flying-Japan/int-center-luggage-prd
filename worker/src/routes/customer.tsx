@@ -1655,13 +1655,12 @@ customer.post("/customer/submit", async (c) => {
     || pickupJST.getUTCMonth() !== nowJST.getUTCMonth()
     || pickupJST.getUTCFullYear() !== nowJST.getUTCFullYear();
   const orderId = await buildOrderId(c.env.DB, undefined, isOvernight);
-  // Tag assignment: overnight → 91+ sequential, same-day → Phase 1/2 (1-90)
+  // Tag assignment: overnight → dedicated 146-150, same-day → Phase 1/2 (1-145)
   const tagNo = isOvernight
     ? await buildOvernightTag(c.env.DB)
     : await buildSameDayTag(c.env.DB);
   if (tagNo === null) {
-    // All 90 same-day tags are in use
-    return redirect(t("capacity_full", lang));
+    return redirect(t(isOvernight ? "overnight_capacity_full" : "capacity_full", lang));
   }
 
   // --- Pricing ---
@@ -1674,7 +1673,7 @@ customer.post("/customer/submit", async (c) => {
 
   // --- Insert order (clean up R2 on failure) ---
   try {
-    await c.env.DB.prepare(
+    const inserted = await c.env.DB.prepare(
       `INSERT INTO luggage_orders (
         order_id, tag_no, name, phone, email, payment_method, companion_count,
         suitcase_qty, backpack_qty, set_qty,
@@ -1683,7 +1682,13 @@ customer.post("/customer/submit", async (c) => {
         flying_pass_tier, flying_pass_discount_amount, final_amount,
         id_image_url, luggage_image_url,
         consent_checked, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING')`
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING'
+        WHERE NOT EXISTS (
+          SELECT 1 FROM luggage_orders
+          WHERE CAST(tag_no AS INTEGER) = CAST(? AS INTEGER)
+            AND status IN ('PAYMENT_PENDING', 'PAID')
+        )
+        RETURNING order_id`
     )
       .bind(
         orderId,
@@ -1706,9 +1711,16 @@ customer.post("/customer/submit", async (c) => {
         finalPrepaid,
         idImageUrl,
         luggageImageUrl,
-        1
+        1,
+        tagNo
       )
-      .run();
+      .first<{ order_id: string }>();
+
+    if (!inserted) {
+      if (idImageUrl) try { await c.env.IMAGES.delete(idImageUrl); } catch { /* best-effort */ }
+      if (luggageImageUrl) try { await c.env.IMAGES.delete(luggageImageUrl); } catch { /* best-effort */ }
+      return redirect(t(isOvernight ? "overnight_capacity_full" : "capacity_full", lang));
+    }
   } catch (e) {
     // Clean up orphaned R2 objects
     if (idImageUrl) try { await c.env.IMAGES.delete(idImageUrl); } catch { /* best-effort */ }

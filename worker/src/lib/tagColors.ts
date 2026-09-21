@@ -9,10 +9,16 @@ export const TAG_COLOR_RANGES: [number, number, string][] = [
   [61, 70, "tag-color-gray"],
   [71, 80, "tag-color-pink"],
   [81, 90, "tag-color-brown"],
-  [91, 100, "tag-color-skyblue"],
+  [91, 100, "tag-color-orange"],
+  [101, 110, "tag-color-blue"],
+  [111, 120, "tag-color-yellow"],
+  [121, 130, "tag-color-green"],
+  [131, 140, "tag-color-purple"],
+  [141, 145, "tag-color-black"],
+  [146, 150, "tag-color-skyblue"],
 ];
 
-/** Map tag_no to a color class (1-10 orange, 11-20 blue, etc.) */
+/** Map tag_no to a color class; sky blue is reserved for overnight tags 146-150. */
 export function tagColorClass(tagNo: string | null): string {
   if (!tagNo) return "";
   const num = parseInt(String(tagNo).replace(/^[A-Za-z]+/, ""), 10);

@@ -248,11 +248,11 @@ CREATE TABLE IF NOT EXISTS luggage_handover_mentions (
 CREATE INDEX IF NOT EXISTS idx_handover_mentions_staff ON luggage_handover_mentions(staff_id);
 CREATE INDEX IF NOT EXISTS idx_handover_mentions_note ON luggage_handover_mentions(note_id);
 
--- Tag pool: static reference table for same-day tags 1-90 (read-only after seed)
+-- Tag pool: static reference table for same-day tags 1-145 (read-only after seed)
 CREATE TABLE IF NOT EXISTS luggage_tag_pool (
-  tag_no INTEGER PRIMARY KEY  -- 1 to 90
+  tag_no INTEGER PRIMARY KEY  -- 1 to 145
 );
--- Seed tag pool (INSERT OR IGNORE so re-running is safe)
+-- Seed/expand tag pool (INSERT OR IGNORE keeps existing 1-90 rows intact)
 INSERT OR IGNORE INTO luggage_tag_pool (tag_no) VALUES
   (1),(2),(3),(4),(5),(6),(7),(8),(9),(10),
   (11),(12),(13),(14),(15),(16),(17),(18),(19),(20),
@@ -262,7 +262,13 @@ INSERT OR IGNORE INTO luggage_tag_pool (tag_no) VALUES
   (51),(52),(53),(54),(55),(56),(57),(58),(59),(60),
   (61),(62),(63),(64),(65),(66),(67),(68),(69),(70),
   (71),(72),(73),(74),(75),(76),(77),(78),(79),(80),
-  (81),(82),(83),(84),(85),(86),(87),(88),(89),(90);
+  (81),(82),(83),(84),(85),(86),(87),(88),(89),(90),
+  (91),(92),(93),(94),(95),(96),(97),(98),(99),(100),
+  (101),(102),(103),(104),(105),(106),(107),(108),(109),(110),
+  (111),(112),(113),(114),(115),(116),(117),(118),(119),(120),
+  (121),(122),(123),(124),(125),(126),(127),(128),(129),(130),
+  (131),(132),(133),(134),(135),(136),(137),(138),(139),(140),
+  (141),(142),(143),(144),(145);
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_luggage_orders_status ON luggage_orders(status);

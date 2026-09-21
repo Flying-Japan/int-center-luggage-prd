@@ -147,7 +147,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
               </label>
               <label class="field">
                 <span class="field-label">짐번호</span>
-                <input class="control" type="text" name="tag_no" value={order.tag_no || ""} />
+                <input class="control" type="number" name="tag_no" min="1" max="150" step="1" value={order.tag_no || ""} />
               </label>
               <label class="field">
                 <span class="field-label">예정 픽업일/시간</span>
@@ -397,6 +397,11 @@ staffOrders.post("/staff/orders/:id/update", editorAuth, async (c) => {
   const updates: string[] = [];
   const values: (string | number)[] = [];
 
+  const requestedTagNo = String(body.tag_no || "").trim();
+  if (requestedTagNo && (!/^\d+$/.test(requestedTagNo) || Number(requestedTagNo) < 1 || Number(requestedTagNo) > 150)) {
+    return c.redirect(`/staff/orders/${orderId}?error=${encodeURIComponent("짐번호는 1~150 사이의 정수로 입력해주세요")}`);
+  }
+
   for (const field of allowedFields) {
     if (field in body) {
       updates.push(`${field} = ?`);
@@ -588,7 +593,7 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
     return c.redirect("/staff/dashboard?error=이름, 전화번호, 짐 수량이 필요합니다");
   }
 
-  // Check if pickup is next day or later → overnight counter (96+)
+  // Check if pickup is next day or later → dedicated overnight tags (146-150)
   let isOvernight = false;
   if (expectedPickupAt) {
     const nowJST = new Date(receivedAt.getTime() + 9 * 60 * 60 * 1000);
@@ -605,12 +610,15 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
     String(receivedJST.getUTCDate()).padStart(2, "0"),
   ].join("");
   const orderId = await buildOrderId(c.env.DB, receivedAt, isOvernight);
-  // Tag assignment: overnight → 91+ sequential, same-day → Phase 1/2 (1-90)
+  // Tag assignment: overnight → dedicated 146-150, same-day → Phase 1/2 (1-145)
   const tagNo = isOvernight
     ? await buildOvernightTag(c.env.DB, businessDate)
     : await buildSameDayTag(c.env.DB, businessDate);
   if (tagNo === null) {
-    return c.redirect("/staff/dashboard?error=당일 태그(1-90) 모두 사용 중입니다");
+    const error = isOvernight
+      ? "장기 태그(146~150)가 모두 사용 중입니다"
+      : "당일 태그(1~145)가 모두 사용 중입니다";
+    return c.redirect(`/staff/dashboard?error=${encodeURIComponent(error)}`);
   }
   const { setQty, pricePerDay } = calculatePricePerDay(suitcaseQty, backpackQty);
 
@@ -625,21 +633,34 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
   const finalPricePerDay = isFree ? 0 : pricePerDay;
 
   try {
-    await c.env.DB.prepare(
+    const inserted = await c.env.DB.prepare(
       `INSERT INTO luggage_orders (
          order_id, name, phone, companion_count, suitcase_qty, backpack_qty, set_qty,
          expected_pickup_at, expected_storage_days, price_per_day, discount_rate,
          prepaid_amount, flying_pass_tier, flying_pass_discount_amount,
          status, tag_no, note, manual_entry, staff_id, consent_checked
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING', ?, ?, 1, ?, 1)`
+       ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING', ?, ?, 1, ?, 1
+         WHERE NOT EXISTS (
+           SELECT 1 FROM luggage_orders
+           WHERE CAST(tag_no AS INTEGER) = CAST(? AS INTEGER)
+             AND status IN ('PAYMENT_PENDING', 'PAID')
+         )
+         RETURNING order_id`
     )
       .bind(
         orderId, name, phone, companionCount, suitcaseQty, backpackQty, setQty,
         expectedPickupAt || null, expectedStorageDays, finalPricePerDay, discountRate,
         prepaidAmount, flyingPassTier, passDiscount,
-        tagNo, note || null, staff.id
+        tagNo, note || null, staff.id, tagNo
       )
-      .run();
+      .first<{ order_id: string }>();
+
+    if (!inserted) {
+      const error = isOvernight
+        ? "장기 태그가 다른 접수에 먼저 배정되었습니다. 다시 시도해 주세요"
+        : "당일 태그가 다른 접수에 먼저 배정되었습니다. 다시 시도해 주세요";
+      return c.redirect(`/staff/dashboard?error=${encodeURIComponent(error)}`);
+    }
   } catch (e) {
     console.error("Manual order insert failed:", e);
     captureOperationalError(e, {

@@ -178,8 +178,8 @@ staffApi.post("/staff/api/orders/:id/inline-update", async (c) => {
         values.push(normalizeFlyingPassTier(val));
       } else if (key === "tag_no") {
         const tagNum = parseInt(String(val), 10);
-        if (isNaN(tagNum) || tagNum < 1 || tagNum > 100) {
-          return c.json({ error: "tag_no must be an integer between 1 and 100" }, 400);
+        if (isNaN(tagNum) || tagNum < 1 || tagNum > 150) {
+          return c.json({ error: "tag_no must be an integer between 1 and 150" }, 400);
         }
         values.push(String(tagNum));
       } else {

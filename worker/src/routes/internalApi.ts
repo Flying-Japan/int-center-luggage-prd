@@ -1589,8 +1589,8 @@ function normalizeLuggageOperationsFieldsPayload(payload: unknown): {
     const tagNo = payload.tagNo?.trim() ?? "";
     if (!tagNo) {
       update.tagNo = null;
-    } else if (!/^\d+$/.test(tagNo) || Number(tagNo) < 1 || Number(tagNo) > 100) {
-      throw new Error("tagNo must be an integer from 1 to 100");
+    } else if (!/^\d+$/.test(tagNo) || Number(tagNo) < 1 || Number(tagNo) > 150) {
+      throw new Error("tagNo must be an integer from 1 to 150");
     } else {
       update.tagNo = String(Number(tagNo));
     }
@@ -1948,7 +1948,13 @@ internalApi.post("/internal/luggage-orders/manual", async (c) => {
   const tagNo = isOvernight
     ? await buildOvernightTag(c.env.DB, businessDate)
     : await buildSameDayTag(c.env.DB, businessDate);
-  if (tagNo === null) return c.json({ error: "당일 태그(1-90)가 모두 사용 중입니다." }, 409);
+  if (tagNo === null) {
+    return c.json({
+      error: isOvernight
+        ? "장기 태그(146~150)가 모두 사용 중입니다."
+        : "당일 태그(1~145)가 모두 사용 중입니다.",
+    }, 409);
+  }
 
   const { setQty, pricePerDay } = calculatePricePerDay(input.suitcaseQty, input.backpackQty);
   const expectedStorageDays = calculateStorageDays(serverNow, expectedPickupDate);
@@ -1993,10 +1999,9 @@ internalApi.post("/internal/luggage-orders/manual", async (c) => {
            payment_method, status, tag_no, note, manual_entry, staff_id,
            consent_checked, parent_order_id, in_warehouse, id_image_url, luggage_image_url
          ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, 0, ?, NULL, 'PAYMENT_PENDING', ?, ?, 1, NULL, 1, NULL, 0, NULL, NULL
-           WHERE ? = 1 OR NOT EXISTS (
+           WHERE NOT EXISTS (
              SELECT 1 FROM luggage_orders
              WHERE CAST(tag_no AS INTEGER) = CAST(? AS INTEGER)
-               AND order_id LIKE ? || '-%'
                AND status IN ('PAYMENT_PENDING', 'PAID')
            )
            RETURNING order_id`,
@@ -2004,7 +2009,7 @@ internalApi.post("/internal/luggage-orders/manual", async (c) => {
         orderId, nowIso, nowIso, input.name, input.phone, input.companionCount,
         input.suitcaseQty, input.backpackQty, setQty, input.expectedPickupAt, expectedStorageDays,
         finalPricePerDay, discountRate, prepaidAmount, input.flyingPassTier, flyingPassDiscount,
-        finalAmount, tagNo, note || null, isOvernight ? 1 : 0, tagNo, businessDate,
+        finalAmount, tagNo, note || null, tagNo,
       ),
       c.env.DB.prepare(
         `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
@@ -2013,7 +2018,11 @@ internalApi.post("/internal/luggage-orders/manual", async (c) => {
       ).bind(orderId, auditDetails, nowIso, orderId),
     ]);
     if (!results[0]?.results?.[0]) {
-      return c.json({ error: "당일 태그가 다른 요청에 먼저 배정되었습니다. 다시 시도해 주세요." }, 409);
+      return c.json({
+        error: isOvernight
+          ? "장기 태그가 다른 요청에 먼저 배정되었습니다. 다시 시도해 주세요."
+          : "당일 태그가 다른 요청에 먼저 배정되었습니다. 다시 시도해 주세요.",
+      }, 409);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message.toLowerCase() : "";

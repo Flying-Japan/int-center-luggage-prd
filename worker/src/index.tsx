@@ -705,7 +705,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 inp.className='edit-input';
                 var field=el.dataset.field;
                 inp.type = el.dataset.type || 'text';
-                if(field==='tag_no'){inp.inputMode='numeric';inp.pattern='[0-9]*';inp.min='1';inp.max='100';}
+                if(field==='tag_no'){inp.inputMode='numeric';inp.pattern='[0-9]*';inp.min='1';inp.max='150';}
                 inp.value = el.dataset.type==='datetime-local' ? (el.dataset.rawValue||'') : orig;
                 el.textContent='';
                 el.appendChild(inp);
@@ -714,7 +714,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                 function finish(){
                   var newVal = inp.value;
                   if(newVal===orig){ restore(orig); return; }
-                  if(field==='tag_no'&&newVal){var n=parseInt(newVal,10);if(isNaN(n)||n<1||n>100){alert('짐번호는 1~100 사이로 입력해주세요');restore(orig);return;}newVal=String(n);}
+                  if(field==='tag_no'&&newVal){var n=parseInt(newVal,10);if(isNaN(n)||n<1||n>150){alert('짐번호는 1~150 사이로 입력해주세요');restore(orig);return;}newVal=String(n);}
                   var label = FIELD_LABELS[el.dataset.field]||el.dataset.field;
                   if(!confirm(label+' 변경: "'+newVal+'" 저장하시겠습니까?')){ restore(orig); return; }
                   var body={};
@@ -1248,7 +1248,7 @@ const worker = {
           console.log(`Scheduled tasks triggered: ${event.cron}`);
 
           // Midnight JST rollover (0 15 * * * = 00:00 JST)
-          // Transition uncollected same-day orders to overnight with new 91+ tags
+          // Transition uncollected same-day orders to available overnight tags (146-150)
           if (event.cron === "0 15 * * *") {
             const rolloverResult = await runMidnightRollover(env.DB);
             console.log(`Midnight rollover complete: ${JSON.stringify(rolloverResult)}`);
