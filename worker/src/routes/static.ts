@@ -1019,6 +1019,51 @@ tbody tr:hover { background: #eef5ff; }
 .tag-color-brown { color: #fff; background: #b45309; border: 2px solid #92400e; }
 .tag-color-skyblue { color: #fff; background: #38bdf8; border: 2px solid #0ea5e9; }
 
+/* 101-145: vertical white stripes; 146-150: horizontal white stripes. */
+.tag-pattern-orange-vertical { --tag-bg: #f97316; --tag-border: #ea580c; --tag-text: #111827; --tag-outline: #fff; }
+.tag-pattern-blue-vertical { --tag-bg: #3b82f6; --tag-border: #2563eb; --tag-text: #fff; --tag-outline: #111827; }
+.tag-pattern-yellow-vertical { --tag-bg: #fbbf24; --tag-border: #f59e0b; --tag-text: #111827; --tag-outline: #fff; }
+.tag-pattern-green-vertical { --tag-bg: #22c55e; --tag-border: #16a34a; --tag-text: #111827; --tag-outline: #fff; }
+.tag-pattern-purple-vertical { --tag-bg: #a855f7; --tag-border: #9333ea; --tag-text: #fff; --tag-outline: #111827; }
+.tag-pattern-red-horizontal { --tag-bg: #ef4444; --tag-border: #dc2626; --tag-text: #fff; --tag-outline: #111827; }
+
+.tag-pattern-orange-vertical,
+.tag-pattern-blue-vertical,
+.tag-pattern-yellow-vertical,
+.tag-pattern-green-vertical,
+.tag-pattern-purple-vertical,
+.tag-pattern-red-horizontal {
+  color: var(--tag-text);
+  border: 2px solid var(--tag-border);
+  font-weight: 900;
+  -webkit-text-stroke: 1px var(--tag-outline);
+  text-shadow:
+    -1px -1px 0 var(--tag-outline),
+    1px -1px 0 var(--tag-outline),
+    -1px 1px 0 var(--tag-outline),
+    1px 1px 0 var(--tag-outline);
+}
+
+.tag-pattern-orange-vertical,
+.tag-pattern-blue-vertical,
+.tag-pattern-yellow-vertical,
+.tag-pattern-green-vertical,
+.tag-pattern-purple-vertical {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--tag-bg) 0 9px,
+    #fff 9px 13px
+  );
+}
+
+.tag-pattern-red-horizontal {
+  background: repeating-linear-gradient(
+    0deg,
+    var(--tag-bg) 0 7px,
+    #fff 7px 11px
+  );
+}
+
 /* ── Click-to-edit cells ── */
 .editable { cursor: pointer; border-bottom: 1px dashed transparent; transition: border-color 0.15s; }
 .editable:hover { border-bottom-color: #cbd5e1; }
@@ -1742,6 +1787,40 @@ body.staff-site #staff-orders-table .tag-pill.tag-color-gray { color: #fff !impo
 body.staff-site #staff-orders-table .tag-pill.tag-color-pink { color: #fff !important; background: #ec4899 !important; border: 2px solid #db2777 !important; }
 body.staff-site #staff-orders-table .tag-pill.tag-color-brown { color: #fff !important; background: #b45309 !important; border: 2px solid #92400e !important; }
 body.staff-site #staff-orders-table .tag-pill.tag-color-skyblue { color: #fff !important; background: #38bdf8 !important; border: 2px solid #0ea5e9 !important; }
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-orange-vertical,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-blue-vertical,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-yellow-vertical,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-green-vertical,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-purple-vertical,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-red-horizontal {
+  color: var(--tag-text) !important;
+  border: 2px solid var(--tag-border) !important;
+  font-weight: 900 !important;
+  -webkit-text-stroke: 1px var(--tag-outline) !important;
+  text-shadow:
+    -1px -1px 0 var(--tag-outline),
+    1px -1px 0 var(--tag-outline),
+    -1px 1px 0 var(--tag-outline),
+    1px 1px 0 var(--tag-outline) !important;
+}
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-orange-vertical,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-blue-vertical,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-yellow-vertical,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-green-vertical,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-purple-vertical {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--tag-bg) 0 9px,
+    #fff 9px 13px
+  ) !important;
+}
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-red-horizontal {
+  background: repeating-linear-gradient(
+    0deg,
+    var(--tag-bg) 0 7px,
+    #fff 7px 11px
+  ) !important;
+}
 
 body.staff-site .price-amount { color: var(--text); font-weight: 600; font-size: 13px; }
 
