@@ -1036,12 +1036,35 @@ tbody tr:hover { background: #eef5ff; }
   color: var(--tag-text);
   border: 2px solid var(--tag-border);
   font-weight: 900;
-  -webkit-text-stroke: 1px var(--tag-outline);
-  text-shadow:
-    -1px -1px 0 var(--tag-outline),
-    1px -1px 0 var(--tag-outline),
-    -1px 1px 0 var(--tag-outline),
-    1px 1px 0 var(--tag-outline);
+  position: relative;
+  isolation: isolate;
+  z-index: 0;
+  -webkit-text-stroke: 0;
+  text-shadow: none;
+}
+
+.tag-pattern-orange-vertical::before,
+.tag-pattern-blue-vertical::before,
+.tag-pattern-yellow-vertical::before,
+.tag-pattern-green-vertical::before,
+.tag-pattern-purple-vertical::before,
+.tag-pattern-red-horizontal::before {
+  content: attr(data-tag-label);
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  color: var(--tag-text);
+  -webkit-text-stroke: 2px var(--tag-outline);
+  text-shadow: none;
+  pointer-events: none;
+  z-index: -1;
 }
 
 .tag-pattern-orange-vertical,
@@ -1063,6 +1086,8 @@ tbody tr:hover { background: #eef5ff; }
     #fff 7px 11px
   );
 }
+
+.tag-pill:has(.edit-input)::before { content: none; }
 
 /* ── Click-to-edit cells ── */
 .editable { cursor: pointer; border-bottom: 1px dashed transparent; transition: border-color 0.15s; }
@@ -1796,12 +1821,62 @@ body.staff-site #staff-orders-table .tag-pill.tag-pattern-red-horizontal {
   color: var(--tag-text) !important;
   border: 2px solid var(--tag-border) !important;
   font-weight: 900 !important;
-  -webkit-text-stroke: 1px var(--tag-outline) !important;
-  text-shadow:
-    -1px -1px 0 var(--tag-outline),
-    1px -1px 0 var(--tag-outline),
-    -1px 1px 0 var(--tag-outline),
-    1px 1px 0 var(--tag-outline) !important;
+  position: relative !important;
+  isolation: isolate !important;
+  z-index: 0 !important;
+  -webkit-text-stroke: 0 !important;
+  text-shadow: none !important;
+}
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-orange-vertical::before,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-blue-vertical::before,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-yellow-vertical::before,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-green-vertical::before,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-purple-vertical::before,
+body.staff-site #staff-orders-table .tag-pill.tag-pattern-red-horizontal::before {
+  content: attr(data-tag-label) !important;
+  position: absolute !important;
+  inset: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font: inherit !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  line-height: inherit !important;
+  letter-spacing: inherit !important;
+  color: var(--tag-text) !important;
+  -webkit-text-stroke: 2px var(--tag-outline) !important;
+  text-shadow: none !important;
+  pointer-events: none !important;
+  z-index: -1 !important;
+}
+body.staff-site #staff-orders-table .tag-pill:has(.edit-input)::before { content: none !important; }
+@supports not (-webkit-text-stroke: 1px #000) {
+  .tag-pattern-orange-vertical::before,
+  .tag-pattern-blue-vertical::before,
+  .tag-pattern-yellow-vertical::before,
+  .tag-pattern-green-vertical::before,
+  .tag-pattern-purple-vertical::before,
+  .tag-pattern-red-horizontal::before {
+    text-shadow:
+      -1px -1px 0 var(--tag-outline),
+      1px -1px 0 var(--tag-outline),
+      -1px 1px 0 var(--tag-outline),
+      1px 1px 0 var(--tag-outline);
+  }
+
+  body.staff-site #staff-orders-table .tag-pill.tag-pattern-orange-vertical::before,
+  body.staff-site #staff-orders-table .tag-pill.tag-pattern-blue-vertical::before,
+  body.staff-site #staff-orders-table .tag-pill.tag-pattern-yellow-vertical::before,
+  body.staff-site #staff-orders-table .tag-pill.tag-pattern-green-vertical::before,
+  body.staff-site #staff-orders-table .tag-pill.tag-pattern-purple-vertical::before,
+  body.staff-site #staff-orders-table .tag-pill.tag-pattern-red-horizontal::before {
+    text-shadow:
+      -1px -1px 0 var(--tag-outline),
+      1px -1px 0 var(--tag-outline),
+      -1px 1px 0 var(--tag-outline),
+      1px 1px 0 var(--tag-outline) !important;
+  }
 }
 body.staff-site #staff-orders-table .tag-pill.tag-pattern-orange-vertical,
 body.staff-site #staff-orders-table .tag-pill.tag-pattern-blue-vertical,

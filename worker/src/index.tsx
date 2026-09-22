@@ -353,6 +353,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                     const paymentTitle = paymentCashAmount > 0 || paymentQrAmount > 0
                       ? `실제 결제: 현금 ¥${paymentCashAmount.toLocaleString()} / QR ¥${paymentQrAmount.toLocaleString()}`
                       : `예약 선택: ${o.payment_method === "PAY_QR" ? "QR" : "현금"}`;
+                    const tagLabel = o.tag_no ? String(o.tag_no).replace(/\.0$/, "") : "-";
+                    const tagNumber = parseInt(tagLabel, 10);
                     return (
                     <tr data-order-id={o.order_id} data-status={o.status} class={rowClasses || undefined}>
                       <td data-col-key="checkbox"><input type="checkbox" class="row-select" data-order-id={o.order_id} style="width:16px;height:16px;cursor:pointer" /></td>
@@ -360,7 +362,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                         <span class="editable" data-field="name" data-order-id={o.order_id}>{o.name || "-"}</span>
                         {o.parent_order_id && <span class="extension-badge">연장</span>}
                       </td>
-                      <td data-col-key="tag_no"><span class={`editable tag-pill ${tagColorClass(o.tag_no)}`} data-field="tag_no" data-order-id={o.order_id}>{o.tag_no ? String(o.tag_no).replace(/\.0$/, "") : "-"}</span></td>
+                      <td data-col-key="tag_no"><span class={`editable tag-pill ${tagColorClass(o.tag_no)}`} data-field="tag_no" data-order-id={o.order_id} data-tag-label={tagNumber >= 101 && tagNumber <= 150 ? tagLabel : undefined}>{tagLabel}</span></td>
                       <td data-col-key="created_time">{o.created_at ? new Date(o.created_at).toLocaleString("ja-JP", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" }) : "-"}</td>
                       <td data-col-key="price" class="price-cell" data-order-id={o.order_id} data-tier={o.flying_pass_tier || "NONE"} data-method={o.payment_method || "CASH"} data-amount={payableAmount} title={paymentTitle} style="cursor:pointer;position:relative"><span class="price-display">{`¥${payableAmount.toLocaleString()}`}</span></td>
                       <td data-col-key="pickup_time">{(() => {
@@ -746,6 +748,8 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
               el.className='editable tag-pill';
               var n=parseInt(val,10);
               if(n>0) TAG_COLORS.forEach(function(c){if(n>=c[0]&&n<=c[1])el.classList.add(c[2]);});
+              if(n>=101&&n<=150) el.dataset.tagLabel=String(n);
+              else delete el.dataset.tagLabel;
             }
 
             /* ── Action buttons (event delegation on table) ── */
