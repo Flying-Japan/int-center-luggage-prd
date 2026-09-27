@@ -16,6 +16,8 @@ BUSINESS_CLOSE_HOUR = "21"
 # - CLARITY_PROJECT_ID
 # Internal reviewer -> luggage auth:
 # - INTERNAL_API_SECRET
+# Center inventory read-only auth (separate from reviewer):
+# - CENTER_INVENTORY_API_SECRET
 
 [[d1_databases]]
 binding = "DB"

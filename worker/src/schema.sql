@@ -281,3 +281,28 @@ CREATE INDEX IF NOT EXISTS idx_luggage_audit_logs_order_id ON luggage_audit_logs
 CREATE INDEX IF NOT EXISTS idx_luggage_handover_notes_created ON luggage_handover_notes(created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cash_closings_date_type ON luggage_cash_closings(business_date, closing_type);
 CREATE INDEX IF NOT EXISTS idx_luggage_cash_closings_date ON luggage_cash_closings(business_date);
+
+-- Structured experience rentals; the existing experience visits table is retained.
+CREATE TABLE IF NOT EXISTS luggage_experience_rentals (
+  rental_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  visit_id INTEGER NOT NULL REFERENCES luggage_experience_visits(visit_id) ON DELETE CASCADE,
+  product_group TEXT NOT NULL CHECK (product_group IN (
+    '에어랩', '에어스트레이트', '트라이크', '싸이벡스', '보조배터리', '밴드',
+    '지팡이', '키즈트래블', '머리띠', '폴라로이드 카메라', '풀리오'
+  )),
+  quantity INTEGER NOT NULL CHECK (typeof(quantity) = 'integer' AND quantity > 0 AND quantity <= 9007199254740991),
+  start_date TEXT NOT NULL CHECK (
+    start_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+    AND start_date >= '0001-01-01' AND date(start_date, '+0 days') IS NOT NULL
+    AND date(start_date, '+0 days') = start_date
+  ),
+  end_date TEXT NOT NULL CHECK (
+    end_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+    AND date(end_date, '+0 days') IS NOT NULL AND date(end_date, '+0 days') = end_date
+    AND end_date >= start_date
+  ),
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_experience_rentals_visit ON luggage_experience_rentals(visit_id);
+CREATE INDEX IF NOT EXISTS idx_experience_rentals_dates ON luggage_experience_rentals(start_date, end_date);

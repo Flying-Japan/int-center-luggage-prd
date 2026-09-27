@@ -11,6 +11,9 @@ import { fetchStaffNamesByIds, fetchStaffProfilesByIds } from "../lib/staffProfi
 import { createSupabaseAdmin } from "../lib/supabase";
 import { CASH_CLOSING_STARTING_FLOAT as STARTING_FLOAT, resolveAutoSalesSummariesByDate, resolveAutoSalesSummaryForDate } from "../services/cashClosingSales";
 
+import { ExperienceRentalForm, ExperienceRentalSummary } from "../lib/experienceRentalForm";
+import { parseExperienceRentals, insertExperienceRentals, type ExperienceRental } from "../services/experienceRentals";
+
 const ops = new Hono<AppType>();
 ops.use("/*", staffAuth);
 
@@ -1277,6 +1280,11 @@ ops.get("/staff/experience", async (c) => {
      FROM luggage_experience_visits
      ORDER BY scheduled_date DESC, created_at DESC LIMIT 50`
   ).all<Record<string, unknown>>();
+  const rentalRows = await c.env.DB.prepare(`SELECT r.visit_id, r.product_group, r.quantity, r.start_date, r.end_date
+    FROM luggage_experience_rentals r WHERE r.visit_id IN (
+      SELECT visit_id FROM luggage_experience_visits ORDER BY scheduled_date DESC, created_at DESC LIMIT 50
+    ) ORDER BY r.rental_id`).all<ExperienceRental & { visit_id: number }>();
+  const rentalsForVisit = (visitId: unknown) => rentalRows.results.filter((rental) => rental.visit_id === visitId);
   const expStaffNameMap = await fetchStaffNamesByIds(
     c.env,
     uniqueStaffIds([
@@ -1346,6 +1354,7 @@ ops.get("/staff/experience", async (c) => {
                   <input class="control" type="text" name="note" placeholder="메모" />
                 </label>
               </div>
+              <ExperienceRentalForm />
               <button class="btn btn-primary" type="submit">등록</button>
             </form>}
 
@@ -1358,6 +1367,7 @@ ops.get("/staff/experience", async (c) => {
                     <th style="padding:4px 6px;text-align:left;font-size:11px">예정일</th>
                     <th style="padding:4px 6px;text-align:left;font-size:11px">혜택</th>
                     <th style="padding:4px 6px;text-align:left;font-size:11px">금액</th>
+                    <th style="padding:4px 6px;text-align:left;font-size:11px">렌탈 재고 반영</th>
                     <th style="padding:4px 6px;text-align:center;font-size:11px">상태</th>
                     <th style="padding:4px 6px;text-align:left;font-size:11px">처리자</th>
                     <th style="padding:4px 6px;text-align:left;font-size:11px">메모</th>
@@ -1378,6 +1388,7 @@ ops.get("/staff/experience", async (c) => {
                         <td style="padding:3px 6px;white-space:nowrap">{v.scheduled_date as string}</td>
                         <td style="padding:3px 6px">{btLabel}</td>
                         <td style="padding:3px 6px">{(v.benefit_amount as string) || "-"}</td>
+                        <td style="padding:3px 6px"><ExperienceRentalSummary rentals={rentalsForVisit(v.visit_id)} /></td>
                         <td style="padding:3px 6px;text-align:center"><span style={`display:inline-block;padding:1px 8px;border-radius:9999px;font-size:10px;font-weight:600;color:white;background:${stColor}`}>{stLabel}</span></td>
                         <td style="padding:3px 6px;font-size:11px">{(v.processor_name as string) || (v.creator_name as string) || "-"}</td>
                         <td style="padding:3px 6px;font-size:11px;color:#64748b;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{(v.note as string) || "-"}</td>
@@ -1390,6 +1401,7 @@ ops.get("/staff/experience", async (c) => {
                               <p style="margin:2px 0"><strong>유형:</strong> {vtLabel}</p>
                               <p style="margin:2px 0"><strong>예정일:</strong> {v.scheduled_date as string}</p>
                               <p style="margin:2px 0"><strong>혜택:</strong> {btLabel} / {(v.benefit_amount as string) || "-"}</p>
+                              <div style="margin:2px 0"><strong>렌탈 재고 반영:</strong><ExperienceRentalSummary rentals={rentalsForVisit(v.visit_id)} /></div>
                               <p style="margin:2px 0"><strong>상태:</strong> {stLabel}</p>
                               <p style="margin:2px 0"><strong>메모:</strong> {(v.note as string) || "-"}</p>
                               <p style="margin:2px 0"><strong>등록자:</strong> {(v.creator_name as string) || "-"}</p>
@@ -1746,10 +1758,14 @@ ops.post("/staff/handover/comments/:id/delete", editorAuth, async (c) => {
 
 // POST /staff/handover/experience — Create visit
 ops.post("/staff/handover/experience", editorAuth, async (c) => {
-  const body = await c.req.parseBody();
+  const body = await c.req.parseBody({ all: true });
   const staff = getStaff(c);
 
-  await c.env.DB.prepare(
+  let rentals: ExperienceRental[];
+  try { rentals = parseExperienceRentals(body); }
+  catch (error) { return c.html(<p>{error instanceof Error ? error.message : "렌탈 입력 오류"} <a href="javascript:history.back()">돌아가기</a></p>, 400); }
+
+  await c.env.DB.batch([c.env.DB.prepare(
     `INSERT INTO luggage_experience_visits (visitor_name, visitor_type, scheduled_date, benefit_type, benefit_amount, note, created_by_staff_id)
      VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).bind(
@@ -1760,7 +1776,7 @@ ops.post("/staff/handover/experience", editorAuth, async (c) => {
     String(body.benefit_amount || "") || null,
     String(body.note || "") || null,
     staff.id
-  ).run();
+  ), insertExperienceRentals(c.env.DB, rentals)]);
 
   return c.redirect("/staff/experience");
 });
@@ -1802,6 +1818,8 @@ ops.get("/staff/handover/experience/:id/edit", editorAuth, async (c) => {
     "SELECT * FROM luggage_experience_visits WHERE visit_id = ?"
   ).bind(visitId).first<Record<string, unknown>>();
   if (!visit) return c.html(<p>Not found</p>, 404);
+  const rentals = await c.env.DB.prepare("SELECT product_group, quantity, start_date, end_date FROM luggage_experience_rentals WHERE visit_id = ? ORDER BY rental_id")
+    .bind(visitId).all<ExperienceRental>();
 
   return c.html(
     <html lang="ko">
@@ -1852,6 +1870,7 @@ ops.get("/staff/handover/experience/:id/edit", editorAuth, async (c) => {
                   <input class="control" type="text" name="note" value={(visit.note as string) || ""} placeholder="메모" />
                 </label>
               </div>
+              <ExperienceRentalForm rentals={rentals.results} />
               <div style="display:flex;gap:8px;margin-top:8px">
                 <button class="btn btn-primary" type="submit">수정 저장</button>
                 <a href="/staff/experience" class="btn btn-secondary">취소</a>
@@ -1868,9 +1887,15 @@ ops.get("/staff/handover/experience/:id/edit", editorAuth, async (c) => {
 // POST /staff/handover/experience/:id/update — Update experience visit
 ops.post("/staff/handover/experience/:id/update", editorAuth, async (c) => {
   const visitId = c.req.param("id");
-  const body = await c.req.parseBody();
+  const body = await c.req.parseBody({ all: true });
 
-  await c.env.DB.prepare(
+  let rentals: ExperienceRental[];
+  try { rentals = parseExperienceRentals(body); }
+  catch (error) { return c.html(<p>{error instanceof Error ? error.message : "렌탈 입력 오류"} <a href="javascript:history.back()">돌아가기</a></p>, 400); }
+  const existing = await c.env.DB.prepare("SELECT visit_id FROM luggage_experience_visits WHERE visit_id = ?").bind(visitId).first();
+  if (!existing) return c.html(<p>Not found</p>, 404);
+
+  await c.env.DB.batch([c.env.DB.prepare(
     `UPDATE luggage_experience_visits SET
        visitor_name = ?, visitor_type = ?, scheduled_date = ?,
        benefit_type = ?, benefit_amount = ?, note = ?,
@@ -1884,7 +1909,10 @@ ops.post("/staff/handover/experience/:id/update", editorAuth, async (c) => {
     String(body.benefit_amount || "") || null,
     String(body.note || "") || null,
     visitId
-  ).run();
+  ),
+    c.env.DB.prepare("DELETE FROM luggage_experience_rentals WHERE visit_id = ?").bind(visitId),
+    insertExperienceRentals(c.env.DB, rentals, visitId),
+  ]);
 
   return c.redirect("/staff/experience");
 });
@@ -1896,9 +1924,10 @@ ops.post("/staff/handover/experience/:id/delete", editorAuth, async (c) => {
     return c.redirect("/staff/experience");
   }
   const visitId = c.req.param("id");
-  await c.env.DB.prepare(
-    "DELETE FROM luggage_experience_visits WHERE visit_id = ?"
-  ).bind(visitId).run();
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM luggage_experience_rentals WHERE visit_id = ?").bind(visitId),
+    c.env.DB.prepare("DELETE FROM luggage_experience_visits WHERE visit_id = ?").bind(visitId),
+  ]);
   return c.redirect("/staff/experience");
 });
 

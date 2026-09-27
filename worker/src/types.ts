@@ -7,6 +7,7 @@ export type Env = {
 
   // Internal reviewer -> luggage auth
   INTERNAL_API_SECRET: string;
+  CENTER_INVENTORY_API_SECRET?: string;
 
   // Supabase (staff auth + staff profiles)
   SUPABASE_URL: string;
