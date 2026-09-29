@@ -66,6 +66,14 @@ import {
   type CashClosingType,
   type CashClosingUpdatePayload,
 } from "../services/cashClosingWrites";
+import {
+  classifyOrderCancelConflict,
+  normalizeOrderCancelPayload,
+  ORDER_CANCEL_AUDIT_ACTION,
+  ORDER_CANCEL_CONFLICT_MESSAGES,
+  ORDER_CANCELLABLE_STATUS,
+  type OrderCancelPayload,
+} from "../services/orderCancelWrites";
 
 const internalApi = new Hono<AppType>();
 // Mounted via `app.route("/", internalApi)` in index.tsx, so a bare "/*" here
@@ -100,6 +108,7 @@ const LUGGAGE_AUDIT_ACTION_LABELS: Record<string, string> = {
   UNIFIED_ADMIN_LOST_FOUND_DELETE: "분실물삭제",
   UNIFIED_ADMIN_HANDOVER_CREATE: "인수인계작성", UNIFIED_ADMIN_HANDOVER_UPDATE: "인수인계수정",
   UNIFIED_ADMIN_HANDOVER_DELETE: "인수인계삭제", UNIFIED_ADMIN_HANDOVER_COMMENT_CREATE: "인수인계댓글",
+  UNIFIED_ADMIN_ORDER_CANCEL: "취소",
 };
 
 type LuggageWorkScheduleDto = {
@@ -3240,6 +3249,88 @@ internalApi.patch("/internal/luggage-orders/:orderId/pickup-status", async (c) =
     });
   } catch {
     return c.json({ error: "Unable to update pickup status" }, 500);
+  }
+});
+
+// POST /internal/luggage-orders/:orderId/cancel — Unified-admin cancel of a PAYMENT_PENDING order.
+// Same meaning as the staff cancel (status → CANCELLED, nothing else is touched), but limited to
+// PAYMENT_PENDING, guarded by the screen's status/updatedAt snapshot, and written as the resolved
+// legacy staff. Status change, audit log, and the requestId replay guard commit in one D1 batch.
+internalApi.post("/internal/luggage-orders/:orderId/cancel", async (c) => {
+  const orderId = c.req.param("orderId");
+  if (orderId.length > 32 || !LUGGAGE_ORDER_ID_PATTERN.test(orderId)) {
+    return c.json({ error: "Invalid orderId" }, 400);
+  }
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  let normalized: OrderCancelPayload;
+  try {
+    normalized = normalizeOrderCancelPayload(payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+  const staff = resolution.staff;
+
+  // instr() instead of LIKE: D1 rejects LIKE patterns longer than its pattern-length limit.
+  const requestMarker = `"requestId":"${normalized.requestId}"`;
+  const current = await c.env.DB.prepare(
+    `SELECT o.status, o.updated_at AS updatedAt,
+            EXISTS (
+              SELECT 1 FROM luggage_audit_logs
+              WHERE order_id = o.order_id AND action = '${ORDER_CANCEL_AUDIT_ACTION}' AND instr(details, ?) > 0
+            ) AS replayed
+     FROM luggage_orders o WHERE o.order_id = ?`,
+  ).bind(requestMarker, orderId).first<{ status: string; updatedAt: string; replayed: number }>();
+  if (!current) return c.json({ error: "Luggage order not found", code: "NOT_FOUND" }, 404);
+  const before = { status: current.status, updatedAt: current.updatedAt };
+  const conflict = classifyOrderCancelConflict(before, normalized.expected, current.replayed === 1);
+  if (conflict) return c.json({ error: ORDER_CANCEL_CONFLICT_MESSAGES[conflict], code: conflict }, 409);
+
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    action: "cancel",
+    requestId: normalized.requestId,
+    orderId,
+    before,
+    after: { status: "CANCELLED", updatedAt: null },
+    expected: normalized.expected,
+    ...unifiedActorAuditSnapshot(normalized.actor, staff),
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `UPDATE luggage_orders SET status = 'CANCELLED', updated_at = datetime('now')
+         WHERE order_id = ? AND status = '${ORDER_CANCELLABLE_STATUS}' AND updated_at = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM luggage_audit_logs
+             WHERE order_id = ? AND action = '${ORDER_CANCEL_AUDIT_ACTION}' AND instr(details, ?) > 0
+           )
+         RETURNING order_id AS orderId, status, updated_at AS updatedAt`,
+      ).bind(orderId, current.updatedAt, orderId, requestMarker),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT ?, ?, 'unified-admin', '${ORDER_CANCEL_AUDIT_ACTION}',
+                json_set(?, '$.after.updatedAt', (SELECT updated_at FROM luggage_orders WHERE order_id = ?)), datetime('now')
+         WHERE changes() = 1`,
+      ).bind(orderId, staff.id, auditDetails, orderId),
+    ]);
+    const updated = (results[0].results ?? []) as Array<{ orderId: string; status: string; updatedAt: string }>;
+    if (updated.length !== 1) {
+      return c.json({ error: ORDER_CANCEL_CONFLICT_MESSAGES.STALE, code: "STALE" }, 409);
+    }
+    if (results[1].meta.changes !== 1) {
+      return c.json({ error: "Unable to write order cancel audit log" }, 500);
+    }
+    return c.json({ changed: true, order: updated[0] });
+  } catch {
+    return c.json({ error: "Unable to cancel luggage order" }, 500);
   }
 });
 
