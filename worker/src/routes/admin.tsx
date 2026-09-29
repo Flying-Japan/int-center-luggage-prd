@@ -414,6 +414,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
 
         <section class="card" style="padding:16px">
           <h3 class="card-title">일별 매출 추이</h3>
+          <p class="sales-td--muted" style="font-size:11px;margin:-4px 0 8px">왼쪽 축: 짐보관 현장 매출(¥) · 오른쪽 축: 네이버 렌탈 온라인 매출(₩) · 통화가 달라 환산·합산하지 않음 · 오늘 렌탈은 다음 날 03:00 집계 후 표시</p>
           <div style="position:relative;height:320px"><canvas id="trendChart"></canvas></div>
         </section>
 
@@ -458,7 +459,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
                 <td class="sales-td sales-td--right">{r.cash ? `¥${r.cash.toLocaleString()}` : "-"}</td>
                 <td class="sales-td sales-td--right">{r.qr ? `¥${r.qr.toLocaleString()}` : "-"}</td>
                 <td class="sales-td sales-td--right sales-td--luggage sales-td--bold">{r.luggage ? `¥${r.luggage.toLocaleString()}` : "-"}</td>
-                <td class="sales-td sales-td--right sales-td--rental">{r.rentalKrw ? <span data-krw={String(r.rentalKrw)}>{`₩${r.rentalKrw.toLocaleString()}`}</span> : "-"}</td>
+                <td class="sales-td sales-td--right sales-td--rental">{r.rentalKrw ? <span data-krw={String(r.rentalKrw)}>{`₩${r.rentalKrw.toLocaleString()}`}</span> : "-"}{r.isRealtime && r.rentalKrw ? <span class="sales-td--muted" style="display:block;font-size:10px" title="네이버 렌탈은 매일 03:00에 집계되어 오늘 값은 부분 집계입니다">(집계 중)</span> : null}</td>
               </tr>
             );
           })}
@@ -606,11 +607,13 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     });
   }
 
-  var rows = ${JSON.stringify(mergedRows.slice().reverse().map(r => ({ label: r.dateJP.slice(5), luggage: r.luggage, people: r.orders })))};
+  // rental: KRW on its own right axis; today's value is partial until the 03:00 sync, so leave it blank
+  var rows = ${JSON.stringify(mergedRows.slice().reverse().map(r => ({ label: r.dateJP.slice(5), luggage: r.luggage, rental: r.date === todayJST ? null : r.rentalKrw, people: r.orders })))};
 
   if(!rows.length){return;}
   var labels = rows.map(function(r){return r.label;});
   var luggageVals = rows.map(function(r){return r.luggage;});
+  var rentalVals = rows.map(function(r){return r.rental;});
 
   var defaults = Chart.defaults;
   defaults.font.family = "'Pretendard','Noto Sans KR',sans-serif";
@@ -638,8 +641,10 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     data:{
       labels: labels,
       datasets:[
-        {label:'짐보관 (Luggage)',data:luggageVals,borderColor:'#4285F4',backgroundColor:'rgba(66,133,244,0.08)',pointBackgroundColor:'#4285F4',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false,datalabels:{display:false}},
-        {label:'Luggage Trend',data:linReg(luggageVals),borderColor:'rgba(66,133,244,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true,datalabels:{display:false}}
+        {label:'짐보관 현장 (¥, 왼쪽 축)',yAxisID:'y',data:luggageVals,borderColor:'#4285F4',backgroundColor:'rgba(66,133,244,0.08)',pointBackgroundColor:'#4285F4',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false,datalabels:{display:false}},
+        {label:'Luggage Trend',yAxisID:'y',data:linReg(luggageVals),borderColor:'rgba(66,133,244,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true,datalabels:{display:false}},
+        {label:'네이버 렌탈 온라인 (₩, 오른쪽 축)',yAxisID:'y1',data:rentalVals,borderColor:'#EA4335',backgroundColor:'rgba(234,67,53,0.08)',pointBackgroundColor:'#EA4335',pointStyle:'rectRot',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false,spanGaps:false,datalabels:{display:false}},
+        {label:'Rental Trend',yAxisID:'y1',data:linReg(rentalVals),borderColor:'rgba(234,67,53,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true,datalabels:{display:false}}
       ]
     },
     options:{
@@ -648,14 +653,16 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
       plugins:{
         legend:{position:'top',labels:{boxWidth:12,padding:16,usePointStyle:true,pointStyle:'circle',
           filter:function(item){return item.text.indexOf('Trend')===-1;}}},
-        tooltip:{filter:function(item){return item.dataset.label.indexOf('Trend')===-1;},
+        tooltip:{filter:function(item){return item.dataset.label.indexOf('Trend')===-1&&item.raw!==null;},
           callbacks:{label:function(c){
-            return c.dataset.label+': \\u00A5'+c.raw.toLocaleString();
+            var cur=c.dataset.yAxisID==='y1'?'\\u20A9':'\\u00A5';
+            return c.dataset.label+': '+cur+c.raw.toLocaleString();
           }}}
       },
       scales:{
         x:{grid:{display:false}},
-        y:{ticks:{callback:function(v){return '\\u00A5'+v.toLocaleString();}},grid:{color:'#f0f0ee'},beginAtZero:true}
+        y:{position:'left',title:{display:true,text:'짐보관 (\\u00A5)',color:'#4285F4'},ticks:{color:'#4285F4',callback:function(v){return '\\u00A5'+v.toLocaleString();}},grid:{color:'#f0f0ee'},beginAtZero:true},
+        y1:{position:'right',title:{display:true,text:'네이버 렌탈 (\\u20A9)',color:'#EA4335'},ticks:{color:'#EA4335',callback:function(v){return '\\u20A9'+v.toLocaleString();}},grid:{drawOnChartArea:false},beginAtZero:true}
       }
     }
   });
