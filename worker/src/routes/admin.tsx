@@ -9,6 +9,8 @@ import { createSupabaseAdmin } from "../lib/supabase";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { loadCompletionMessages, buildCompletionMessagesFromKo } from "../services/completionMessages";
 import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
+import { syncNaverRentalRevenueRange } from "../services/rentalRevenueSync";
+import { fetchTodayJpyRate } from "../services/exchangeRate";
 
 const admin = new Hono<AppType>();
 admin.use("/staff/admin/completion-message*", editorAuth);
@@ -28,6 +30,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
   const whereClause = " WHERE sale_date BETWEEN ? AND ?";
   const params: string[] = [startDate, endDate];
 
+  // Naver online rental revenue (KRW) — shown separately, never added to luggage (JPY).
   let rentalWhereClause = "";
   if (startDate && endDate) {
     rentalWhereClause = " WHERE business_date BETWEEN ? AND ?";
@@ -44,8 +47,8 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
       `SELECT sale_date, people, cash, qr, luggage_total, rental_total FROM luggage_daily_sales${whereClause} ORDER BY sale_date DESC`
     ).bind(...params).all<{ sale_date: string; people: number; cash: number; qr: number; luggage_total: number; rental_total: number }>(),
     c.env.DB.prepare(
-      `SELECT business_date as sale_date, revenue_amount as rental_total FROM luggage_rental_daily_sales${rentalWhereClause} ORDER BY business_date DESC`
-    ).bind(...params).all<{ sale_date: string; rental_total: number }>(),
+      `SELECT business_date as sale_date, revenue_krw FROM luggage_naver_rental_daily_sales${rentalWhereClause} ORDER BY business_date DESC`
+    ).bind(...params).all<{ sale_date: string; revenue_krw: number }>(),
     c.env.DB.prepare(
       `WITH payment_allocations AS (
         SELECT order_id,
@@ -77,9 +80,9 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     ).bind(...params).all<{ sale_date: string; total_amount: number; paypay_amount: number; actual_qr_amount: number }>(),
   ]);
 
-  const rentalByDate = new Map<string, number>();
+  const rentalKrwByDate = new Map<string, number>();
   for (const r of rentalRows.results) {
-    rentalByDate.set(r.sale_date, r.rental_total);
+    rentalKrwByDate.set(r.sale_date, r.revenue_krw);
   }
 
   // Build lookup map for actual luggage data by date
@@ -101,7 +104,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     sheetByDate.set(r.sale_date, r);
   }
 
-  interface MergedRow { date: string; dateJP: string; orders: number; suitcases: number; backpacks: number; cash: number; qr: number; luggage: number; rental: number; combined: number; isSettled?: boolean; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
+  interface MergedRow { date: string; dateJP: string; orders: number; suitcases: number; backpacks: number; cash: number; qr: number; luggage: number; rentalKrw: number; isSettled?: boolean; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
   // Build rows from all data sources
   const allDates = new Set([
     ...actualLuggageRows.results.map(r => r.sale_date),
@@ -126,8 +129,8 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     const dbPeople = actual?.order_count || 0;
     const sheetPeople = sheet?.people || 0;
     const orders = Math.max(dbPeople, sheetPeople);
-    // Rental from our own system (luggage_rental_daily_sales)
-    const rental = rentalByDate.get(date) || 0;
+    // Naver online rental revenue (KRW, center dashboard formula)
+    const rentalKrw = rentalKrwByDate.get(date) || 0;
     return {
       date,
       dateJP: `${date.replace(/-/g, "/")}/${dow}`,
@@ -137,8 +140,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
       cash,
       qr,
       luggage,
-      rental,
-      combined: luggage + rental,
+      rentalKrw,
       isSettled: useFinalClosing,
       isWeekend: flags.isWeekend,
       jpHoliday: flags.jp,
@@ -214,7 +216,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
   const todayIdx = mergedRows.findIndex(r => r.date === todayJST);
   const todayDow = JST_DOW_JP[new Date(todayJST + "T12:00:00Z").getUTCDay()];
   const todayFlags = getSalesHolidayFlags(todayJST);
-  const todayRental = rentalByDate.get(todayJST) || 0;
+  const todayRentalKrw = rentalKrwByDate.get(todayJST) || 0;
   const todayRTRow: MergedRow & { isRealtime?: boolean } = {
     date: todayJST,
     dateJP: `${todayJST.replace(/-/g, "/")}/${todayDow}`,
@@ -224,8 +226,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     cash: tlrt.cash,
     qr: tlrt.qr,
     luggage: tlrt.luggage_total,
-    rental: todayRental,
-    combined: tlrt.luggage_total + todayRental,
+    rentalKrw: todayRentalKrw,
     isWeekend: todayFlags.isWeekend,
     jpHoliday: todayFlags.jp,
     krHoliday: todayFlags.kr,
@@ -245,8 +246,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
   // Stats — computed after real-time injection so today's row is accurate
   const dayCount = mergedRows.length || 1;
   const totalLuggage = mergedRows.reduce((s, r) => s + r.luggage, 0);
-  const totalRental = mergedRows.reduce((s, r) => s + r.rental, 0);
-  const totalCombined = totalLuggage + totalRental;
+  const totalRentalKrw = mergedRows.reduce((s, r) => s + r.rentalKrw, 0);
   const totalPeople = mergedRows.reduce((s, r) => s + r.orders, 0);
   const totalSuitcases = mergedRows.reduce((s, r) => s + r.suitcases, 0);
   const totalBackpacks = mergedRows.reduce((s, r) => s + r.backpacks, 0);
@@ -254,7 +254,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
   const totalQr = mergedRows.reduce((s, r) => s + r.qr, 0);
 
   // Min / Max stats (only from days with data)
-  const activeDays = mergedRows.filter(r => r.combined > 0);
+  const activeDays = mergedRows.filter(r => r.luggage > 0);
   const activePastDays = activeDays.filter(r => r.date !== todayJST);
   const minSrc = activePastDays.length > 0 ? activePastDays : activeDays;
   const minMax = activeDays.length > 0 ? {
@@ -262,19 +262,25 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     cash: { min: Math.min(...minSrc.map(r => r.cash)), max: Math.max(...activeDays.map(r => r.cash)) },
     qr: { min: Math.min(...minSrc.map(r => r.qr)), max: Math.max(...activeDays.map(r => r.qr)) },
     luggage: { min: Math.min(...minSrc.map(r => r.luggage)), max: Math.max(...activeDays.map(r => r.luggage)) },
-    rental: { min: Math.min(...minSrc.map(r => r.rental)), max: Math.max(...activeDays.map(r => r.rental)) },
-    combined: { min: Math.min(...minSrc.map(r => r.combined)), max: Math.max(...activeDays.map(r => r.combined)) },
+  } : null;
+  const rentalDays = mergedRows.filter(r => r.rentalKrw > 0);
+  const rentalPastDays = rentalDays.filter(r => r.date !== todayJST);
+  const rentalMinSrc = rentalPastDays.length > 0 ? rentalPastDays : rentalDays;
+  const rentalMinMax = rentalDays.length > 0 ? {
+    min: Math.min(...rentalMinSrc.map(r => r.rentalKrw)),
+    max: Math.max(...rentalDays.map(r => r.rentalKrw)),
   } : null;
 
   // Average daily revenue (excluding today's real-time row for a fair historical avg)
-  const historicalRows = mergedRows.filter(r => r.date !== todayJST && r.combined > 0);
+  const historicalRows = mergedRows.filter(r => r.date !== todayJST && r.luggage > 0);
   const histDayCount = historicalRows.length || 1;
-  const avgDailyRevenue = Math.round(historicalRows.reduce((s, r) => s + r.combined, 0) / histDayCount);
+  const avgDailyRevenue = Math.round(historicalRows.reduce((s, r) => s + r.luggage, 0) / histDayCount);
   const todayVsAvgDiff = ts.revenue_total - avgDailyRevenue;
   const todayVsAvgPct = avgDailyRevenue > 0 ? Math.round((todayVsAvgDiff / avgDailyRevenue) * 100) : 0;
 
   const staff = getStaff(c);
   const successMsg = c.req.query("success");
+  const errorMsg = c.req.query("error");
   return c.html(
     <html lang="ko">
       <head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="stylesheet" href="/static/styles.css" /><script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script><script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2/dist/chartjs-plugin-datalabels.min.js"></script><title>매출 분석</title></head>
@@ -282,6 +288,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
         <StaffTopbar staff={staff} active="/staff/admin/sales" />
         <main class="container">
         {successMsg && <p class="success-note" id="page-alert" role="alert">{successMsg}</p>}
+        {errorMsg && <p class="error" id="page-alert" role="alert">{errorMsg}</p>}
         <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div><a href="/staff/admin/sales/heatmap" class="btn btn-sm" style="font-size:12px;margin-top:8px;align-self:flex-start">시간대별 히트맵 →</a></section>
 
         <section style="margin-bottom:16px;padding:16px;background:#fff;border:1px solid #e2e8f0;border-radius:12px">
@@ -369,21 +376,13 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
         })()}
 
         {(() => {
-          const cashPct = totalCombined > 0 ? Math.round(totalCash / (totalCash + totalQr) * 100) : 0;
+          const cashPct = totalCash + totalQr > 0 ? Math.round(totalCash / (totalCash + totalQr) * 100) : 0;
           const qrPct = 100 - cashPct;
           return (
         <div class="stat-grid">
-          <div class="card stat-card">
-            <p class="stat-label">짐보관 매출 · 手荷物預かり</p>
-            <p class="stat-value">¥{totalLuggage.toLocaleString()}</p>
-          </div>
-          <div class="card stat-card">
-            <p class="stat-label">렌탈 매출 · レンタル</p>
-            <p class="stat-value">¥{totalRental.toLocaleString()}</p>
-          </div>
           <div class="card stat-card stat-card--highlight">
-            <p class="stat-label stat-label--highlight">합계 · 合計</p>
-            <p class="stat-value stat-value--highlight">¥{totalCombined.toLocaleString()}</p>
+            <p class="stat-label stat-label--highlight">짐보관 매출 · 手荷物預かり</p>
+            <p class="stat-value stat-value--highlight">¥{totalLuggage.toLocaleString()}</p>
           </div>
           <div class="card stat-card">
             <p class="stat-label">총고객수 · 来客数</p>
@@ -391,11 +390,23 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
           </div>
           <div class="card stat-card">
             <p class="stat-label">일평균 · 日平均</p>
-            <p class="stat-value">¥{Math.round(totalCombined / dayCount).toLocaleString()}</p>
+            <p class="stat-value">¥{Math.round(totalLuggage / dayCount).toLocaleString()}</p>
           </div>
           <div class="card stat-card">
             <p class="stat-label">현금 · Pay</p>
             <p class="stat-value stat-value--sm">¥{totalCash.toLocaleString()} <span class="sales-td--muted">({cashPct}%)</span> / ¥{totalQr.toLocaleString()} <span class="sales-td--muted">({qrPct}%)</span></p>
+          </div>
+          <div class="card stat-card">
+            <p class="stat-label">네이버 렌탈 매출 (온라인·KRW)</p>
+            <p class="stat-value"><span data-krw={String(totalRentalKrw)}>₩{totalRentalKrw.toLocaleString()}</span></p>
+            <p class="sales-td--muted" style="font-size:11px;margin:4px 0 0">센터 대시보드 매출과 동일 기준 · 짐보관 매출과 합산하지 않음 · 매일 03:00 갱신</p>
+            <button type="button" id="fxToggle" class="btn btn-sm" style="font-size:11px;padding:2px 8px;min-height:24px;margin-top:6px">오늘 환율로 엔화 보기</button>
+            <p id="fxNote" class="sales-td--muted" style="font-size:11px;margin:4px 0 0;display:none" role="status"></p>
+            {staff?.role === "admin" && (
+              <form method="post" action="/staff/admin/sales/rental-resync" style="margin-top:6px" onsubmit="return confirm('2025-08-01부터 오늘까지 네이버 렌탈 매출을 다시 동기화할까요?')">
+                <button type="submit" class="btn btn-sm" style="font-size:11px;padding:2px 8px;min-height:24px">전체 재동기화</button>
+              </form>
+            )}
           </div>
         </div>
           );
@@ -424,17 +435,14 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
             <th class="sales-th sales-th--right" style="color:#64748b">🎒</th>
             <th class="sales-th sales-th--right">Cash</th>
             <th class="sales-th sales-th--right">Pay</th>
-            <th class="sales-th sales-th--right sales-td--luggage">Luggage</th>
-            <th class="sales-th sales-th--right sales-td--rental">Rental</th>
-            <th class="sales-th sales-th--right sales-td--bold">Daily Total</th>
+            <th class="sales-th sales-th--right sales-td--luggage sales-td--bold">Luggage</th>
+            <th class="sales-th sales-th--right sales-td--rental" title="네이버 온라인 렌탈 매출 (KRW) · 짐보관 매출과 합산하지 않음">Naver Rental (₩)</th>
           </tr></thead>
           <tbody>
           {mergedRows.length === 0 && (
-            <tr><td colspan={9} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
+            <tr><td colspan={8} style="padding:24px;text-align:center;color:#a5a5a3">데이터가 없습니다</td></tr>
           )}
           {(mergedRows as Array<MergedRow & { isRealtime?: boolean }>).map((r) => {
-            const lPct = r.combined > 0 ? Math.round(r.luggage / r.combined * 100) : 0;
-            const rPct = r.combined > 0 ? 100 - lPct : 0;
             const isHoliday = r.isWeekend || r.jpHoliday || r.krHoliday;
             const rowBg = r.isRealtime ? "background:#f0f9ff;outline:2px solid #bfdbfe;outline-offset:-1px" : isHoliday ? "background:#fef9ee" : "";
             return (
@@ -449,9 +457,8 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
                 <td class="sales-td sales-td--right" style="color:#64748b">{r.backpacks || "-"}</td>
                 <td class="sales-td sales-td--right">{r.cash ? `¥${r.cash.toLocaleString()}` : "-"}</td>
                 <td class="sales-td sales-td--right">{r.qr ? `¥${r.qr.toLocaleString()}` : "-"}</td>
-                <td class="sales-td sales-td--right sales-td--luggage">{r.luggage ? <>{`¥${r.luggage.toLocaleString()}`} <span class="sales-td--muted">({lPct}%)</span></> : "-"}</td>
-                <td class="sales-td sales-td--right sales-td--rental">{r.rental ? <>{`¥${r.rental.toLocaleString()}`} <span class="sales-td--muted">({rPct}%)</span></> : "-"}</td>
-                <td class="sales-td sales-td--right sales-td--bold">¥{r.combined.toLocaleString()}</td>
+                <td class="sales-td sales-td--right sales-td--luggage sales-td--bold">{r.luggage ? `¥${r.luggage.toLocaleString()}` : "-"}</td>
+                <td class="sales-td sales-td--right sales-td--rental">{r.rentalKrw ? <span data-krw={String(r.rentalKrw)}>{`₩${r.rentalKrw.toLocaleString()}`}</span> : "-"}</td>
               </tr>
             );
           })}
@@ -463,9 +470,8 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
               <td class="sales-td sales-td--right" style="color:#64748b">{totalBackpacks.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{totalCash.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{totalQr.toLocaleString()}</td>
-              <td class="sales-td sales-td--right sales-td--luggage">¥{totalLuggage.toLocaleString()} <span class="sales-td--muted">({totalCombined > 0 ? Math.round(totalLuggage / totalCombined * 100) : 0}%)</span></td>
-              <td class="sales-td sales-td--right sales-td--rental">¥{totalRental.toLocaleString()} <span class="sales-td--muted">({totalCombined > 0 ? Math.round(totalRental / totalCombined * 100) : 0}%)</span></td>
-              <td class="sales-td sales-td--right">¥{totalCombined.toLocaleString()}</td>
+              <td class="sales-td sales-td--right sales-td--luggage">¥{totalLuggage.toLocaleString()}</td>
+              <td class="sales-td sales-td--right sales-td--rental"><span data-krw={String(totalRentalKrw)}>₩{totalRentalKrw.toLocaleString()}</span></td>
             </tr>
             <tr class="sales-avg-row">
               <td class="sales-td">Daily Avg</td>
@@ -475,8 +481,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
               <td class="sales-td sales-td--right">¥{Math.round(totalCash / dayCount).toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{Math.round(totalQr / dayCount).toLocaleString()}</td>
               <td class="sales-td sales-td--right sales-td--luggage">¥{Math.round(totalLuggage / dayCount).toLocaleString()}</td>
-              <td class="sales-td sales-td--right sales-td--rental">¥{Math.round(totalRental / dayCount).toLocaleString()}</td>
-              <td class="sales-td sales-td--right">¥{Math.round(totalCombined / dayCount).toLocaleString()}</td>
+              <td class="sales-td sales-td--right sales-td--rental"><span data-krw={String(Math.round(totalRentalKrw / dayCount))}>₩{Math.round(totalRentalKrw / dayCount).toLocaleString()}</span></td>
             </tr>
             {minMax && (<>
             <tr class="sales-max-row">
@@ -487,8 +492,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
               <td class="sales-td sales-td--right">¥{minMax.cash.max.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.qr.max.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.luggage.max.toLocaleString()}</td>
-              <td class="sales-td sales-td--right">¥{minMax.rental.max.toLocaleString()}</td>
-              <td class="sales-td sales-td--right">¥{minMax.combined.max.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">{rentalMinMax ? <span data-krw={String(rentalMinMax.max)}>{`₩${rentalMinMax.max.toLocaleString()}`}</span> : "-"}</td>
             </tr>
             <tr class="sales-min-row">
               <td class="sales-td">Min</td>
@@ -498,8 +502,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
               <td class="sales-td sales-td--right">¥{minMax.cash.min.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.qr.min.toLocaleString()}</td>
               <td class="sales-td sales-td--right">¥{minMax.luggage.min.toLocaleString()}</td>
-              <td class="sales-td sales-td--right">¥{minMax.rental.min.toLocaleString()}</td>
-              <td class="sales-td sales-td--right">¥{minMax.combined.min.toLocaleString()}</td>
+              <td class="sales-td sales-td--right">{rentalMinMax ? <span data-krw={String(rentalMinMax.min)}>{`₩${rentalMinMax.min.toLocaleString()}`}</span> : "-"}</td>
             </tr>
             </>)}
           </>)}
@@ -576,13 +579,38 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     });
     renderCal();
   }
-  var rows = ${JSON.stringify(mergedRows.slice().reverse().map(r => ({ label: r.dateJP.slice(5), luggage: r.luggage, rental: r.rental, combined: r.combined, people: r.orders })))};
+  // Reference-only JPY view of Naver rental KRW at today's rate (never stored or summed)
+  var fxToggle=document.getElementById('fxToggle');
+  var fxNote=document.getElementById('fxNote');
+  var fxOn=false;
+  function fxRender(rate){
+    document.querySelectorAll('[data-krw]').forEach(function(el){
+      var jp=el.parentNode.querySelector('.fx-jpy');
+      if(!rate){if(jp)jp.remove();return;}
+      if(!jp){jp=document.createElement('span');jp.className='fx-jpy sales-td--muted';jp.style.cssText='display:block;font-size:11px;font-weight:400';el.after(jp);}
+      jp.textContent='≈ \\u00A5'+Math.round(Number(el.getAttribute('data-krw'))/rate).toLocaleString();
+    });
+  }
+  if(fxToggle){
+    fxToggle.addEventListener('click',function(){
+      if(fxOn){fxOn=false;fxRender(null);fxNote.style.display='none';fxToggle.textContent='오늘 환율로 엔화 보기';return;}
+      fxToggle.disabled=true;fxToggle.textContent='환율 불러오는 중…';
+      fetch('/staff/admin/sales/fx-rate',{headers:{Accept:'application/json'}}).then(function(r){return r.json();}).then(function(d){
+        if(!d||d.status!=='ok')throw new Error('fx');
+        fxOn=true;fxRender(d.krwPerJpy);
+        fxNote.textContent='참고용 · 오늘 환율 1\\u00A5 = \\u20A9'+d.krwPerJpy.toFixed(2)+(d.rateDate?' ('+d.rateDate+' 기준)':'')+' · 과거 날짜도 오늘 환율로 환산 · 저장·합산하지 않음';
+        fxNote.style.display='block';fxToggle.textContent='원화만 보기';
+      }).catch(function(){
+        fxNote.textContent='환율을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.';fxNote.style.display='block';fxToggle.textContent='오늘 환율로 엔화 보기';
+      }).finally(function(){fxToggle.disabled=false;});
+    });
+  }
+
+  var rows = ${JSON.stringify(mergedRows.slice().reverse().map(r => ({ label: r.dateJP.slice(5), luggage: r.luggage, people: r.orders })))};
 
   if(!rows.length){return;}
   var labels = rows.map(function(r){return r.label;});
   var luggageVals = rows.map(function(r){return r.luggage;});
-  var rentalVals = rows.map(function(r){return r.rental;});
-  var combinedVals = rows.map(function(r){return r.combined;});
 
   var defaults = Chart.defaults;
   defaults.font.family = "'Pretendard','Noto Sans KR',sans-serif";
@@ -604,24 +632,14 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     return vals.map(function(_,i){return i>=first&&i<=last?Math.round(m*i+b):null;});
   }
 
-  // Compute percentages for labels
-  var luggagePcts = luggageVals.map(function(_,i){var c=combinedVals[i];return c>0?Math.round(luggageVals[i]/c*100):0;});
-  var rentalPcts = rentalVals.map(function(_,i){var c=combinedVals[i];return c>0?Math.round(rentalVals[i]/c*100):0;});
-
   Chart.register(ChartDataLabels);
   new Chart(document.getElementById('trendChart'),{
     type:'line',
     data:{
       labels: labels,
       datasets:[
-        {label:'짐보관 (Luggage)',data:luggageVals,borderColor:'#4285F4',backgroundColor:'rgba(66,133,244,0.08)',pointBackgroundColor:'#4285F4',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false,
-          datalabels:{align:'top',color:'#4285F4',font:{size:9,weight:'bold'},formatter:function(_,ctx){return luggagePcts[ctx.dataIndex]+'%';}}},
-        {label:'Luggage Trend',data:linReg(luggageVals),borderColor:'rgba(66,133,244,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true,datalabels:{display:false}},
-        {label:'렌탈 (Rental)',data:rentalVals,borderColor:'#EA4335',backgroundColor:'rgba(234,67,53,0.08)',pointBackgroundColor:'#EA4335',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false,
-          datalabels:{align:'bottom',color:'#EA4335',font:{size:9,weight:'bold'},formatter:function(_,ctx){return rentalPcts[ctx.dataIndex]+'%';}}},
-        {label:'Rental Trend',data:linReg(rentalVals),borderColor:'rgba(234,67,53,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true,datalabels:{display:false}},
-        {label:'합계 (Combined)',data:combinedVals,borderColor:'#FBBC05',backgroundColor:'rgba(251,188,5,0.08)',pointBackgroundColor:'#FBBC05',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false,datalabels:{display:false}},
-        {label:'Combined Trend',data:linReg(combinedVals),borderColor:'rgba(251,188,5,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true,datalabels:{display:false}}
+        {label:'짐보관 (Luggage)',data:luggageVals,borderColor:'#4285F4',backgroundColor:'rgba(66,133,244,0.08)',pointBackgroundColor:'#4285F4',pointRadius:4,pointHoverRadius:6,borderWidth:2,tension:0.1,fill:false,datalabels:{display:false}},
+        {label:'Luggage Trend',data:linReg(luggageVals),borderColor:'rgba(66,133,244,0.35)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,pointHoverRadius:0,fill:false,tension:0,spanGaps:true,datalabels:{display:false}}
       ]
     },
     options:{
@@ -632,11 +650,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
           filter:function(item){return item.text.indexOf('Trend')===-1;}}},
         tooltip:{filter:function(item){return item.dataset.label.indexOf('Trend')===-1;},
           callbacks:{label:function(c){
-            var val='\\u00A5'+c.raw.toLocaleString();
-            var idx=c.dataIndex;
-            if(c.datasetIndex===0)val+=' ('+luggagePcts[idx]+'%)';
-            if(c.datasetIndex===2)val+=' ('+rentalPcts[idx]+'%)';
-            return c.dataset.label+': '+val;
+            return c.dataset.label+': \\u00A5'+c.raw.toLocaleString();
           }}}
       },
       scales:{
@@ -1247,6 +1261,44 @@ admin.post("/staff/admin/completion-message", async (c) => {
 // POST /staff/admin/sales/backfill — One-time full backfill from Google Sheets
 admin.post("/staff/admin/sales/backfill", editorAuth, async (c) => {
   return c.redirect("/staff/admin/sales?error=시트 백필은 비활성화되었습니다. 현재 SOT는 서비스 DB입니다.");
+});
+
+// GET /staff/admin/sales/fx-rate — Today's JPY→KRW rate for the reference-only JPY view
+admin.get("/staff/admin/sales/fx-rate", staffAuth, async (c) => {
+  c.header("Cache-Control", "no-store");
+  try {
+    const rate = await fetchTodayJpyRate();
+    if (!rate) return c.json({ status: "error" }, 502);
+    return c.json({ status: "ok", ...rate });
+  } catch (error) {
+    console.error("FX rate fetch failed:", error);
+    return c.json({ status: "error" }, 502);
+  }
+});
+
+// POST /staff/admin/sales/rental-resync — Re-sync Naver rental revenue (KRW) for the full history
+admin.post("/staff/admin/sales/rental-resync", adminAuth, async (c) => {
+  const url = c.env.NAVER_ORDERS_SUPABASE_URL;
+  const key = c.env.NAVER_ORDERS_SUPABASE_KEY;
+  if (!url || !key) return c.redirect(`/staff/admin/sales?error=${encodeURIComponent("네이버 주문 DB 설정이 없습니다.")}`);
+  const today = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  try {
+    // One month per batch keeps each DELETE+INSERT atomic and small.
+    let synced = 0;
+    let rows = 0;
+    for (let month = "2025-08"; `${month}-01` <= today; ) {
+      const [y, m] = month.split("-").map(Number);
+      const monthEnd = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+      const result = await syncNaverRentalRevenueRange(c.env.DB, url, key, `${month}-01`, monthEnd < today ? monthEnd : today);
+      synced += result.synced;
+      rows += result.rows;
+      month = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 7);
+    }
+    return c.redirect(`/staff/admin/sales?success=${encodeURIComponent(`네이버 렌탈 매출 ${synced}일 (${rows}건) 재동기화 완료`)}`);
+  } catch (error) {
+    console.error("Naver rental resync failed:", error);
+    return c.redirect(`/staff/admin/sales?error=${encodeURIComponent("네이버 렌탈 매출 재동기화에 실패했습니다.")}`);
+  }
 });
 
 // POST /staff/admin/retention/run — Manual retention cleanup

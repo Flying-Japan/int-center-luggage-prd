@@ -8,8 +8,12 @@ const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('wrangler/package.json'))('esbuild');
 const temp = await mkdtemp(join(tmpdir(), 'luggage-tests-'));
 try {
-  const output = join(temp, 'experience.test.cjs');
-  await build({ entryPoints: ['tests/experience.test.ts'], outfile: output, bundle: true, platform: 'node', format: 'cjs', target: 'node22' });
-  const result = spawnSync(process.execPath, ['--test', output], { stdio: 'inherit' });
+  const outputs = [];
+  for (const name of ['experience', 'rentalRevenue']) {
+    const output = join(temp, `${name}.test.cjs`);
+    await build({ entryPoints: [`tests/${name}.test.ts`], outfile: output, bundle: true, platform: 'node', format: 'cjs', target: 'node22' });
+    outputs.push(output);
+  }
+  const result = spawnSync(process.execPath, ['--test', ...outputs], { stdio: 'inherit' });
   process.exitCode = result.status ?? 1;
 } finally { await rm(temp, { recursive: true, force: true }); }

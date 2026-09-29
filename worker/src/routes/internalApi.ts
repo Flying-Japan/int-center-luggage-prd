@@ -301,11 +301,11 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
   if (!range) return c.json({ status: "error", error: "invalid JST date range" }, 400);
 
   try {
-    const [sheetRows, rentalRows, actualRows, closingRows] = await Promise.all([
+    // On-site luggage revenue only (JPY). Naver online rental revenue is KRW and is served by the
+    // integrated admin's own Naver source, so it is intentionally not part of this projection.
+    const [sheetRows, actualRows, closingRows] = await Promise.all([
       c.env.DB.prepare("SELECT sale_date, people, cash, qr, luggage_total FROM luggage_daily_sales WHERE sale_date BETWEEN ? AND ?")
         .bind(range.startDate, range.endDate).all<{ sale_date: string; people: number; cash: number; qr: number; luggage_total: number }>(),
-      c.env.DB.prepare("SELECT business_date AS sale_date, revenue_amount AS rental_total FROM luggage_rental_daily_sales WHERE business_date BETWEEN ? AND ?")
-        .bind(range.startDate, range.endDate).all<{ sale_date: string; rental_total: number }>(),
       c.env.DB.prepare(
         `WITH payment_allocations AS (
           SELECT order_id, SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) AS cash_amount,
@@ -324,7 +324,6 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
     ]);
 
     const sheetByDate = new Map(sheetRows.results.map((row) => [row.sale_date, row]));
-    const rentalByDate = new Map(rentalRows.results.map((row) => [row.sale_date, Number(row.rental_total) || 0]));
     const actualByDate = new Map(actualRows.results.map((row) => [row.sale_date, row]));
     const closingByDate = new Map(closingRows.results.map((row) => {
       const cash = Math.max(0, (Number(row.total_amount) || 0) - SALES_STARTING_FLOAT);
@@ -332,7 +331,7 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
       return [row.sale_date, { cash, qr, luggage: cash + qr }] as const;
     }));
     const today = jstToday();
-    const dates = new Set([...sheetByDate.keys(), ...rentalByDate.keys(), ...actualByDate.keys(), ...closingByDate.keys()]);
+    const dates = new Set([...sheetByDate.keys(), ...actualByDate.keys(), ...closingByDate.keys()]);
     if (today >= range.startDate && today <= range.endDate) dates.add(today);
     const dailyRows = [...dates].sort((a, b) => b.localeCompare(a)).map((date) => {
       const actual = actualByDate.get(date);
@@ -347,7 +346,7 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
         date, weekdayJst: JST_DOW_JP[new Date(`${date}T12:00:00Z`).getUTCDay()], isWeekend: flags.isWeekend,
         japaneseHoliday: flags.jp, koreanHoliday: flags.kr, people: Math.max(Number(actual?.people) || 0, Number(sheet?.people) || 0),
         suitcases: Number(actual?.suitcase_total) || 0, backpacks: Number(actual?.backpack_total) || 0, cash, qr, luggage,
-        rental: rentalByDate.get(date) ?? 0, combined: luggage + (rentalByDate.get(date) ?? 0), realtime: date === today,
+        realtime: date === today,
         settled, luggageSource: settled ? "final_close" : actual ? "orders" : sheet ? "daily_sales_fallback" : "none",
       };
     });
@@ -361,14 +360,14 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
               SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN o.suitcase_qty ELSE 0 END) AS suitcases, SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN o.backpack_qty ELSE 0 END) AS backpacks
        FROM luggage_orders o LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id WHERE date(o.created_at, '+9 hours') = ?`
     ).bind(today).first<{ order_count: number; paid_count: number; pending_count: number; people: number; cash: number; qr: number; luggage: number; suitcases: number; backpacks: number }>();
-    const rows = todayRow ? dailyRows.map((row) => row.date === today ? { ...row, people: Number(todayOrders?.people) || 0, suitcases: Number(todayOrders?.suitcases) || 0, backpacks: Number(todayOrders?.backpacks) || 0, cash: Number(todayOrders?.cash) || 0, qr: Number(todayOrders?.qr) || 0, luggage: Number(todayOrders?.luggage) || 0, combined: (Number(todayOrders?.luggage) || 0) + row.rental, realtime: true, settled: false, luggageSource: "orders" } : row) : dailyRows;
-    const total = (key: "cash" | "qr" | "luggage" | "rental" | "combined" | "people" | "suitcases" | "backpacks") => rows.reduce((sum, row) => sum + row[key], 0);
-    const activeRows = rows.filter((row) => row.combined > 0);
+    const rows = todayRow ? dailyRows.map((row) => row.date === today ? { ...row, people: Number(todayOrders?.people) || 0, suitcases: Number(todayOrders?.suitcases) || 0, backpacks: Number(todayOrders?.backpacks) || 0, cash: Number(todayOrders?.cash) || 0, qr: Number(todayOrders?.qr) || 0, luggage: Number(todayOrders?.luggage) || 0, realtime: true, settled: false, luggageSource: "orders" } : row) : dailyRows;
+    const total = (key: "cash" | "qr" | "luggage" | "people" | "suitcases" | "backpacks") => rows.reduce((sum, row) => sum + row[key], 0);
+    const activeRows = rows.filter((row) => row.luggage > 0);
     const historical = activeRows.filter((row) => row.date !== today);
-    const historicalAverage = historical.length ? Math.round(historical.reduce((sum, row) => sum + row.combined, 0) / historical.length) : 0;
+    const historicalAverage = historical.length ? Math.round(historical.reduce((sum, row) => sum + row.luggage, 0) / historical.length) : 0;
     const minRows = historical.length ? historical : activeRows;
-    const totalCash = total("cash"); const totalQr = total("qr"); const totalCombined = total("combined");
-    return c.json({ status: "ok", range, today: { date: today, orders: Number(todayOrders?.order_count) || 0, paid: Number(todayOrders?.paid_count) || 0, pending: Number(todayOrders?.pending_count) || 0, cash: Number(todayOrders?.cash) || 0, qr: Number(todayOrders?.qr) || 0, luggage: Number(todayOrders?.luggage) || 0, suitcases: Number(todayOrders?.suitcases) || 0, backpacks: Number(todayOrders?.backpacks) || 0, versusHistoricalAverage: { amount: (Number(todayOrders?.luggage) || 0) - historicalAverage, percent: historicalAverage ? Math.round(((Number(todayOrders?.luggage) || 0) - historicalAverage) / historicalAverage * 100) : 0 } }, summary: { luggage: total("luggage"), rental: total("rental"), combined: totalCombined, cash: totalCash, qr: totalQr, cashPercent: totalCash + totalQr ? Math.round(totalCash / (totalCash + totalQr) * 100) : 0, qrPercent: totalCash + totalQr ? Math.round(totalQr / (totalCash + totalQr) * 100) : 0, people: total("people"), suitcases: total("suitcases"), backpacks: total("backpacks"), dailyAverage: historicalAverage, activeMin: minRows.length ? Math.min(...minRows.map((row) => row.combined)) : null, activeMax: activeRows.length ? Math.max(...activeRows.map((row) => row.combined)) : null }, dailyRows: rows });
+    const totalCash = total("cash"); const totalQr = total("qr");
+    return c.json({ status: "ok", range, today: { date: today, orders: Number(todayOrders?.order_count) || 0, paid: Number(todayOrders?.paid_count) || 0, pending: Number(todayOrders?.pending_count) || 0, cash: Number(todayOrders?.cash) || 0, qr: Number(todayOrders?.qr) || 0, luggage: Number(todayOrders?.luggage) || 0, suitcases: Number(todayOrders?.suitcases) || 0, backpacks: Number(todayOrders?.backpacks) || 0, versusHistoricalAverage: { amount: (Number(todayOrders?.luggage) || 0) - historicalAverage, percent: historicalAverage ? Math.round(((Number(todayOrders?.luggage) || 0) - historicalAverage) / historicalAverage * 100) : 0 } }, summary: { luggage: total("luggage"), cash: totalCash, qr: totalQr, cashPercent: totalCash + totalQr ? Math.round(totalCash / (totalCash + totalQr) * 100) : 0, qrPercent: totalCash + totalQr ? Math.round(totalQr / (totalCash + totalQr) * 100) : 0, people: total("people"), suitcases: total("suitcases"), backpacks: total("backpacks"), dailyAverage: historicalAverage, activeMin: minRows.length ? Math.min(...minRows.map((row) => row.luggage)) : null, activeMax: activeRows.length ? Math.max(...activeRows.map((row) => row.luggage)) : null }, dailyRows: rows });
   } catch {
     return c.json({ status: "error", error: "failed to read luggage sales analytics" }, 500);
   }

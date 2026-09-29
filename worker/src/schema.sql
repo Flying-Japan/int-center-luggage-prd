@@ -191,7 +191,8 @@ CREATE TABLE IF NOT EXISTS luggage_cash_closing_audits (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Analytics: Rental daily sales (synced from Supabase product_orders via cron)
+-- DEPRECATED: JPY-converted rental sales (unit_price x quantity / 9.5). No longer written or read;
+-- replaced by luggage_naver_rental_daily_sales. Kept only as a historical record.
 CREATE TABLE IF NOT EXISTS luggage_rental_daily_sales (
   rental_id INTEGER PRIMARY KEY AUTOINCREMENT,
   business_date TEXT UNIQUE,
@@ -203,6 +204,15 @@ CREATE TABLE IF NOT EXISTS luggage_rental_daily_sales (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rental_daily_sales_date ON luggage_rental_daily_sales(business_date);
+
+-- Analytics: Naver (online) rental daily revenue in KRW, synced from Supabase product_orders via cron.
+-- Same formula as the center dashboard /revenue page. Never converted to JPY or added to luggage totals.
+CREATE TABLE IF NOT EXISTS luggage_naver_rental_daily_sales (
+  business_date TEXT PRIMARY KEY,
+  revenue_krw INTEGER NOT NULL DEFAULT 0,
+  order_count INTEGER NOT NULL DEFAULT 0,
+  synced_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- Config: App settings (key-value)
 CREATE TABLE IF NOT EXISTS luggage_app_settings (
