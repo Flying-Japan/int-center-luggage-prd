@@ -11,8 +11,8 @@ import { buildOrderId, buildOvernightTag, buildSameDayTag } from "../services/or
 import { downloadImage } from "../lib/r2";
 import { fetchStaffNamesByIds } from "../lib/staffProfiles";
 import { createSupabaseAdmin } from "../lib/supabase";
-import { resolveAutoSalesSummariesByDate, type AutoSalesSummary } from "../services/cashClosingSales";
-import { calculateExtraDays, calculateStorageDays, toJST, validatePickupTimeWindow } from "../services/storage";
+import { CASH_CLOSING_STARTING_FLOAT, resolveAutoSalesSummariesByDate, resolveAutoSalesSummaryForDate, type AutoSalesSummary } from "../services/cashClosingSales";
+import { calculateExtraDays, calculateStorageDays, formatDateJST, toJST, validatePickupTimeWindow } from "../services/storage";
 import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
 import { hmacSha256Hex } from "../lib/hmac";
 import { loadCompletionMessages } from "../services/completionMessages";
@@ -50,6 +50,22 @@ import {
   type HandoverReadPayload,
   type HandoverUpdatePayload,
 } from "../services/handoverWrites";
+import {
+  CASH_CLOSING_DENOMS,
+  CASH_CLOSING_RAW_COLUMNS,
+  CASH_CLOSING_SNAPSHOT_WHERE,
+  cashClosingSnapshotBinds,
+  cashClosingSnapshotOf,
+  computeCashClosingCreate,
+  computeCashClosingEdit,
+  normalizeCashClosingCreatePayload,
+  normalizeCashClosingUpdatePayload,
+  parseCashClosingId,
+  sameCashClosingSnapshot,
+  type CashClosingCreatePayload,
+  type CashClosingType,
+  type CashClosingUpdatePayload,
+} from "../services/cashClosingWrites";
 
 const internalApi = new Hono<AppType>();
 // Mounted via `app.route("/", internalApi)` in index.tsx, so a bare "/*" here
@@ -808,6 +824,227 @@ internalApi.get("/internal/luggage-cash-closings/:closingId", async (c) => {
     .first<LuggageCashClosingRow>();
   if (!row) return c.json({ error: "cash closing not found" }, 404);
   return c.json({ closing: (await serializeCashClosings(c.env, [row]))[0] });
+});
+
+async function readCashClosingJson(c: Context<AppType>): Promise<{ ok: true; payload: unknown } | { ok: false; response: Response }> {
+  try {
+    return { ok: true, payload: await c.req.json() };
+  } catch {
+    return { ok: false, response: c.json({ error: "Invalid JSON body" }, 400) };
+  }
+}
+
+function readCashClosingRow(env: AppType["Bindings"], closingId: number) {
+  return env.DB.prepare(`SELECT ${CASH_CLOSING_RAW_COLUMNS} FROM luggage_cash_closings WHERE closing_id = ?`)
+    .bind(closingId).first<Record<string, unknown>>();
+}
+
+function isUniqueCashClosingViolation(error: unknown): boolean {
+  return error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
+}
+
+function cashClosingAutoSalesDto(autoSales: AutoSalesSummary | null) {
+  return autoSales
+    ? { cashAmount: autoSales.cashAmount, qrAmount: autoSales.qrAmount, totalAmount: autoSales.totalAmount, orderCount: autoSales.orderCount, source: autoSales.source }
+    : null;
+}
+
+// GET /internal/luggage-cash-closing-draft — What POST /staff/cash-closing would use right now:
+// today's JST business date, the current auto sales and which closing types already exist.
+internalApi.get("/internal/luggage-cash-closing-draft", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const businessDate = formatDateJST(new Date());
+  try {
+    const [autoSales, existing] = await Promise.all([
+      resolveAutoSalesSummaryForDate(c.env.DB, businessDate),
+      c.env.DB.prepare("SELECT closing_id AS closingId, closing_type AS closingType FROM luggage_cash_closings WHERE business_date = ?")
+        .bind(businessDate).all<{ closingId: number; closingType: string }>(),
+    ]);
+    const existingId = (type: CashClosingType) => existing.results.find((row) => row.closingType === type)?.closingId ?? null;
+    return c.json({
+      businessDate,
+      startingFloat: CASH_CLOSING_STARTING_FLOAT,
+      autoSales: cashClosingAutoSalesDto(autoSales),
+      existing: { MORNING_HANDOVER: existingId("MORNING_HANDOVER"), FINAL_CLOSE: existingId("FINAL_CLOSE") },
+    });
+  } catch {
+    return c.json({ error: "Unable to read cash-closing auto sales" }, 503);
+  }
+});
+
+// GET /internal/luggage-cash-closings/:closingId/edit-snapshot — Stored values (not the read API's
+// current-sales view) that the edit screen shows and sends back as its stale token.
+internalApi.get("/internal/luggage-cash-closings/:closingId/edit-snapshot", async (c) => {
+  c.header("Cache-Control", "no-store");
+  const closingId = parseCashClosingId(c.req.param("closingId"));
+  if (closingId === null) return c.json({ error: "Invalid closingId" }, 400);
+  const row = await readCashClosingRow(c.env, closingId);
+  if (!row) return c.json({ error: "Cash closing not found" }, 404);
+  const snapshot = cashClosingSnapshotOf(row);
+  const previousActualQrAmount = (snapshot.actualQrAmount || 0) || (snapshot.paypayAmount || 0);
+  return c.json({
+    snapshot,
+    editable: snapshot.workflowStatus === "SUBMITTED",
+    startingFloat: CASH_CLOSING_STARTING_FLOAT,
+    expectedQrAmount: previousActualQrAmount - (snapshot.qrDifferenceAmount || 0),
+  });
+});
+
+// POST /internal/luggage-cash-closings — Create today's closing like POST /staff/cash-closing.
+// The (business_date, closing_type) UNIQUE index is the final guard against concurrent duplicates.
+internalApi.post("/internal/luggage-cash-closings", async (c) => {
+  const body = await readCashClosingJson(c);
+  if (!body.ok) return body.response;
+  let normalized: CashClosingCreatePayload;
+  try {
+    normalized = normalizeCashClosingCreatePayload(body.payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+  const staff = resolution.staff;
+  const businessDate = formatDateJST(new Date());
+  const duplicate = () => c.json({ error: "A cash closing of this type already exists for this business date", code: "DUPLICATE_CLOSING" }, 409);
+
+  const existing = await c.env.DB.prepare("SELECT closing_id FROM luggage_cash_closings WHERE business_date = ? AND closing_type = ?")
+    .bind(businessDate, normalized.closingType).first();
+  if (existing) return duplicate();
+  let autoSales: AutoSalesSummary | null;
+  try {
+    autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, businessDate);
+  } catch {
+    return c.json({ error: "Unable to read cash-closing auto sales" }, 503);
+  }
+  const computed = computeCashClosingCreate(normalized, autoSales);
+  const requestMarker = `"requestId":"${normalized.requestId}"`;
+  const auditPayload = JSON.stringify({
+    source: "unified-admin",
+    requestId: normalized.requestId,
+    closingId: null,
+    businessDate,
+    closingType: normalized.closingType,
+    before: null,
+    after: {
+      counts: normalized.counts, rentalCash: normalized.rentalCash, wandRefund: normalized.wandRefund,
+      floor4fCount: normalized.floor4fCount, floor8fCount: normalized.floor8fCount, note: normalized.note, ...computed,
+    },
+    autoSalesSnapshot: cashClosingAutoSalesDto(autoSales),
+    startingFloat: CASH_CLOSING_STARTING_FLOAT,
+    ...unifiedActorAuditSnapshot(normalized.actor, staff),
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO luggage_cash_closings (
+           business_date, closing_type, workflow_status,
+           ${CASH_CLOSING_DENOMS.map((d) => `count_${d}`).join(", ")},
+           total_amount, paypay_amount, actual_qr_amount,
+           actual_amount, check_auto_amount, expected_amount,
+           difference_amount, qr_difference_amount,
+           rental_cash, wand_refund, floor_4f_count, floor_8f_count,
+           staff_id, note
+         )
+         SELECT ?, ?, 'SUBMITTED', ${CASH_CLOSING_DENOMS.map(() => "?").join(", ")}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         WHERE NOT EXISTS (
+           SELECT 1 FROM luggage_cash_closing_audits WHERE action = 'SUBMIT' AND instr(payload, ?) > 0
+         )
+         RETURNING ${CASH_CLOSING_RAW_COLUMNS}`,
+      ).bind(
+        businessDate, normalized.closingType, ...normalized.counts,
+        computed.totalAmount, computed.paypayAmount, computed.actualQrForTotal,
+        computed.actualAmount, computed.checkAutoAmount, computed.expectedAmount,
+        computed.differenceAmount, computed.qrDifferenceAmount,
+        normalized.rentalCash, normalized.wandRefund, normalized.floor4fCount, normalized.floor8fCount,
+        staff.id, normalized.note, requestMarker,
+      ),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_cash_closing_audits (closing_id, action, reason, payload, staff_id)
+         SELECT last_insert_rowid(), 'SUBMIT', NULL, json_set(?, '$.closingId', last_insert_rowid()), ?
+         WHERE changes() = 1`,
+      ).bind(auditPayload, staff.id),
+    ]);
+    const created = (results[0].results ?? []) as Array<Record<string, unknown>>;
+    if (created.length === 0) return duplicate();
+    if (results[1].meta.changes !== 1) return c.json({ error: "Unable to write cash-closing audit" }, 500);
+    return c.json({ closing: cashClosingSnapshotOf(created[0]), autoSales: cashClosingAutoSalesDto(autoSales) }, 201);
+  } catch (error) {
+    if (isUniqueCashClosingViolation(error)) return duplicate();
+    return c.json({ error: "Unable to create cash closing" }, 500);
+  }
+});
+
+// PATCH /internal/luggage-cash-closings/:closingId — Edit a SUBMITTED closing like
+// POST /staff/cash-closing/:id/edit, keeping check_auto_amount/expected_amount from creation.
+internalApi.patch("/internal/luggage-cash-closings/:closingId", async (c) => {
+  const closingId = parseCashClosingId(c.req.param("closingId"));
+  if (closingId === null) return c.json({ error: "Invalid closingId" }, 400);
+  const body = await readCashClosingJson(c);
+  if (!body.ok) return body.response;
+  let normalized: CashClosingUpdatePayload;
+  try {
+    normalized = normalizeCashClosingUpdatePayload(body.payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+  const staff = resolution.staff;
+
+  const row = await readCashClosingRow(c.env, closingId);
+  if (!row) return c.json({ error: "Cash closing not found" }, 404);
+  const before = cashClosingSnapshotOf(row);
+  if (!sameCashClosingSnapshot(before, normalized.expected)) {
+    return c.json({ error: "Cash closing was changed by another request", code: "STALE" }, 409);
+  }
+  if (before.workflowStatus !== "SUBMITTED") {
+    return c.json({ error: "Only SUBMITTED cash closings can be edited", code: "NOT_EDITABLE" }, 409);
+  }
+  const computed = computeCashClosingEdit(normalized, before);
+  const auditPayload = JSON.stringify({
+    source: "unified-admin",
+    closingId,
+    before,
+    after: {
+      counts: normalized.counts, rentalCash: normalized.rentalCash, wandRefund: normalized.wandRefund,
+      floor4fCount: normalized.floor4fCount, floor8fCount: normalized.floor8fCount, note: normalized.note, ...computed,
+    },
+    preservedSnapshot: { checkAutoAmount: before.checkAutoAmount, expectedAmount: before.expectedAmount },
+    startingFloat: CASH_CLOSING_STARTING_FLOAT,
+    ...unifiedActorAuditSnapshot(normalized.actor, staff),
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `UPDATE luggage_cash_closings SET
+           ${CASH_CLOSING_DENOMS.map((d) => `count_${d} = ?`).join(", ")},
+           total_amount = ?, paypay_amount = ?, actual_qr_amount = ?,
+           actual_amount = ?, difference_amount = ?, qr_difference_amount = ?,
+           rental_cash = ?, wand_refund = ?, floor_4f_count = ?, floor_8f_count = ?,
+           note = ?, updated_at = datetime('now')
+         WHERE closing_id = ? AND ${CASH_CLOSING_SNAPSHOT_WHERE}
+         RETURNING ${CASH_CLOSING_RAW_COLUMNS}`,
+      ).bind(
+        ...normalized.counts,
+        computed.totalAmount, computed.paypayAmount, computed.actualQrForTotal,
+        computed.actualAmount, computed.differenceAmount, computed.qrDifferenceAmount,
+        normalized.rentalCash, normalized.wandRefund, normalized.floor4fCount, normalized.floor8fCount,
+        normalized.note, closingId, ...cashClosingSnapshotBinds(before),
+      ),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_cash_closing_audits (closing_id, action, reason, payload, staff_id)
+         SELECT ?, 'EDIT', NULL, ?, ? WHERE changes() = 1`,
+      ).bind(closingId, auditPayload, staff.id),
+    ]);
+    const updated = (results[0].results ?? []) as Array<Record<string, unknown>>;
+    if (updated.length !== 1) return c.json({ error: "Cash closing was changed by another request", code: "STALE" }, 409);
+    if (results[1].meta.changes !== 1) return c.json({ error: "Unable to write cash-closing audit" }, 500);
+    return c.json({ closing: cashClosingSnapshotOf(updated[0]), expectedQrAmount: computed.expectedQrAmount });
+  } catch {
+    return c.json({ error: "Unable to update cash closing" }, 500);
+  }
 });
 
 type LuggageActivityLogSource = "staff" | "unified-admin" | "system";
