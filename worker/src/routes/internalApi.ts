@@ -31,6 +31,25 @@ import {
   type LostFoundSnapshot,
   type LostFoundUpdatePayload,
 } from "../services/lostFoundWrites";
+import {
+  HANDOVER_RAW_WHERE,
+  extractMentionedStaffIds,
+  handoverRawBinds,
+  handoverSnapshotOf,
+  normalizeHandoverCommentCreatePayload,
+  normalizeHandoverCreatePayload,
+  normalizeHandoverDeletePayload,
+  normalizeHandoverReadPayload,
+  normalizeHandoverUpdatePayload,
+  parseHandoverId,
+  sameHandoverSnapshot,
+  type HandoverCommentCreatePayload,
+  type HandoverCreatePayload,
+  type HandoverDeletePayload,
+  type HandoverRawNote,
+  type HandoverReadPayload,
+  type HandoverUpdatePayload,
+} from "../services/handoverWrites";
 
 const internalApi = new Hono<AppType>();
 // Mounted via `app.route("/", internalApi)` in index.tsx, so a bare "/*" here
@@ -63,6 +82,8 @@ const LUGGAGE_AUDIT_ACTION_LABELS: Record<string, string> = {
   CREATE_EXTENSION: "연장접수", BULK_CANCEL: "일괄취소", BULK_MARK_PAID: "일괄결제",
   UNIFIED_ADMIN_LOST_FOUND_CREATE: "분실물등록", UNIFIED_ADMIN_LOST_FOUND_UPDATE: "분실물상태변경",
   UNIFIED_ADMIN_LOST_FOUND_DELETE: "분실물삭제",
+  UNIFIED_ADMIN_HANDOVER_CREATE: "인수인계작성", UNIFIED_ADMIN_HANDOVER_UPDATE: "인수인계수정",
+  UNIFIED_ADMIN_HANDOVER_DELETE: "인수인계삭제", UNIFIED_ADMIN_HANDOVER_COMMENT_CREATE: "인수인계댓글",
 };
 
 type LuggageWorkScheduleDto = {
@@ -1429,6 +1450,336 @@ internalApi.get("/internal/luggage-handovers", async (c) => {
     };
   });
   return c.json({ notes: serialized, authors, total: totalResult?.total ?? 0, limit, offset });
+});
+
+const HANDOVER_RAW_COLUMNS = `note_id AS noteId, category, title, content, is_pinned AS isPinned,
+       staff_id AS staffId, created_at AS createdAt`;
+
+async function readHandoverJson(c: Context<AppType>): Promise<{ ok: true; payload: unknown } | { ok: false; response: Response }> {
+  try {
+    return { ok: true, payload: await c.req.json() };
+  } catch {
+    return { ok: false, response: c.json({ error: "Invalid JSON body" }, 400) };
+  }
+}
+
+function readHandoverNote(env: AppType["Bindings"], noteId: number) {
+  return env.DB.prepare(`SELECT ${HANDOVER_RAW_COLUMNS} FROM luggage_handover_notes WHERE note_id = ?`)
+    .bind(noteId).first<HandoverRawNote>();
+}
+
+async function handoverMentionIds(env: AppType["Bindings"], content: string): Promise<string[]> {
+  if (!content.includes("@")) return [];
+  // Like the staff screen, a failed name lookup only drops mentions; it never blocks the note.
+  try {
+    return extractMentionedStaffIds(content, await fetchActiveHandoverAuthorNames(env));
+  } catch {
+    return [];
+  }
+}
+
+// POST /internal/luggage-handovers — Unified-admin note creation (same fields as the staff compose form).
+internalApi.post("/internal/luggage-handovers", async (c) => {
+  const body = await readHandoverJson(c);
+  if (!body.ok) return body.response;
+  let normalized: HandoverCreatePayload;
+  try {
+    normalized = normalizeHandoverCreatePayload(body.payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+  const staff = resolution.staff;
+  const mentionIds = await handoverMentionIds(c.env, normalized.content);
+  const requestMarker = `"requestId":"${normalized.requestId}"`;
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    action: "create",
+    requestId: normalized.requestId,
+    noteId: null,
+    before: null,
+    after: { category: normalized.category, title: normalized.title, content: normalized.content, isPinned: normalized.isPinned, authorId: staff.id },
+    mentionedStaffIds: mentionIds,
+    ...unifiedActorAuditSnapshot(normalized.actor, staff),
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO luggage_handover_notes (category, title, content, is_pinned, staff_id)
+         SELECT ?, ?, ?, ?, ?
+         WHERE NOT EXISTS (
+           SELECT 1 FROM luggage_audit_logs
+           WHERE action = 'UNIFIED_ADMIN_HANDOVER_CREATE' AND device_id = 'unified-admin' AND instr(details, ?) > 0
+         )
+         RETURNING ${HANDOVER_RAW_COLUMNS}`,
+      ).bind(normalized.category, normalized.title, normalized.content, normalized.isPinned ? 1 : 0, staff.id, requestMarker),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT NULL, ?, 'unified-admin', 'UNIFIED_ADMIN_HANDOVER_CREATE',
+                json_set(?, '$.noteId', last_insert_rowid()), datetime('now')
+         WHERE changes() = 1`,
+      ).bind(staff.id, auditDetails),
+      // The note id is read back from this request's audit row; last_insert_rowid() moves per inserted mention.
+      c.env.DB.prepare(
+        `INSERT INTO luggage_handover_mentions (note_id, staff_id)
+         SELECT json_extract(a.details, '$.noteId'), m.value
+         FROM luggage_audit_logs a, json_each(?) m
+         WHERE changes() = 1 AND a.action = 'UNIFIED_ADMIN_HANDOVER_CREATE'
+           AND a.device_id = 'unified-admin' AND instr(a.details, ?) > 0`,
+      ).bind(JSON.stringify(mentionIds), requestMarker),
+    ]);
+    const created = (results[0].results ?? []) as HandoverRawNote[];
+    if (created.length === 0) return c.json({ error: "This handover request was already processed" }, 409);
+    if (results[1].meta.changes !== 1) return c.json({ error: "Unable to write handover audit log" }, 500);
+    return c.json({ note: { ...handoverSnapshotOf(created[0]), noteId: created[0].noteId, createdAt: created[0].createdAt }, mentionedStaffIds: mentionIds }, 201);
+  } catch {
+    return c.json({ error: "Unable to create handover note" }, 500);
+  }
+});
+
+// PATCH /internal/luggage-handovers/:noteId — Edit like POST /staff/handover/:id/edit (author or legacy admin),
+// keeping luggage_handover_edits history and adding a unified audit row in the same batch.
+internalApi.patch("/internal/luggage-handovers/:noteId", async (c) => {
+  const noteId = parseHandoverId(c.req.param("noteId"));
+  if (noteId === null) return c.json({ error: "Invalid noteId" }, 400);
+  const body = await readHandoverJson(c);
+  if (!body.ok) return body.response;
+  let normalized: HandoverUpdatePayload;
+  try {
+    normalized = normalizeHandoverUpdatePayload(body.payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+  const staff = resolution.staff;
+
+  const current = await readHandoverNote(c.env, noteId);
+  if (!current) return c.json({ error: "Handover note not found" }, 404);
+  if (current.staffId !== staff.id && staff.role !== "admin") {
+    return c.json({ error: "Only the note author or a legacy admin can edit this note", code: "NOT_AUTHOR" }, 403);
+  }
+  const before = handoverSnapshotOf(current);
+  if (!sameHandoverSnapshot(before, normalized.expected)) {
+    return c.json({ error: "Handover note was changed by another request" }, 409);
+  }
+  const after = { category: normalized.category, title: normalized.title, content: normalized.content, isPinned: normalized.isPinned, authorId: current.staffId };
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    action: "update",
+    noteId,
+    before,
+    after,
+    ...unifiedActorAuditSnapshot(normalized.actor, staff),
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `UPDATE luggage_handover_notes SET title = ?, content = ?, category = ?, is_pinned = ?
+         WHERE note_id = ? AND ${HANDOVER_RAW_WHERE}
+         RETURNING ${HANDOVER_RAW_COLUMNS}`,
+      ).bind(normalized.title, normalized.content, normalized.category, normalized.isPinned ? 1 : 0, noteId, ...handoverRawBinds(current)),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_handover_edits (note_id, staff_id, old_title, old_content, new_title, new_content)
+         SELECT ?, ?, ?, ?, ?, ? WHERE changes() = 1`,
+      ).bind(noteId, staff.id, current.title, current.content, normalized.title, normalized.content),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT NULL, ?, 'unified-admin', 'UNIFIED_ADMIN_HANDOVER_UPDATE', ?, datetime('now')
+         WHERE changes() = 1`,
+      ).bind(staff.id, auditDetails),
+    ]);
+    const updated = (results[0].results ?? []) as HandoverRawNote[];
+    if (updated.length !== 1) return c.json({ error: "Handover note was changed by another request" }, 409);
+    if (results[1].meta.changes !== 1 || results[2].meta.changes !== 1) {
+      return c.json({ error: "Unable to write handover edit history" }, 500);
+    }
+    return c.json({ note: { ...handoverSnapshotOf(updated[0]), noteId, createdAt: updated[0].createdAt } });
+  } catch {
+    return c.json({ error: "Unable to update handover note" }, 500);
+  }
+});
+
+// DELETE /internal/luggage-handovers/:noteId — Author-only hard delete like POST /staff/handover/:id/delete:
+// removes the note, reads, comments and mentions (edit history stays, as on the staff route).
+internalApi.delete("/internal/luggage-handovers/:noteId", async (c) => {
+  const noteId = parseHandoverId(c.req.param("noteId"));
+  if (noteId === null) return c.json({ error: "Invalid noteId" }, 400);
+  const body = await readHandoverJson(c);
+  if (!body.ok) return body.response;
+  let normalized: HandoverDeletePayload;
+  try {
+    normalized = normalizeHandoverDeletePayload(body.payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+  const staff = resolution.staff;
+
+  const current = await readHandoverNote(c.env, noteId);
+  if (!current) return c.json({ error: "Handover note not found" }, 404);
+  if (current.staffId !== staff.id) {
+    return c.json({ error: "Only the note author can delete this note", code: "NOT_AUTHOR" }, 403);
+  }
+  const [comments, reads, mentions] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT comment_id AS commentId, staff_id AS staffId, content, created_at AS createdAt
+       FROM luggage_handover_comments WHERE note_id = ? ORDER BY comment_id`,
+    ).bind(noteId).all<{ commentId: number; staffId: string; content: string | null; createdAt: string }>(),
+    c.env.DB.prepare("SELECT staff_id AS staffId, read_at AS readAt FROM luggage_handover_reads WHERE note_id = ? ORDER BY read_id")
+      .bind(noteId).all<{ staffId: string; readAt: string }>(),
+    c.env.DB.prepare("SELECT comment_id AS commentId, staff_id AS staffId FROM luggage_handover_mentions WHERE note_id = ? ORDER BY mention_id")
+      .bind(noteId).all<{ commentId: number | null; staffId: string }>(),
+  ]);
+  const before = handoverSnapshotOf(current);
+  if (!sameHandoverSnapshot(before, normalized.expected) || comments.results.length !== normalized.expected.commentCount) {
+    return c.json({ error: "Handover note was changed by another request" }, 409);
+  }
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    action: "delete",
+    noteId,
+    before: { ...before, createdAt: current.createdAt, comments: comments.results, reads: reads.results, mentions: mentions.results },
+    after: null,
+    ...unifiedActorAuditSnapshot(normalized.actor, staff),
+  });
+  const orphanOnly = "WHERE note_id = ? AND NOT EXISTS (SELECT 1 FROM luggage_handover_notes WHERE note_id = ?)";
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `DELETE FROM luggage_handover_notes
+         WHERE note_id = ? AND ${HANDOVER_RAW_WHERE}
+           AND (SELECT COUNT(*) FROM luggage_handover_comments WHERE note_id = ?) = ?
+         RETURNING note_id AS noteId`,
+      ).bind(noteId, ...handoverRawBinds(current), noteId, comments.results.length),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT NULL, ?, 'unified-admin', 'UNIFIED_ADMIN_HANDOVER_DELETE', ?, datetime('now')
+         WHERE changes() = 1`,
+      ).bind(staff.id, auditDetails),
+      c.env.DB.prepare(`DELETE FROM luggage_handover_reads ${orphanOnly}`).bind(noteId, noteId),
+      c.env.DB.prepare(`DELETE FROM luggage_handover_comments ${orphanOnly}`).bind(noteId, noteId),
+      c.env.DB.prepare(`DELETE FROM luggage_handover_mentions ${orphanOnly}`).bind(noteId, noteId),
+    ]);
+    if ((results[0].results ?? []).length !== 1) return c.json({ error: "Handover note was changed by another request" }, 409);
+    if (results[1].meta.changes !== 1) return c.json({ error: "Unable to write handover audit log" }, 500);
+    return c.json({ deleted: true, noteId });
+  } catch {
+    return c.json({ error: "Unable to delete handover note" }, 500);
+  }
+});
+
+// POST /internal/luggage-handovers/:noteId/read — Idempotent read mark like POST /staff/handover/:id/read.
+// The reads row itself is the legacy record (read badge source), so no separate audit row is written.
+internalApi.post("/internal/luggage-handovers/:noteId/read", async (c) => {
+  const noteId = parseHandoverId(c.req.param("noteId"));
+  if (noteId === null) return c.json({ error: "Invalid noteId" }, 400);
+  const body = await readHandoverJson(c);
+  if (!body.ok) return body.response;
+  let normalized: HandoverReadPayload;
+  try {
+    normalized = normalizeHandoverReadPayload(body.payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+  const staff = resolution.staff;
+
+  try {
+    const inserted = await c.env.DB.prepare(
+      `INSERT INTO luggage_handover_reads (note_id, staff_id)
+       SELECT ?, ?
+       WHERE EXISTS (SELECT 1 FROM luggage_handover_notes WHERE note_id = ?)
+         AND NOT EXISTS (SELECT 1 FROM luggage_handover_reads WHERE note_id = ? AND staff_id = ?)
+       RETURNING read_at AS readAt`,
+    ).bind(noteId, staff.id, noteId, noteId, staff.id).all<{ readAt: string }>();
+    if (inserted.results.length === 1) {
+      return c.json({ noteId, staffId: staff.id, readAt: inserted.results[0].readAt, changed: true });
+    }
+    const existing = await c.env.DB.prepare(
+      "SELECT read_at AS readAt FROM luggage_handover_reads WHERE note_id = ? AND staff_id = ? ORDER BY read_id LIMIT 1",
+    ).bind(noteId, staff.id).first<{ readAt: string }>();
+    if (!existing) return c.json({ error: "Handover note not found" }, 404);
+    return c.json({ noteId, staffId: staff.id, readAt: existing.readAt, changed: false });
+  } catch {
+    return c.json({ error: "Unable to mark handover note as read" }, 500);
+  }
+});
+
+// POST /internal/luggage-handovers/:noteId/comments — Comment like POST /staff/handover/:id/comments,
+// but refused (404) when the note no longer exists instead of leaving an orphan comment.
+internalApi.post("/internal/luggage-handovers/:noteId/comments", async (c) => {
+  const noteId = parseHandoverId(c.req.param("noteId"));
+  if (noteId === null) return c.json({ error: "Invalid noteId" }, 400);
+  const body = await readHandoverJson(c);
+  if (!body.ok) return body.response;
+  let normalized: HandoverCommentCreatePayload;
+  try {
+    normalized = normalizeHandoverCommentCreatePayload(body.payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+  const staff = resolution.staff;
+  const mentionIds = await handoverMentionIds(c.env, normalized.content);
+  const requestMarker = `"requestId":"${normalized.requestId}"`;
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    action: "comment_create",
+    requestId: normalized.requestId,
+    noteId,
+    commentId: null,
+    before: null,
+    after: { content: normalized.content, staffId: staff.id },
+    mentionedStaffIds: mentionIds,
+    ...unifiedActorAuditSnapshot(normalized.actor, staff),
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO luggage_handover_comments (note_id, staff_id, content)
+         SELECT ?, ?, ?
+         WHERE EXISTS (SELECT 1 FROM luggage_handover_notes WHERE note_id = ?)
+           AND NOT EXISTS (
+             SELECT 1 FROM luggage_audit_logs
+             WHERE action = 'UNIFIED_ADMIN_HANDOVER_COMMENT_CREATE' AND device_id = 'unified-admin' AND instr(details, ?) > 0
+           )
+         RETURNING comment_id AS commentId, created_at AS createdAt`,
+      ).bind(noteId, staff.id, normalized.content, noteId, requestMarker),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT NULL, ?, 'unified-admin', 'UNIFIED_ADMIN_HANDOVER_COMMENT_CREATE',
+                json_set(?, '$.commentId', last_insert_rowid()), datetime('now')
+         WHERE changes() = 1`,
+      ).bind(staff.id, auditDetails),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_handover_mentions (note_id, comment_id, staff_id)
+         SELECT ?, json_extract(a.details, '$.commentId'), m.value
+         FROM luggage_audit_logs a, json_each(?) m
+         WHERE changes() = 1 AND a.action = 'UNIFIED_ADMIN_HANDOVER_COMMENT_CREATE'
+           AND a.device_id = 'unified-admin' AND instr(a.details, ?) > 0`,
+      ).bind(noteId, JSON.stringify(mentionIds), requestMarker),
+    ]);
+    const created = (results[0].results ?? []) as Array<{ commentId: number; createdAt: string }>;
+    if (created.length === 0) {
+      const note = await readHandoverNote(c.env, noteId);
+      return note
+        ? c.json({ error: "This handover request was already processed" }, 409)
+        : c.json({ error: "Handover note not found" }, 404);
+    }
+    if (results[1].meta.changes !== 1) return c.json({ error: "Unable to write handover audit log" }, 500);
+    return c.json({ comment: { commentId: created[0].commentId, noteId, staffId: staff.id, content: normalized.content, createdAt: created[0].createdAt }, mentionedStaffIds: mentionIds }, 201);
+  } catch {
+    return c.json({ error: "Unable to create handover comment" }, 500);
+  }
 });
 
 // GET /internal/luggage-orders — Read-only order list for the integrated admin.
