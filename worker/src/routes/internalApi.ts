@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import type { AppType } from "../types";
 import { internalAuth } from "../middleware/internalAuth";
 import {
@@ -16,6 +16,21 @@ import { calculateExtraDays, calculateStorageDays, toJST, validatePickupTimeWind
 import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
 import { hmacSha256Hex } from "../lib/hmac";
 import { loadCompletionMessages } from "../services/completionMessages";
+import { resolveInternalActorStaff, unifiedActorAuditSnapshot } from "../lib/internalActorStaff";
+import {
+  LOST_FOUND_SNAPSHOT_WHERE,
+  LOST_FOUND_TRANSITIONS,
+  isKnownLostFoundStatus,
+  lostFoundSnapshotBinds,
+  normalizeLostFoundCreatePayload,
+  normalizeLostFoundDeletePayload,
+  normalizeLostFoundUpdatePayload,
+  sameLostFoundSnapshot,
+  type LostFoundCreatePayload,
+  type LostFoundDeletePayload,
+  type LostFoundSnapshot,
+  type LostFoundUpdatePayload,
+} from "../services/lostFoundWrites";
 
 const internalApi = new Hono<AppType>();
 // Mounted via `app.route("/", internalApi)` in index.tsx, so a bare "/*" here
@@ -46,6 +61,8 @@ const LUGGAGE_AUDIT_ACTION_LABELS: Record<string, string> = {
   VIEW_ID_IMAGE: "신분증조회", VIEW_LUGGAGE_IMAGE: "짐사진조회",
   VIEW_ID: "신분증조회", VIEW_LUGGAGE: "짐사진조회",
   CREATE_EXTENSION: "연장접수", BULK_CANCEL: "일괄취소", BULK_MARK_PAID: "일괄결제",
+  UNIFIED_ADMIN_LOST_FOUND_CREATE: "분실물등록", UNIFIED_ADMIN_LOST_FOUND_UPDATE: "분실물상태변경",
+  UNIFIED_ADMIN_LOST_FOUND_DELETE: "분실물삭제",
 };
 
 type LuggageWorkScheduleDto = {
@@ -1033,6 +1050,233 @@ internalApi.get("/internal/luggage-lost-found", async (c) => {
     createdAt: entry.createdAt,
   }));
   return c.json({ entries, total: totalResult?.total ?? 0, limit, offset });
+});
+
+type LuggageLostFoundWriteRow = LostFoundSnapshot & { entryId: number; staffId: string | null; createdAt: string };
+
+const LOST_FOUND_WRITE_COLUMNS = `entry_id AS entryId, item_name AS itemName, quantity, found_location AS foundLocation,
+       found_at AS foundAt, status, claimed_by AS claimedBy, note, staff_id AS staffId, created_at AS createdAt`;
+
+function parseLostFoundEntryId(raw: string): number | null {
+  if (!/^[1-9]\d{0,9}$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
+function lostFoundSnapshotOf(row: LuggageLostFoundWriteRow): LostFoundSnapshot {
+  return {
+    itemName: row.itemName,
+    quantity: row.quantity,
+    foundLocation: row.foundLocation,
+    foundAt: row.foundAt,
+    status: row.status,
+    claimedBy: row.claimedBy,
+    note: row.note,
+  };
+}
+
+function serializeLostFoundWriteRow(row: LuggageLostFoundWriteRow) {
+  return { ...lostFoundSnapshotOf(row), entryId: row.entryId, registeredByStaffId: row.staffId, createdAt: row.createdAt };
+}
+
+async function readLostFoundJson(c: Context<AppType>): Promise<{ ok: true; payload: unknown } | { ok: false; response: Response }> {
+  try {
+    return { ok: true, payload: await c.req.json() };
+  } catch {
+    return { ok: false, response: c.json({ error: "Invalid JSON body" }, 400) };
+  }
+}
+
+// POST /internal/luggage-lost-found — Unified-admin lost-and-found registration.
+// Source row, audit log, and the requestId replay guard commit in one D1 batch.
+internalApi.post("/internal/luggage-lost-found", async (c) => {
+  const body = await readLostFoundJson(c);
+  if (!body.ok) return body.response;
+  let normalized: LostFoundCreatePayload;
+  try {
+    normalized = normalizeLostFoundCreatePayload(body.payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+  const staff = resolution.staff;
+
+  // instr() instead of LIKE: D1 rejects LIKE patterns longer than its pattern-length limit.
+  const requestMarker = `"requestId":"${normalized.requestId}"`;
+  const after = {
+    entryId: null,
+    itemName: normalized.itemName,
+    quantity: normalized.quantity,
+    foundLocation: normalized.foundLocation,
+    foundAt: normalized.foundAt,
+    status: "UNCLAIMED",
+    claimedBy: null,
+    note: normalized.note,
+  };
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    action: "create",
+    requestId: normalized.requestId,
+    entryId: null,
+    before: null,
+    after,
+    ...unifiedActorAuditSnapshot(normalized.actor, staff),
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO luggage_lost_found_entries (item_name, quantity, found_location, found_at, note, staff_id)
+         SELECT ?, ?, ?, ?, ?, ?
+         WHERE NOT EXISTS (
+           SELECT 1 FROM luggage_audit_logs
+           WHERE action = 'UNIFIED_ADMIN_LOST_FOUND_CREATE' AND device_id = 'unified-admin' AND instr(details, ?) > 0
+         )
+         RETURNING ${LOST_FOUND_WRITE_COLUMNS}`,
+      ).bind(normalized.itemName, normalized.quantity, normalized.foundLocation, normalized.foundAt, normalized.note, staff.id, requestMarker),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT NULL, ?, 'unified-admin', 'UNIFIED_ADMIN_LOST_FOUND_CREATE',
+                json_set(?, '$.entryId', last_insert_rowid(), '$.after.entryId', last_insert_rowid()), datetime('now')
+         WHERE changes() = 1`,
+      ).bind(staff.id, auditDetails),
+    ]);
+    const created = (results[0].results ?? []) as LuggageLostFoundWriteRow[];
+    if (created.length === 0) {
+      return c.json({ error: "This lost-and-found request was already processed" }, 409);
+    }
+    if (results[1].meta.changes !== 1) {
+      return c.json({ error: "Unable to write lost-and-found audit log" }, 500);
+    }
+    return c.json({ entry: serializeLostFoundWriteRow(created[0]) }, 201);
+  } catch {
+    return c.json({ error: "Unable to register lost-and-found entry" }, 500);
+  }
+});
+
+// PATCH /internal/luggage-lost-found/:entryId — Status transition (인계/폐기/반환) with snapshot stale guard.
+internalApi.patch("/internal/luggage-lost-found/:entryId", async (c) => {
+  const entryId = parseLostFoundEntryId(c.req.param("entryId"));
+  if (entryId === null) return c.json({ error: "Invalid entryId" }, 400);
+  const body = await readLostFoundJson(c);
+  if (!body.ok) return body.response;
+  let normalized: LostFoundUpdatePayload;
+  try {
+    normalized = normalizeLostFoundUpdatePayload(body.payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+  const staff = resolution.staff;
+
+  const current = await c.env.DB.prepare(
+    `SELECT ${LOST_FOUND_WRITE_COLUMNS} FROM luggage_lost_found_entries WHERE entry_id = ?`,
+  ).bind(entryId).first<LuggageLostFoundWriteRow>();
+  if (!current) return c.json({ error: "Lost-and-found entry not found" }, 404);
+  const before = lostFoundSnapshotOf(current);
+  if (!sameLostFoundSnapshot(before, normalized.expected)) {
+    return c.json({ error: "Lost-and-found entry was changed by another request" }, 409);
+  }
+  const transition = LOST_FOUND_TRANSITIONS[normalized.action];
+  if (!isKnownLostFoundStatus(before.status) || !transition.from.includes(before.status)) {
+    return c.json({ error: "Lost-and-found status transition is not allowed" }, 409);
+  }
+  const claimedBy = normalized.action === "claim" ? normalized.claimedBy : before.claimedBy;
+  const after = { ...before, status: transition.to, claimedBy };
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    action: normalized.action,
+    entryId,
+    before,
+    after,
+    ...unifiedActorAuditSnapshot(normalized.actor, staff),
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `UPDATE luggage_lost_found_entries SET status = ?, claimed_by = ?
+         WHERE entry_id = ? AND ${LOST_FOUND_SNAPSHOT_WHERE}
+         RETURNING ${LOST_FOUND_WRITE_COLUMNS}`,
+      ).bind(transition.to, claimedBy, entryId, ...lostFoundSnapshotBinds(before)),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT NULL, ?, 'unified-admin', 'UNIFIED_ADMIN_LOST_FOUND_UPDATE', ?, datetime('now')
+         WHERE changes() = 1`,
+      ).bind(staff.id, auditDetails),
+    ]);
+    const updated = (results[0].results ?? []) as LuggageLostFoundWriteRow[];
+    if (updated.length !== 1) {
+      return c.json({ error: "Lost-and-found entry was changed by another request" }, 409);
+    }
+    if (results[1].meta.changes !== 1) {
+      return c.json({ error: "Unable to write lost-and-found audit log" }, 500);
+    }
+    return c.json({ entry: serializeLostFoundWriteRow(updated[0]) });
+  } catch {
+    return c.json({ error: "Unable to update lost-and-found entry" }, 500);
+  }
+});
+
+// DELETE /internal/luggage-lost-found/:entryId — Hard delete like the staff screen, but the deleted
+// row is preserved as the audit "before" snapshot and only removed when it still matches.
+internalApi.delete("/internal/luggage-lost-found/:entryId", async (c) => {
+  const entryId = parseLostFoundEntryId(c.req.param("entryId"));
+  if (entryId === null) return c.json({ error: "Invalid entryId" }, 400);
+  const body = await readLostFoundJson(c);
+  if (!body.ok) return body.response;
+  let normalized: LostFoundDeletePayload;
+  try {
+    normalized = normalizeLostFoundDeletePayload(body.payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+  const staff = resolution.staff;
+
+  const current = await c.env.DB.prepare(
+    `SELECT ${LOST_FOUND_WRITE_COLUMNS} FROM luggage_lost_found_entries WHERE entry_id = ?`,
+  ).bind(entryId).first<LuggageLostFoundWriteRow>();
+  if (!current) return c.json({ error: "Lost-and-found entry not found" }, 404);
+  const before = lostFoundSnapshotOf(current);
+  if (!sameLostFoundSnapshot(before, normalized.expected)) {
+    return c.json({ error: "Lost-and-found entry was changed by another request" }, 409);
+  }
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    action: "delete",
+    entryId,
+    before: { ...before, registeredByStaffId: current.staffId, createdAt: current.createdAt },
+    after: null,
+    ...unifiedActorAuditSnapshot(normalized.actor, staff),
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `DELETE FROM luggage_lost_found_entries
+         WHERE entry_id = ? AND ${LOST_FOUND_SNAPSHOT_WHERE}
+         RETURNING entry_id AS entryId`,
+      ).bind(entryId, ...lostFoundSnapshotBinds(before)),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT NULL, ?, 'unified-admin', 'UNIFIED_ADMIN_LOST_FOUND_DELETE', ?, datetime('now')
+         WHERE changes() = 1`,
+      ).bind(staff.id, auditDetails),
+    ]);
+    if ((results[0].results ?? []).length !== 1) {
+      return c.json({ error: "Lost-and-found entry was changed by another request" }, 409);
+    }
+    if (results[1].meta.changes !== 1) {
+      return c.json({ error: "Unable to write lost-and-found audit log" }, 500);
+    }
+    return c.json({ deleted: true, entryId });
+  } catch {
+    return c.json({ error: "Unable to delete lost-and-found entry" }, 500);
+  }
 });
 
 // GET /internal/luggage-handovers — Read-only handover notes for the integrated admin.
