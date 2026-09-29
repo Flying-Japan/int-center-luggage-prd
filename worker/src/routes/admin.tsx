@@ -402,7 +402,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
             <p class="sales-td--muted" style="font-size:11px;margin:4px 0 0">센터 대시보드 매출과 동일 기준 · 짐보관 매출과 합산하지 않음 · 매일 03:00 갱신</p>
             <button type="button" id="fxToggle" class="btn btn-sm" style="font-size:11px;padding:2px 8px;min-height:24px;margin-top:6px">오늘 환율로 엔화 보기</button>
             <p id="fxNote" class="sales-td--muted" style="font-size:11px;margin:4px 0 0;display:none" role="status"></p>
-            {staff?.role === "admin" && (
+            {(staff?.role === "admin" || staff?.role === "editor") && (
               <form method="post" action="/staff/admin/sales/rental-resync" style="margin-top:6px" onsubmit="return confirm('2025-08-01부터 오늘까지 네이버 렌탈 매출을 다시 동기화할까요?')">
                 <button type="submit" class="btn btn-sm" style="font-size:11px;padding:2px 8px;min-height:24px">전체 재동기화</button>
               </form>
@@ -1277,7 +1277,7 @@ admin.get("/staff/admin/sales/fx-rate", staffAuth, async (c) => {
 });
 
 // POST /staff/admin/sales/rental-resync — Re-sync Naver rental revenue (KRW) for the full history
-admin.post("/staff/admin/sales/rental-resync", adminAuth, async (c) => {
+admin.post("/staff/admin/sales/rental-resync", editorAuth, async (c) => {
   const url = c.env.NAVER_ORDERS_SUPABASE_URL;
   const key = c.env.NAVER_ORDERS_SUPABASE_KEY;
   if (!url || !key) return c.redirect(`/staff/admin/sales?error=${encodeURIComponent("네이버 주문 DB 설정이 없습니다.")}`);
