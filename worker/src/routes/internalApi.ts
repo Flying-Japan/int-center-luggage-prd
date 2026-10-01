@@ -1224,6 +1224,8 @@ internalApi.get("/internal/luggage-customers", async (c) => {
          SELECT COUNT(*) AS total FROM grouped`,
       ).bind(...params).first<{ total: number }>(),
       c.env.DB.prepare(
+        // 대표 이름(고객별 가장 최근 주문의 name)은 window 함수 한 번의 정렬로 구한다.
+        // 이전의 고객별 correlated subquery는 filtered CTE를 고객 수만큼 다시 스캔해 한 호출에 수백만 행을 읽었다.
         `WITH filtered AS (${filteredSql}),
          grouped AS (
            SELECT customerIdentity, COUNT(*) AS orderCount,
@@ -1231,12 +1233,17 @@ internalApi.get("/internal/luggage-customers", async (c) => {
              MAX(createdAt) AS lastVisitAt, SUM(suitcaseQty) AS totalSuitcases,
              SUM(backpackQty) AS totalBackpacks
            FROM filtered GROUP BY customerIdentity
+         ),
+         latest_names AS (
+           SELECT customerIdentity AS latestIdentity, name AS latestName FROM (
+             SELECT customerIdentity, name,
+               ROW_NUMBER() OVER (PARTITION BY customerIdentity ORDER BY createdAt DESC, orderId DESC) AS recentRank
+             FROM filtered
+           ) WHERE recentRank = 1
          )
-         SELECT grouped.*,
-           (SELECT recent.name FROM filtered recent
-            WHERE recent.customerIdentity IS grouped.customerIdentity
-            ORDER BY recent.createdAt DESC, recent.orderId DESC LIMIT 1) AS name
-         FROM grouped ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+         SELECT grouped.*, latest_names.latestName AS name
+         FROM grouped LEFT JOIN latest_names ON latest_names.latestIdentity = grouped.customerIdentity
+         ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
       ).bind(...params, limit, offset).all<LuggageCustomerAggregateRow>(),
     ]);
 

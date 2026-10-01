@@ -9,7 +9,7 @@ const { build } = createRequire(require.resolve('wrangler/package.json'))('esbui
 const temp = await mkdtemp(join(tmpdir(), 'luggage-tests-'));
 try {
   const outputs = [];
-  for (const name of ['experience', 'rentalRevenue', 'lostFound', 'handover', 'cashClosing', 'orderCancel', 'orderPhone']) {
+  for (const name of ['experience', 'rentalRevenue', 'lostFound', 'handover', 'cashClosing', 'orderCancel', 'orderPhone', 'customers']) {
     const output = join(temp, `${name}.test.cjs`);
     await build({ entryPoints: [`tests/${name}.test.ts`], outfile: output, bundle: true, platform: 'node', format: 'cjs', target: 'node22' });
     outputs.push(output);
