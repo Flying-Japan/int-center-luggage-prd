@@ -17,6 +17,7 @@ import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
 import { hmacSha256Hex } from "../lib/hmac";
 import { loadCompletionMessages } from "../services/completionMessages";
 import { resolveInternalActorStaff, unifiedActorAuditSnapshot } from "../lib/internalActorStaff";
+import { getDashboardSyncToken } from "../lib/dashboardSync";
 import {
   LOST_FOUND_SNAPSHOT_WHERE,
   LOST_FOUND_TRANSITIONS,
@@ -2044,6 +2045,33 @@ internalApi.post("/internal/luggage-handovers/:noteId/comments", async (c) => {
 });
 
 // GET /internal/luggage-orders — Read-only order list for the integrated admin.
+const INTERNAL_DASHBOARD_SYNC_STATUSES = new Set(["UNPICKED", "PAYMENT_PENDING", "PAID", "PICKED_UP", "CANCELLED"]);
+
+function shiftIsoDate(value: string, days: number): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+// GET /internal/luggage-orders/dashboard-sync — 통합 어드민 주문 목록 자동 새로고침용 변경 토큰(읽기 전용).
+// staff 대시보드의 /staff/api/orders/dashboard-sync와 같은 getDashboardSyncToken을 쓴다. 통합 목록은 JST 날짜
+// (date(created_at, '+9 hours'))로 거르지만 토큰 함수는 UTC 문자열로 비교하므로, 앞뒤 하루를 넓힌 범위로 계산해
+// 목록 범위의 변경을 놓치지 않게 한다(넓힌 범위의 변경은 불필요한 새로고침 한 번이 될 뿐 데이터는 바뀌지 않는다).
+internalApi.get("/internal/luggage-orders/dashboard-sync", async (c) => {
+  const statusQuery = c.req.query("status");
+  if (statusQuery && !INTERNAL_DASHBOARD_SYNC_STATUSES.has(statusQuery)) return c.json({ error: "invalid_status" }, 400);
+  const dateFrom = parseJstDateQuery(c.req.query("dateFrom"));
+  const dateTo = parseJstDateQuery(c.req.query("dateTo"));
+  const token = await getDashboardSyncToken(c.env.DB, {
+    q: (c.req.query("search") ?? "").trim(),
+    status: statusQuery ?? "ALL",
+    showAllPickedUp: !statusQuery,
+    dateFrom: dateFrom ? shiftIsoDate(dateFrom, -1) : "",
+    dateTo: dateTo ? shiftIsoDate(dateTo, 1) : "",
+  });
+  return c.json({ token });
+});
+
 internalApi.get("/internal/luggage-orders", async (c) => {
   const status = c.req.query("status");
   const search = c.req.query("search");
