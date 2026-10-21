@@ -2251,6 +2251,7 @@ type LuggageOperationsFieldsOrder = {
   expectedPickupAt: string | null;
   inWarehouse: number;
   updatedAt: string;
+  createdAt: string;
 };
 
 type LuggageOperationsFieldsUpdateDto = {
@@ -3468,6 +3469,247 @@ internalApi.patch("/internal/luggage-orders/:orderId/phone", async (c) => {
   }
 });
 
+type LuggagePickupDateOrder = {
+  orderId: string;
+  status: string;
+  name: string | null;
+  tagNo: string | null;
+  expectedPickupAt: string | null;
+  inWarehouse: number;
+  updatedAt: string;
+  createdAt: string;
+  parentOrderId: string | null;
+  pricePerDay: number;
+  discountRate: number;
+  expectedStorageDays: number;
+  prepaidAmount: number;
+  finalAmount: number | null;
+  flyingPassTier: string;
+  flyingPassDiscountAmount: number;
+  staffPrepaidOverrideAmount: number | null;
+};
+
+type LuggagePickupDatePricing = {
+  previousStorageDays: number;
+  storageDays: number;
+  /** Amount the order should cost for the new storage days (manual amount wins over the automatic price). */
+  expectedAmount: number;
+  /** Amount already collected: tender ledger sum, or the order's billed amount when no ledger rows exist. */
+  paidAmount: number;
+  paidAmountSource: "LEDGER" | "ORDER_FINAL_AMOUNT";
+  /** true: no tender ledger rows, so paidAmount is the order's billed amount, not a confirmed collection. */
+  paidAmountEstimated: boolean;
+  /** Extra amount staff still has to collect (never recorded as paid by this API). */
+  outstandingAmount: number;
+  /** Amount collected beyond the new expected price (refund is a separate staff action). */
+  overpaidAmount: number;
+  /** true: order price columns were rewritten (unpaid order). false: paid order, price columns and ledger untouched. */
+  amountsUpdated: boolean;
+};
+
+const PICKUP_DATE_CONFLICT_MESSAGES = {
+  STATUS_NOT_EDITABLE: "Pickup date can only change on payment-pending or paid orders",
+  IS_EXTENSION: "Pickup date cannot change on an extension order",
+  HAS_EXTENSIONS: "Pickup date cannot change on an order that has extension orders",
+  PICKUP_BEFORE_CREATED: "Pickup date cannot be earlier than the order date",
+  TAG_DATE_CONFLICT: "tagNo cannot be set together with a pickup date change; the tag is assigned automatically",
+  NO_LONG_TAG: "장기 태그(146~150)가 모두 사용 중입니다.",
+  NO_SAME_DAY_TAG: "당일 태그(1~145)가 모두 사용 중입니다.",
+  TAG_CLAIMED: "번호표가 다른 요청에 먼저 배정되었습니다. 다시 시도해 주세요.",
+  STALE: "Luggage order was changed by another request",
+} as const;
+
+type PickupDateConflictCode = keyof typeof PICKUP_DATE_CONFLICT_MESSAGES;
+
+function jstDateKey(value: string | Date): string {
+  return formatBusinessDateFromJst(toJST(value));
+}
+
+function isLongStorageTag(tagNo: string | null): boolean {
+  const n = tagNo !== null && /^\d+$/.test(tagNo) ? Number(tagNo) : NaN;
+  return n >= 146 && n <= 150;
+}
+
+function isSameDayStorageTag(tagNo: string | null): boolean {
+  const n = tagNo !== null && /^\d+$/.test(tagNo) ? Number(tagNo) : NaN;
+  return n >= 1 && n <= 145;
+}
+
+/**
+ * Pickup date change for the unified admin: recompute storage days, move between the same-day (1-145) and
+ * long-term (146-150) tag ranges, and reprice unpaid orders. Paid orders keep prepaid/final/extra amounts and
+ * the tender ledger; the shortfall is only reported. Everything lands in one conditional D1 batch.
+ */
+async function applyPickupDateChange(
+  db: D1Database,
+  orderId: string,
+  update: { name?: string | null; tagNo?: string | null; expectedPickupAt?: string | null; inWarehouse?: number },
+  newPickupAt: string,
+  actor: LuggageNoteActor,
+): Promise<{ status: 200; body: Record<string, unknown> } | { status: 409 | 404 | 500; body: { error: string; code?: PickupDateConflictCode } }> {
+  const conflict = (code: PickupDateConflictCode) => ({ status: 409 as const, body: { error: PICKUP_DATE_CONFLICT_MESSAGES[code], code } });
+  const selectOrder = () => db.prepare(
+    `SELECT order_id AS orderId, status, name, tag_no AS tagNo, expected_pickup_at AS expectedPickupAt,
+            in_warehouse AS inWarehouse, updated_at AS updatedAt, created_at AS createdAt,
+            parent_order_id AS parentOrderId, price_per_day AS pricePerDay, discount_rate AS discountRate,
+            expected_storage_days AS expectedStorageDays, prepaid_amount AS prepaidAmount, final_amount AS finalAmount,
+            flying_pass_tier AS flyingPassTier, flying_pass_discount_amount AS flyingPassDiscountAmount,
+            staff_prepaid_override_amount AS staffPrepaidOverrideAmount
+     FROM luggage_orders WHERE order_id = ?`,
+  ).bind(orderId).first<LuggagePickupDateOrder>();
+
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    const order = await selectOrder();
+    if (!order) return { status: 404, body: { error: "Luggage order not found" } };
+    if (order.status !== "PAYMENT_PENDING" && order.status !== "PAID") return conflict("STATUS_NOT_EDITABLE");
+    if (order.parentOrderId) return conflict("IS_EXTENSION");
+    const hasExtensions = await db.prepare("SELECT 1 FROM luggage_orders WHERE parent_order_id = ? LIMIT 1").bind(orderId).first();
+    if (hasExtensions) return conflict("HAS_EXTENSIONS");
+    if ("tagNo" in update && update.tagNo !== order.tagNo) return conflict("TAG_DATE_CONFLICT");
+    if (jstDateKey(newPickupAt) < jstDateKey(order.createdAt)) return conflict("PICKUP_BEFORE_CREATED");
+
+    // Tag range: any other JST date than the order date is long-term storage.
+    const wantLong = jstDateKey(newPickupAt) !== jstDateKey(order.createdAt);
+    let newTag: string | null = null;
+    if (wantLong && isSameDayStorageTag(order.tagNo)) {
+      newTag = await buildOvernightTag(db);
+      if (newTag === null) return conflict("NO_LONG_TAG");
+    } else if (!wantLong && isLongStorageTag(order.tagNo) && jstDateKey(order.createdAt) === jstDateKey(new Date())) {
+      // Same business day only: after midnight the rollover would move the bag to a long tag again.
+      newTag = await buildSameDayTag(db, jstDateKey(new Date()));
+      if (newTag === null) return conflict("NO_SAME_DAY_TAG");
+    }
+
+    const storageDays = calculateStorageDays(order.createdAt, newPickupAt);
+    const tier = normalizeFlyingPassTier(order.flyingPassTier);
+    const recalculated = recalculateOrderPrepaid(order.pricePerDay, storageDays, tier);
+    const expectedAmount = order.staffPrepaidOverrideAmount ?? recalculated.finalPrepaid;
+    const ledger = await db.prepare(
+      "SELECT COUNT(*) AS rows, COALESCE(SUM(amount), 0) AS total FROM luggage_order_payments WHERE order_id = ?",
+    ).bind(orderId).first<{ rows: number; total: number }>();
+    const ledgerRows = ledger?.rows ?? 0;
+    // Same fallback the cash closing uses when an order has no tender rows.
+    const billedAmount = order.finalAmount && order.finalAmount !== 0 ? order.finalAmount : order.prepaidAmount;
+    const rewriteAmounts = order.status === "PAYMENT_PENDING" && ledgerRows === 0;
+    const paidAmount = rewriteAmounts ? 0 : ledgerRows > 0 ? ledger!.total : billedAmount;
+    const pricing: LuggagePickupDatePricing = {
+      previousStorageDays: order.expectedStorageDays,
+      storageDays,
+      expectedAmount,
+      paidAmount,
+      paidAmountSource: ledgerRows > 0 ? "LEDGER" : "ORDER_FINAL_AMOUNT",
+      paidAmountEstimated: ledgerRows === 0 && !rewriteAmounts,
+      outstandingAmount: rewriteAmounts ? 0 : Math.max(0, expectedAmount - paidAmount),
+      overpaidAmount: rewriteAmounts ? 0 : Math.max(0, paidAmount - expectedAmount),
+      amountsUpdated: rewriteAmounts,
+    };
+
+    const sets: string[] = ["expected_pickup_at = ?", "expected_storage_days = ?"];
+    const values: Array<string | number | null> = [newPickupAt, storageDays];
+    if ("name" in update) { sets.push("name = ?"); values.push(update.name ?? null); }
+    if ("inWarehouse" in update) { sets.push("in_warehouse = ?"); values.push(update.inWarehouse ?? 0); }
+    if (newTag !== null) { sets.push("tag_no = ?"); values.push(newTag); }
+    if (rewriteAmounts) {
+      sets.push("discount_rate = ?", "prepaid_amount = ?", "final_amount = ?", "flying_pass_discount_amount = ?");
+      values.push(recalculated.discountRate, expectedAmount, expectedAmount, recalculated.flyingPassDiscountAmount);
+    }
+
+    const before = {
+      expectedPickupAt: order.expectedPickupAt,
+      expectedStorageDays: order.expectedStorageDays,
+      tagNo: order.tagNo,
+      prepaidAmount: order.prepaidAmount,
+      finalAmount: order.finalAmount,
+      flyingPassDiscountAmount: order.flyingPassDiscountAmount,
+      name: order.name,
+      inWarehouse: order.inWarehouse === 1,
+    };
+    const after = {
+      expectedPickupAt: newPickupAt,
+      expectedStorageDays: storageDays,
+      tagNo: newTag ?? order.tagNo,
+      prepaidAmount: rewriteAmounts ? expectedAmount : order.prepaidAmount,
+      finalAmount: rewriteAmounts ? expectedAmount : order.finalAmount,
+      flyingPassDiscountAmount: rewriteAmounts ? recalculated.flyingPassDiscountAmount : order.flyingPassDiscountAmount,
+      name: "name" in update ? update.name ?? null : order.name,
+      inWarehouse: "inWarehouse" in update ? update.inWarehouse === 1 : order.inWarehouse === 1,
+    };
+    const auditDetails = JSON.stringify({
+      source: "unified-admin",
+      change: "pickup_date",
+      before,
+      after,
+      tagReassigned: newTag !== null,
+      pricing,
+      paymentPolicy: rewriteAmounts ? "UNPAID_REPRICED" : "PAID_AMOUNTS_AND_LEDGER_UNCHANGED",
+      actor,
+    });
+
+    const stateGuard = `order_id = ? AND updated_at = ? AND status = ? AND name IS ? AND tag_no IS ? AND expected_pickup_at IS ?
+           AND in_warehouse = ? AND expected_storage_days = ? AND prepaid_amount = ? AND final_amount IS ? AND price_per_day = ?
+           AND parent_order_id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM luggage_orders ext WHERE ext.parent_order_id = ?)`;
+    const guardValues = [
+      orderId, order.updatedAt, order.status, order.name, order.tagNo, order.expectedPickupAt,
+      order.inWarehouse, order.expectedStorageDays, order.prepaidAmount, order.finalAmount, order.pricePerDay, orderId,
+    ];
+    const tagGuard = newTag === null ? "" : `AND NOT EXISTS (
+             SELECT 1 FROM luggage_orders other
+             WHERE other.order_id != ? AND CAST(other.tag_no AS INTEGER) = CAST(? AS INTEGER)
+               AND other.status IN ('PAYMENT_PENDING', 'PAID'))`;
+    const ledgerGuard = order.status === "PAYMENT_PENDING"
+      ? "AND (SELECT COUNT(*) FROM luggage_order_payments WHERE order_id = ?) = " + String(ledgerRows)
+      : "";
+    const binds: Array<string | number | null> = [...values, ...guardValues];
+    if (newTag !== null) binds.push(orderId, newTag);
+    if (order.status === "PAYMENT_PENDING") binds.push(orderId);
+
+    try {
+      const results = await db.batch<{ orderId: string; name: string | null; tagNo: string | null; expectedPickupAt: string | null; inWarehouse: number; updatedAt: string }>([
+        db.prepare(
+          `UPDATE luggage_orders SET ${sets.join(", ")}, updated_at = datetime('now')
+           WHERE ${stateGuard} ${tagGuard} ${ledgerGuard}
+           RETURNING order_id AS orderId, name, tag_no AS tagNo, expected_pickup_at AS expectedPickupAt,
+                     in_warehouse AS inWarehouse, updated_at AS updatedAt`,
+        ).bind(...binds),
+        db.prepare(
+          `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+           SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_OPERATION_FIELDS_UPDATE', ?, datetime('now')
+           WHERE changes() = 1`,
+        ).bind(orderId, auditDetails),
+      ]);
+      const updated = results[0].results?.[0];
+      if (updated) {
+        if (results[1].meta.changes !== 1) return { status: 500, body: { error: "Unable to write luggage pickup date audit log" } };
+        return {
+          status: 200,
+          body: {
+            changed: true,
+            orderId: updated.orderId,
+            name: updated.name,
+            tagNo: updated.tagNo,
+            expectedPickupAt: updated.expectedPickupAt,
+            inWarehouse: updated.inWarehouse === 1,
+            updatedAt: updated.updatedAt,
+            tagReassigned: newTag !== null,
+            previousTagNo: order.tagNo,
+            pricing,
+          },
+        };
+      }
+    } catch {
+      return { status: 500, body: { error: "Unable to update luggage operation fields" } };
+    }
+
+    // Not updated: the order changed, or another order took the chosen tag. Re-read to tell them apart.
+    const reread = await selectOrder();
+    if (!reread || reread.updatedAt !== order.updatedAt || reread.status !== order.status) return conflict("STALE");
+    // Same order state: the tag was claimed (or the ledger changed). The next attempt picks a fresh tag.
+  }
+  return conflict("TAG_CLAIMED");
+}
+
 // PATCH /internal/luggage-orders/:orderId/operations-fields — Limited operational field mutation for the unified admin.
 internalApi.patch("/internal/luggage-orders/:orderId/operations-fields", async (c) => {
   const orderId = c.req.param("orderId");
@@ -3489,10 +3731,28 @@ internalApi.patch("/internal/luggage-orders/:orderId/operations-fields", async (
 
   const current = await c.env.DB.prepare(
     `SELECT order_id AS orderId, status, name, tag_no AS tagNo, expected_pickup_at AS expectedPickupAt,
-            in_warehouse AS inWarehouse, updated_at AS updatedAt
+            in_warehouse AS inWarehouse, updated_at AS updatedAt, created_at AS createdAt
      FROM luggage_orders WHERE order_id = ?`,
   ).bind(orderId).first<LuggageOperationsFieldsOrder>();
   if (!current) return c.json({ error: "Luggage order not found" }, 404);
+
+  // A different JST pickup date changes storage days, tag range and price; same-date time edits keep the field-only path.
+  if ("expectedPickupAt" in normalized.update && normalized.update.expectedPickupAt === null) {
+    return c.json({ error: "Pickup date cannot be cleared", code: "PICKUP_DATE_REQUIRED" }, 400);
+  }
+  const requestedPickupAt = normalized.update.expectedPickupAt;
+  // Also repair an active order whose same-day tag (1-145) no longer matches a next-day-or-later pickup.
+  const longPickupOnSameDayTag = typeof requestedPickupAt === "string"
+    && (current.status === "PAYMENT_PENDING" || current.status === "PAID")
+    && isSameDayStorageTag(current.tagNo)
+    && jstDateKey(requestedPickupAt) !== jstDateKey(current.createdAt);
+  if (
+    typeof requestedPickupAt === "string"
+    && (longPickupOnSameDayTag || !current.expectedPickupAt || jstDateKey(requestedPickupAt) !== jstDateKey(current.expectedPickupAt))
+  ) {
+    const outcome = await applyPickupDateChange(c.env.DB, orderId, normalized.update, requestedPickupAt, normalized.actor);
+    return c.json(outcome.body, outcome.status);
+  }
 
   const before = {
     orderId: current.orderId,
