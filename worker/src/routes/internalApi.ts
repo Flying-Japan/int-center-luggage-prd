@@ -76,6 +76,16 @@ import {
   type OrderCancelPayload,
 } from "../services/orderCancelWrites";
 import {
+  classifyOrderPricingConflict,
+  computeOrderPricing,
+  normalizeOrderPricingPayload,
+  ORDER_PRICING_AUDIT_ACTION,
+  ORDER_PRICING_CONFLICT_MESSAGES,
+  ORDER_PRICING_EDITABLE_STATUS,
+  type OrderPricingPayload,
+  type OrderPricingRow,
+} from "../services/orderPricingWrites";
+import {
   classifyOrderPhoneConflict,
   maskPhone,
   normalizeOrderPhonePayload,
@@ -3695,6 +3705,129 @@ internalApi.patch("/internal/luggage-orders/:orderId/price", async (c) => {
     });
   } catch {
     return c.json({ error: "Unable to update luggage price" }, 500);
+  }
+});
+
+// PATCH /internal/luggage-orders/:orderId/pricing — Unified-admin correction of bag counts, Flying Pass tier,
+// payment method and manual amount in one atomic write (payment-pending orders only; see orderPricingWrites.ts).
+internalApi.patch("/internal/luggage-orders/:orderId/pricing", async (c) => {
+  const orderId = c.req.param("orderId");
+  if (orderId.length > 32 || !LUGGAGE_ORDER_ID_PATTERN.test(orderId)) {
+    return c.json({ error: "Invalid orderId" }, 400);
+  }
+  let payload: unknown;
+  try {
+    payload = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  let normalized: OrderPricingPayload;
+  try {
+    normalized = normalizeOrderPricingPayload(payload);
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
+  }
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
+  const staff = resolution.staff;
+
+  // instr() instead of LIKE: D1 rejects LIKE patterns longer than its pattern-length limit.
+  const requestMarker = `"requestId":"${normalized.requestId}"`;
+  const current = await c.env.DB.prepare(
+    `SELECT o.status, o.updated_at AS updatedAt, o.parent_order_id AS parentOrderId,
+            EXISTS (SELECT 1 FROM luggage_orders child WHERE child.parent_order_id = o.order_id) AS hasExtensions,
+            o.suitcase_qty AS suitcaseQty, o.backpack_qty AS backpackQty, o.set_qty AS setQty,
+            o.price_per_day AS pricePerDay, o.expected_storage_days AS expectedStorageDays,
+            o.flying_pass_tier AS flyingPassTier, o.flying_pass_discount_amount AS flyingPassDiscountAmount,
+            o.staff_prepaid_override_amount AS staffPrepaidOverrideAmount, o.payment_method AS paymentMethod,
+            o.prepaid_amount AS prepaidAmount, o.final_amount AS finalAmount,
+            EXISTS (
+              SELECT 1 FROM luggage_audit_logs
+              WHERE order_id = o.order_id AND action = '${ORDER_PRICING_AUDIT_ACTION}' AND instr(details, ?) > 0
+            ) AS replayed
+     FROM luggage_orders o WHERE o.order_id = ?`,
+  ).bind(requestMarker, orderId).first<Omit<OrderPricingRow, "hasExtensions"> & { hasExtensions: number; replayed: number }>();
+  if (!current) return c.json({ error: "Luggage order not found", code: "NOT_FOUND" }, 404);
+  const row: OrderPricingRow = { ...current, hasExtensions: current.hasExtensions === 1 };
+
+  const conflict = classifyOrderPricingConflict(row, normalized.expected, current.replayed === 1);
+  if (conflict) return c.json({ error: ORDER_PRICING_CONFLICT_MESSAGES[conflict], code: conflict }, 409);
+  const computed = computeOrderPricing(row, normalized.changes);
+  if (!computed.ok) return c.json({ error: ORDER_PRICING_CONFLICT_MESSAGES[computed.code], code: computed.code }, 409);
+  const { before, after, quantityChanged } = computed;
+  const orderBody = (updatedAt: string) => ({
+    orderId,
+    suitcaseQty: after.suitcaseQty,
+    backpackQty: after.backpackQty,
+    setQty: after.setQty,
+    pricePerDay: after.pricePerDay,
+    paymentMethod: after.paymentMethod,
+    flyingPassTier: after.flyingPassTier,
+    flyingPassDiscountAmount: after.flyingPassDiscountAmount,
+    prepaidAmount: after.prepaidAmount,
+    finalAmount: after.finalAmount,
+    staffPrepaidOverrideAmount: after.staffPrepaidOverrideAmount,
+    updatedAt,
+  });
+  if (!computed.changed) return c.json({ changed: false, order: orderBody(current.updatedAt) });
+
+  const auditDetails = JSON.stringify({
+    source: "unified-admin",
+    action: "pricing_update",
+    requestId: normalized.requestId,
+    orderId,
+    reason: normalized.reason,
+    before: { ...before, updatedAt: current.updatedAt },
+    after: { ...after, updatedAt: null },
+    expected: normalized.expected,
+    ...unifiedActorAuditSnapshot(normalized.actor, staff),
+  });
+
+  try {
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `UPDATE luggage_orders
+         SET suitcase_qty = ?, backpack_qty = ?, set_qty = ?, price_per_day = ?, flying_pass_tier = ?,
+             flying_pass_discount_amount = ?, staff_prepaid_override_amount = ?, payment_method = ?,
+             prepaid_amount = ?, final_amount = ?, updated_at = datetime('now')
+         WHERE order_id = ? AND status = '${ORDER_PRICING_EDITABLE_STATUS}' AND updated_at = ?
+           AND suitcase_qty = ? AND backpack_qty = ? AND set_qty = ? AND price_per_day = ?
+           AND flying_pass_tier IS ? AND flying_pass_discount_amount = ? AND staff_prepaid_override_amount IS ?
+           AND payment_method IS ? AND prepaid_amount = ? AND final_amount IS ?
+           AND (? = 0 OR (parent_order_id IS NULL AND NOT EXISTS (SELECT 1 FROM luggage_orders child WHERE child.parent_order_id = ?)))
+           AND NOT EXISTS (
+             SELECT 1 FROM luggage_audit_logs
+             WHERE order_id = ? AND action = '${ORDER_PRICING_AUDIT_ACTION}' AND instr(details, ?) > 0
+           )
+         RETURNING order_id AS orderId, updated_at AS updatedAt`,
+      ).bind(
+        after.suitcaseQty, after.backpackQty, after.setQty, after.pricePerDay, after.flyingPassTier,
+        after.flyingPassDiscountAmount, after.staffPrepaidOverrideAmount, after.paymentMethod,
+        after.prepaidAmount, after.finalAmount,
+        orderId, current.updatedAt,
+        current.suitcaseQty, current.backpackQty, current.setQty, current.pricePerDay,
+        current.flyingPassTier, current.flyingPassDiscountAmount, current.staffPrepaidOverrideAmount,
+        current.paymentMethod, current.prepaidAmount, current.finalAmount,
+        quantityChanged ? 1 : 0, orderId,
+        orderId, requestMarker,
+      ),
+      c.env.DB.prepare(
+        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+         SELECT ?, ?, 'unified-admin', '${ORDER_PRICING_AUDIT_ACTION}',
+                json_set(?, '$.after.updatedAt', (SELECT updated_at FROM luggage_orders WHERE order_id = ?)), datetime('now')
+         WHERE changes() = 1`,
+      ).bind(orderId, staff.id, auditDetails, orderId),
+    ]);
+    const updated = (results[0].results ?? []) as Array<{ orderId: string; updatedAt: string }>;
+    if (updated.length !== 1) {
+      return c.json({ error: ORDER_PRICING_CONFLICT_MESSAGES.STALE, code: "STALE" }, 409);
+    }
+    if (results[1].meta.changes !== 1) {
+      return c.json({ error: "Unable to write order pricing audit log" }, 500);
+    }
+    return c.json({ changed: true, order: orderBody(updated[0].updatedAt) });
+  } catch {
+    return c.json({ error: "Unable to update luggage order pricing" }, 500);
   }
 });
 
