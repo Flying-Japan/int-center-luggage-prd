@@ -294,6 +294,18 @@ test("counts do not change on extension orders, orders with extensions, or free 
   assert.equal((await call(ctx, "20261021-070", body({ flyingPassTier: "BLUE" }))).status, 200);
 });
 
+test("an order without storage days cannot be recalculated to 0; an explicit manual amount still works", async () => {
+  stubProfiles([EDITOR]);
+  const ctx = setup();
+  seedOrder(ctx.sqlite, "20261021-075", { days: 0, prepaid: 1600, final: 1600 });
+  const refused = await call(ctx, "20261021-075", body({ flyingPassTier: "BLUE" }));
+  assert.deepEqual([refused.status, refused.json.code], [409, "INVALID_DAYS"]);
+  assert.equal(priced(ctx.sqlite, "20261021-075").final, 1600);
+  const manual = await call(ctx, "20261021-075", body({ staffPrepaidOverrideAmount: 1500 }));
+  assert.equal(manual.status, 200);
+  assert.equal(priced(ctx.sqlite, "20261021-075").final, 1500);
+});
+
 test("11. stale screen (time or same-second value drift) is refused; a concurrent writer between read and write is not overwritten", async () => {
   stubProfiles([EDITOR]);
   const ctx = setup();

@@ -65,6 +65,7 @@ export type OrderPricingConflictCode =
   | "HAS_EXTENSIONS"
   | "IS_EXTENSION"
   | "FREE_ORDER"
+  | "INVALID_DAYS"
   | "OVERRIDE_DECISION_REQUIRED"
   | "EMPTY_ORDER";
 
@@ -75,6 +76,7 @@ export const ORDER_PRICING_CONFLICT_MESSAGES: Record<OrderPricingConflictCode, s
   HAS_EXTENSIONS: "Bag counts cannot change on an order that has extension orders",
   IS_EXTENSION: "Bag counts cannot change on an extension order",
   FREE_ORDER: "Bag counts cannot change on a free (no daily price) order",
+  INVALID_DAYS: "The order has no storage days, so its price cannot be recalculated; set a manual amount",
   OVERRIDE_DECISION_REQUIRED: "A manual amount is set: choose to keep, replace or clear it when bag counts change",
   EMPTY_ORDER: "An order needs at least one bag",
 };
@@ -246,6 +248,8 @@ export function computeOrderPricing(row: OrderPricingRow, changes: OrderPricingC
   const flyingPassTier = changes.flyingPassTier ?? before.flyingPassTier;
   const override = "staffPrepaidOverrideAmount" in changes ? (changes.staffPrepaidOverrideAmount ?? null) : row.staffPrepaidOverrideAmount;
   const { finalPrepaid, flyingPassDiscountAmount } = recalculateOrderPrepaid(pricePerDay, row.expectedStorageDays, flyingPassTier);
+  // Recalculating a price from fewer than one storage day would bill 0; only an explicit manual amount may proceed.
+  if (override === null && row.expectedStorageDays < 1) return { ok: false, code: "INVALID_DAYS" };
   const prepaidAmount = override ?? finalPrepaid;
   const after: OrderPricingValues = {
     suitcaseQty,
