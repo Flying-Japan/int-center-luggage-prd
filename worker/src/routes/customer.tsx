@@ -1169,6 +1169,7 @@ form { margin-top: 16px; }
     fileOptimized: formEl.dataset.fileOptimized || ""
   };
   var optimizedFilesByField = new Map();
+  var imagePreparationsByField = new Map();
   var MAX_IMAGE_DIMENSION = 1800;
   var OPTIMIZE_SIZE_THRESHOLD = 450 * 1024;
   var TARGET_IMAGE_BYTES = 1000 * 1024;
@@ -1323,7 +1324,7 @@ form { margin-top: 16px; }
   }
   async function optimizeImageFile(file) {
     if (!file||!file.type||!file.type.startsWith("image/")) return file;
-    var img; try { img = await loadImageElement(file); } catch(e) { return file; }
+    var img = await loadImageElement(file);
     var w = Number(img.naturalWidth||img.width||0), h = Number(img.naturalHeight||img.height||0);
     if (w<1||h<1) return file;
     var scale = Math.min(1, MAX_IMAGE_DIMENSION/Math.max(w,h));
@@ -1342,15 +1343,41 @@ form { margin-top: 16px; }
     if (best.size>=file.size*0.96&&file.size<=TARGET_IMAGE_BYTES) return file;
     return new File([best], baseName(file.name)+"-opt.jpg", {type:"image/jpeg",lastModified:Date.now()});
   }
-  async function optimizeInputIfNeeded(inputEl, textEl, emptyText) {
-    if (!inputEl||!textEl) return;
-    var src = inputEl.files&&inputEl.files[0];
-    if (!src) { optimizedFilesByField.delete(inputEl.name); textEl.textContent=emptyText||""; return; }
+  function optimizeInputIfNeeded(inputEl, textEl, emptyText) {
+    if (!inputEl || !textEl) return Promise.resolve(null);
+    var src = inputEl.files && inputEl.files[0];
+    var field = inputEl.name;
+    if (!src) {
+      imagePreparationsByField.delete(field);
+      optimizedFilesByField.delete(field);
+      textEl.textContent = emptyText || "";
+      return Promise.resolve(null);
+    }
+    var current = imagePreparationsByField.get(field);
+    // Reuse an in-flight or completed preparation for the same file object.
+    if (current && current.source === src) return current.promise;
+    optimizedFilesByField.delete(field);
     textEl.textContent = src.name;
-    if (!shouldOptimizeImage(src)) { optimizedFilesByField.set(inputEl.name,src); return; }
-    var opt = await optimizeImageFile(src);
-    optimizedFilesByField.set(inputEl.name, opt);
-    if (opt!==src) textEl.textContent = src.name+" · "+messages.fileOptimized+" ("+formatFileSize(opt.size)+")";
+    var state = { source: src, promise: null };
+    imagePreparationsByField.set(field, state);
+    state.promise = (async function() {
+      var opt = shouldOptimizeImage(src) ? await optimizeImageFile(src) : src;
+      // A slower, older selection must never replace a newer photo.
+      if (imagePreparationsByField.get(field) !== state) return null;
+      // A file object that cannot be read is not safe to submit as fallback.
+      if (typeof opt.arrayBuffer === "function") await opt.slice(0, 1).arrayBuffer();
+      if (imagePreparationsByField.get(field) !== state) return null;
+      optimizedFilesByField.set(field, opt);
+      if (opt !== src) textEl.textContent = src.name + " · " + messages.fileOptimized + " (" + formatFileSize(opt.size) + ")";
+      return opt;
+    })().catch(function(error) {
+      if (imagePreparationsByField.get(field) === state) {
+        optimizedFilesByField.delete(field);
+        imagePreparationsByField.delete(field);
+      }
+      throw error;
+    });
+    return state.promise;
   }
   function initFilePickers() {
     var triggers = Array.from(document.querySelectorAll("[data-file-trigger]"));
@@ -1370,9 +1397,10 @@ form { margin-top: 16px; }
           await optimizeInputIfNeeded(inputEl, textEl, emptyText);
           clearUploadStatus();
         } catch(e) {
-          optimizedFilesByField.set(inputEl.name, inputEl.files[0]);
-          textEl.textContent = inputEl.files[0].name;
-          setUploadStatus(messages.uploadError,"error");
+          // Never silently fall back to a photo that failed preparation.
+          if (inputEl.files && inputEl.files[0] && !imagePreparationsByField.has(inputEl.name)) {
+            setUploadStatus(messages.uploadError,"error");
+          }
         }
       });
     });
@@ -1524,19 +1552,47 @@ form { margin-top: 16px; }
         {inputEl:idImageInputEl,textEl:document.getElementById("id_image_name")},
         {inputEl:luggageImageInputEl,textEl:document.getElementById("luggage_image_name")}
       ];
+      var selectedBeforePreparation = fileTargets.map(function(t){return t.inputEl && t.inputEl.files && t.inputEl.files[0];});
       setUploadStatus(messages.uploadOptimizing,"busy");
       await Promise.all(fileTargets.map(function(t){
         if(!t.inputEl||!t.textEl) return Promise.resolve();
         var empty = t.textEl.getAttribute("data-file-empty")||"";
         return optimizeInputIfNeeded(t.inputEl,t.textEl,empty);
       }));
+      if (fileTargets.some(function(t,i){return (t.inputEl && t.inputEl.files && t.inputEl.files[0]) !== selectedBeforePreparation[i];})) {
+        throw new Error("Photo selection changed during submission");
+      }
       clearUploadStatus();
       setUploadStatus(messages.uploadSubmitting,"busy");
+      var preparedFiles = fileTargets.map(function(t, i) {
+        if (!selectedBeforePreparation[i]) return null;
+        var prepared = optimizedFilesByField.get(t.inputEl.name);
+        if (!prepared) throw new Error("Photo preparation incomplete");
+        return prepared;
+      });
       var hasDataTransfer = typeof DataTransfer === "function";
-      var idImg = optimizedFilesByField.get("id_image");
-      var lugImg = optimizedFilesByField.get("luggage_image");
-      if (idImg && idImageInputEl && hasDataTransfer) { var dt1=new DataTransfer(); dt1.items.add(idImg); idImageInputEl.files=dt1.files; }
-      if (lugImg && luggageImageInputEl && hasDataTransfer) { var dt2=new DataTransfer(); dt2.items.add(lugImg); luggageImageInputEl.files=dt2.files; }
+      var replacements = [];
+      fileTargets.forEach(function(t, i) {
+        var prepared = preparedFiles[i];
+        if (!prepared || prepared === selectedBeforePreparation[i]) return;
+        if (!hasDataTransfer) {
+          throw new Error("DataTransfer unavailable for optimized photos");
+        }
+        var transfer = new DataTransfer();
+        transfer.items.add(prepared);
+        replacements.push({ input: t.inputEl, files: transfer.files });
+      });
+      var originals = replacements.map(function(r) {
+        return { input: r.input, files: r.input.files };
+      });
+      try {
+        replacements.forEach(function(r) { r.input.files = r.files; });
+      } catch (assignmentError) {
+        originals.forEach(function(r) {
+          try { r.input.files = r.files; } catch (restoreError) {}
+        });
+        throw assignmentError;
+      }
       formEl.submit();
     } catch(e) {
       setUploadStatus(messages.uploadError,"error");
