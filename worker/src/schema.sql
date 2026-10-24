@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS luggage_orders (
   note TEXT,
   id_image_url TEXT,
   luggage_image_url TEXT,
+  view_token TEXT,
   consent_checked INTEGER NOT NULL DEFAULT 0,
   manual_entry INTEGER NOT NULL DEFAULT 0,
   staff_id TEXT,
