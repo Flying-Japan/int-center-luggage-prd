@@ -117,6 +117,7 @@ export async function getDashboardSyncToken(
   };
 
   return [
+    new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10),
     safeCounts.pending_count ?? 0,
     safeCounts.paid_count ?? 0,
     safeCounts.picked_up_count ?? 0,

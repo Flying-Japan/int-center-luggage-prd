@@ -236,7 +236,7 @@ ops.get("/staff/cash-closing", async (c) => {
                         <td style="padding:2px 4px;text-align:right">{((cl.count_1 as number) || 0).toLocaleString()}</td>
                         <td style="padding:2px 6px;text-align:right;font-weight:700">¥{(cl.total_amount as number).toLocaleString()}</td>
                         <td style="padding:2px 6px;text-align:right">¥{(cl.paypay_amount as number).toLocaleString()}</td>
-                        <td style="padding:2px 6px;text-align:right;color:#2563eb">¥{autoAmount.toLocaleString()}</td>
+                        <td style="padding:2px 6px;text-align:right;color:#2563eb">¥{autoAmount.toLocaleString()}{(currentAutoSales?.estimatedAmount ?? 0) > 0 && <span style="display:block;font-size:10px">원장 없는 추정 ¥{currentAutoSales?.estimatedAmount?.toLocaleString()} 포함</span>}</td>
                         <td style={`padding:2px 6px;text-align:right;font-weight:600;color:${diff === 0 ? '#166534' : '#dc2626'}`}>{diff > 0 ? "+" : ""}{diff.toLocaleString()}</td>
                         <td style="padding:2px 4px;text-align:right">{((cl.floor_4f_count as number) || 0) > 0 ? (cl.floor_4f_count as number) : "-"}</td>
                         <td style="padding:2px 4px;text-align:right">{((cl.floor_8f_count as number) || 0) > 0 ? (cl.floor_8f_count as number) : "-"}</td>
@@ -473,6 +473,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
               <div class="card stat-card">
                 <p class="stat-label">자동매출 <span title="현재 짐보관 매출 집계 기준 자동매출입니다." style="cursor:help;color:#94a3b8;font-size:10px">(?)</span></p>
                 <p class="stat-value">¥{autoAmount.toLocaleString()}</p>
+                {(autoSales?.estimatedAmount ?? 0) > 0 && <p class="card-desc">원장 없는 과거 결제완료 추정 ¥{autoSales?.estimatedAmount?.toLocaleString()} 포함 · 실제 수납 확정액이 아닙니다.</p>}
               </div>
               <div class="card stat-card">
                 <p class="stat-label">차액</p>

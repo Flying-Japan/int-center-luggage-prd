@@ -4,6 +4,10 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
 import internalApi from "../src/routes/internalApi";
+import staffApi from "../src/routes/staffApi";
+import staffOrders from "../src/routes/staffOrders";
+import type { AppType } from "../src/types";
+import { getBillingSummary } from "../src/services/luggageBilling";
 import { recalculateOrderPrepaid } from "../src/services/pricing";
 import { signInternalRequest } from "../src/lib/hmac";
 
@@ -37,19 +41,23 @@ function setup() {
     };
   };
 
+  let batchQueue: Promise<unknown> = Promise.resolve();
   const db = {
     prepare: statement,
-    async batch(statements: Array<ReturnType<typeof statement>>) {
-      sqlite.exec("BEGIN");
-      try {
-        const results = [];
-        for (const item of statements) results.push(await item.run());
-        sqlite.exec("COMMIT");
-        return results;
-      } catch (error) {
-        sqlite.exec("ROLLBACK");
-        throw error;
-      }
+    batch(statements: Array<ReturnType<typeof statement>>) {
+      // Model D1 atomic serialization. The concurrency test still races stale tag reads and
+      // requires the SQL NOT EXISTS guard to produce exactly one winner, never duplicate tag 150.
+      const result = batchQueue.then(async () => {
+        sqlite.exec('BEGIN');
+        try {
+          const results = [];
+          for (const item of statements) results.push(await item.run());
+          sqlite.exec('COMMIT');
+          return results;
+        } catch (error) { sqlite.exec('ROLLBACK'); throw error; }
+      });
+      batchQueue = result.then(() => undefined, () => undefined);
+      return result;
     },
   };
 
@@ -410,4 +418,105 @@ test("Flying Pass 할인·장기 할인: 새 일수 기준으로 재계산", asy
   assert.equal(saved.prepaid_amount, expected.finalPrepaid);
   assert.equal(saved.final_amount, expected.finalPrepaid);
   assert.equal(saved.flying_pass_discount_amount, expected.flyingPassDiscountAmount);
+});
+
+function staffApp() {
+  const app = new Hono<AppType>();
+  app.use('/staff/*', async (c, next) => {
+    c.set('staff', { id: 'pickup-editor', role: 'editor', is_active: true, display_name: 'Editor', username: 'editor', created_at: '' });
+    await next();
+  });
+  return app.route('/', staffApi).route('/', staffOrders);
+}
+
+function seedDatedExtension(ctx: Context) {
+  ctx.sqlite.prepare(`INSERT INTO luggage_orders(order_id, parent_order_id, status, created_at, updated_at,
+    extension_date, expected_pickup_at, expected_storage_days, price_per_day, prepaid_amount, final_amount, tag_no)
+    VALUES ('EXT-20261021-001', ?, 'PAYMENT_PENDING', '2026-10-21 01:00:00', '2026-10-21 01:00:00',
+      '2026-10-22', '2026-10-22T12:00:00Z', 1, 800, 800, 800, '146')`).run(ORDER_ID);
+}
+
+test('potential overdue days alone do not lock standalone corrections or invent extension/receipt rows', async () => {
+  const ctx = setup(); seed(ctx, ORDER_ID, 'PAID');
+  const before = await getBillingSummary(ctx.env.DB as unknown as D1Database, ORDER_ID);
+  const result = await change(ctx);
+  assert.equal(result.status, 200, JSON.stringify(result.data));
+  assert.equal(result.data.pricing.paidAmountSource, 'ORDER_FINAL_AMOUNT');
+  assert.equal(result.data.pricing.paidAmountEstimated, true);
+  assert.equal(result.data.pricing.expectedAmount, 1600);
+  assert.equal(result.data.pricing.outstandingAmount, 800);
+  const after = (await getBillingSummary(ctx.env.DB as unknown as D1Database, ORDER_ID))!;
+  assert.equal(after.recorded_amount, 0);
+  assert.equal(after.legacy_paid_estimate, 800);
+  assert.ok(after.unbilled_days <= before!.unbilled_days);
+  assert.equal(ctx.sqlite.prepare('SELECT COUNT(*) AS n FROM luggage_orders').get()!.n, 1);
+  assert.equal(ctx.sqlite.prepare('SELECT COUNT(*) AS n FROM luggage_order_payments').get()!.n, 0);
+});
+
+test('actual extension dates stay locked in internal API, staff JSON and staff HTML with no audit/ledger changes', async () => {
+  const ctx = setup(); seed(ctx, ORDER_ID, 'PAID');
+  ctx.sqlite.prepare(`INSERT INTO luggage_order_payments(order_id, business_date, tender_type, amount)
+    VALUES (?, '2026-10-21', 'CASH', 800)`).run(ORDER_ID);
+  seedDatedExtension(ctx);
+  const before = order(ctx);
+  const ledger = ctx.sqlite.prepare('SELECT * FROM luggage_order_payments').all();
+  const internal = await change(ctx);
+  assert.deepEqual([internal.status, internal.data.code], [409, 'HAS_EXTENSIONS']);
+  const app = staffApp();
+  const json = await app.request(`/staff/api/orders/${ORDER_ID}/inline-update`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_pickup_at: NEXT_DAY_PICKUP }),
+  }, ctx.env);
+  assert.equal(json.status, 409);
+  assert.equal((await json.json() as any).code, 'BILLING_HISTORY_LOCKED');
+  const html = await app.request(`/staff/orders/${ORDER_ID}/update`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'expected_pickup_at=2026-10-22T12%3A30',
+  }, ctx.env);
+  assert.equal(html.status, 302);
+  assert.match(decodeURIComponent(html.headers.get('location')!), /확정된 연장 보관일/);
+  assert.deepEqual(order(ctx), before);
+  assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_order_payments').all(), ledger);
+  assert.equal(audits(ctx).length, 0);
+});
+
+test('same-JST-date clock correction remains legal with extensions and receipts; minute precision survives both staff routes', async () => {
+  const ctx = setup(); seed(ctx, ORDER_ID, 'PAID');
+  ctx.sqlite.prepare(`INSERT INTO luggage_order_payments(order_id, business_date, tender_type, amount)
+    VALUES (?, '2026-10-21', 'PAY_QR', 800)`).run(ORDER_ID);
+  seedDatedExtension(ctx);
+  const ledger = ctx.sqlite.prepare('SELECT * FROM luggage_order_payments').all();
+  const internal = await change(ctx, '2026-10-21T04:25:00.000Z');
+  assert.equal(internal.status, 200, JSON.stringify(internal.data));
+  assert.equal(internal.data.pricing, undefined); // Existing field-only time-edit response contract.
+  const app = staffApp();
+  const json = await app.request(`/staff/api/orders/${ORDER_ID}/inline-update`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_pickup_at: '2026-10-21T14:35' }),
+  }, ctx.env);
+  assert.equal(json.status, 200);
+  assert.equal(order(ctx).expected_pickup_at, '2026-10-21T05:35:00.000Z');
+  const html = await app.request(`/staff/orders/${ORDER_ID}/update`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'expected_pickup_at=2026-10-21T14%3A45',
+  }, ctx.env);
+  assert.equal(html.status, 302);
+  assert.equal(html.headers.get('location'), `/staff/orders/${ORDER_ID}`);
+  assert.equal(order(ctx).expected_pickup_at, '2026-10-21T05:45:00.000Z');
+  assert.equal(audits(ctx).length, 3);
+  assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_order_payments').all(), ledger);
+  assert.equal(ctx.sqlite.prepare('SELECT extension_date FROM luggage_orders WHERE parent_order_id = ?').get(ORDER_ID)!.extension_date, '2026-10-22');
+});
+
+test('staff standalone historical edits remain available; clearing the deadline cannot bypass projected debt', async () => {
+  const ctx = setup(); seed(ctx, ORDER_ID, 'PAID');
+  const app = staffApp();
+  const response = await app.request(`/staff/api/orders/${ORDER_ID}/inline-update`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_pickup_at: '2026-10-22T12:35' }),
+  }, ctx.env);
+  assert.equal(response.status, 200);
+  assert.equal(order(ctx).expected_pickup_at, '2026-10-22T03:35:00.000Z');
+  const before = order(ctx);
+  const invalid = await app.request(`/staff/api/orders/${ORDER_ID}/inline-update`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_pickup_at: null }),
+  }, ctx.env);
+  assert.equal(invalid.status, 400);
+  assert.deepEqual(order(ctx), before);
+  assert.equal(audits(ctx).length, 1);
 });

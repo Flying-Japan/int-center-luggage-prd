@@ -1,3 +1,4 @@
+import { getBillingSummaries, pickupBillingError } from './services/luggageBilling';
 import { Hono } from "hono";
 import * as Sentry from "@sentry/cloudflare";
 import type { AppType, Env } from "./types";
@@ -196,7 +197,9 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
   const refCounts: Record<string, number> = { "4F": 0, "8F": 0 };
   for (const r of refRows.results) refCounts[r.floor] = r.count;
   const noteAuthorMap = await fetchStaffNamesByIds(c.env, orders.results.map((order) => order.note_staff_id));
+  const billings = await getBillingSummaries(c.env.DB, orders.results.map(o => o.order_id));
   const orderRows = orders.results.map((order) => ({
+    billing: billings.get(order.order_id),
     ...order,
     note_author: order.note_staff_id ? noteAuthorMap.get(order.note_staff_id) || order.note_staff_id : null,
   }));
@@ -349,7 +352,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       o.status === "CANCELLED" && "is-cancelled",
                       o.in_warehouse && "is-in-warehouse",
                     ].filter(Boolean).join(" ");
-                    const payableAmount = ((o.final_amount || 0) > 0 ? (o.final_amount || 0) : o.prepaid_amount) + (o.extra_amount || 0);
+                    const payableAmount = (o.final_amount ?? o.prepaid_amount) + (o.extra_amount || 0);
                     const paymentCashAmount = o.payment_cash_amount || 0;
                     const paymentQrAmount = o.payment_qr_amount || 0;
                     const paymentTitle = paymentCashAmount > 0 || paymentQrAmount > 0
@@ -382,6 +385,14 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                         );
                       })()}</td>
                       <td data-col-key="pay_status">{(() => {
+                        if (o.billing && (o.billing.root_review_required || o.billing.outstanding_amount > 0 && (o.billing.extension_count > 0 || o.billing.unbilled_days > 0 || o.status === 'PAID') || o.billing.invalid_amount)) {
+                          return <div>
+                            {!!o.billing.root_review_required && <a class="status-pill status-payment_pending" href={`/staff/orders/${o.parent_order_id || o.order_id}`}>기존 원주문 정산 확인 필요 · 차이 ¥{o.billing.root_review_difference.toLocaleString()}</a>}
+                            {o.billing.extension_outstanding_amount > 0 && <a class="status-pill status-payment_pending" href={`/staff/orders/${o.parent_order_id || o.order_id}`}>추가 보관료 미수납 · ¥{o.billing.extension_outstanding_amount.toLocaleString()} (추가 결제 필요)</a>}
+                            {o.billing.outstanding_amount > 0 && o.billing.extension_outstanding_amount === 0 && <a class="status-pill status-payment_pending" href={`/staff/orders/${o.parent_order_id || o.order_id}`}>추가 결제 필요 · ¥{o.billing.outstanding_amount.toLocaleString()}</a>}
+                            {!!o.billing.invalid_amount && <span class="status-pill status-payment_pending">금액 확인 필요</span>}
+                          </div>;
+                        }
                         const isPaid = o.status === "PAID" || o.status === "PICKED_UP";
                         const isCancelled = o.status === "CANCELLED";
                         const isPending = o.status === "PAYMENT_PENDING";
@@ -398,7 +409,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                         const isPaid = o.status === "PAID";
                         const cls = isPickedUp ? "status-picked_up" : isCancelled ? "status-cancelled" : "status-payment_pending";
                         const label = isPickedUp ? "수령완료" : isCancelled ? "취소" : "미수령";
-                        if (isPaid) {
+                        if (isPaid && !o.parent_order_id && o.billing && !pickupBillingError(o.billing)) {
                           return <span class={`status-pill ${cls} pill-clickable`} data-action="pickup" data-order-id={o.order_id} style="cursor:pointer" title="클릭하여 수령완료 처리">{label}</span>;
                         }
                         return <span class={`status-pill ${cls}`}>{label}</span>;

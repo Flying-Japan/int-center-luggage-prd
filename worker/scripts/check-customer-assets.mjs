@@ -12,6 +12,7 @@ const checkedFiles = [
   "src/routes/staffApi.ts",
   "src/lib/brevo.ts",
   "src/services/extension.ts",
+  "src/services/luggageBilling.ts",
 ];
 
 const forbidden = [
@@ -82,8 +83,17 @@ const operationalGuardRequirements = {
     "datetime(created_at) > datetime(?)",
   ],
   "src/services/extension.ts": [
-    "toSqliteDateTime",
-    "created_at: toSqliteDateTime(now)",
+    "const ids = await materializeOutstandingDays(db);",
+  ],
+  // Creation moved into the shared automatic/manual extension transaction.
+  // Guard the UTC conversion and the real INSERT/bind path, not the old record builder.
+  "src/services/luggageBilling.ts": [
+    "return date.toISOString().replace('T', ' ').replace(/\\.\\d{3}Z$/, '');",
+    "const createdAt = toSqliteDateTime(now);",
+    "buildOrderId(db, now, false, 'ext')",
+    "order_id, created_at, updated_at, name, phone",
+    ") SELECT ?, ?, ?, r.name, r.phone",
+    ".bind(id, createdAt, createdAt, billingDate,",
   ],
 };
 

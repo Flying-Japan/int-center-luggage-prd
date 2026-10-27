@@ -1,8 +1,9 @@
 import { normalizeUnifiedWriteActor, type UnifiedWriteActor } from "../lib/internalActorStaff";
 
 // Unified-admin cancellation of a PAYMENT_PENDING luggage order.
-// The staff route (/staff/api/orders/:id/cancel) keeps its original behavior. Like that
-// route, cancelling only flips status to CANCELLED: payment rows, tag_no and images are
+// Legacy undated/unaccrued pending extension drafts remain cancellable under the shared billing policy.
+// Dated/accrued charges or any child receipt require an explicit correction policy.
+// Cancelling a permitted draft only flips status to CANCELLED: payment rows, tag_no and images are
 // left untouched, and tag reuse follows from the status change. The unified path is
 // narrower on purpose: only PAYMENT_PENDING orders, with a stale guard and replay guard.
 
@@ -14,7 +15,7 @@ export type OrderCancelPayload = {
   actor: UnifiedWriteActor;
 };
 
-export type OrderCancelConflictCode = "DUPLICATE_REQUEST" | "ALREADY_CANCELLED" | "STALE" | "INVALID_STATUS";
+export type OrderCancelConflictCode = "DUPLICATE_REQUEST" | "ALREADY_CANCELLED" | "STALE" | "INVALID_STATUS" | "COLLECTED_EXTENSION" | "EXTENSION_POLICY_REQUIRED" | "ROOT_SETTLEMENT_REVIEW_REQUIRED";
 
 export const ORDER_CANCEL_AUDIT_ACTION = "UNIFIED_ADMIN_ORDER_CANCEL";
 export const ORDER_CANCELLABLE_STATUS = "PAYMENT_PENDING";
@@ -76,4 +77,7 @@ export const ORDER_CANCEL_CONFLICT_MESSAGES: Record<OrderCancelConflictCode, str
   ALREADY_CANCELLED: "Luggage order is already cancelled",
   STALE: "Luggage order was changed by another request",
   INVALID_STATUS: "Only PAYMENT_PENDING luggage orders can be cancelled",
+  ROOT_SETTLEMENT_REVIEW_REQUIRED: "기존 원주문 정산 확인 필요: 정산 차이가 남은 주문은 취소할 수 없습니다.",
+  COLLECTED_EXTENSION: "수납 기록이 있는 연장은 취소할 수 없습니다. 별도 정산 정책이 필요합니다.",
+  EXTENSION_POLICY_REQUIRED: "보관일이 확정되었거나 이미 발생한 연장 요금의 취소·정정은 운영 정책 결정이 필요합니다.",
 };

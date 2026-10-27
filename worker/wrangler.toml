@@ -1,8 +1,9 @@
 name = "int-center-luggage-api"
-main = "src/index.tsx"
+main = "src/index.f0.ts"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
+preview_urls = false
 
 [vars]
 APP_ENV = "production"

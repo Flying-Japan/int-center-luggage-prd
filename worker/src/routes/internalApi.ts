@@ -1,3 +1,5 @@
+import { writePickupTransition, PickupTransitionError } from '../services/orderPickupWrites';
+import { getBillingSummary, getBillingSummaries, getCancellationBlock, nextManualExtensionDate, requiresCollectionFlow } from '../services/luggageBilling';
 import { Hono, type Context } from "hono";
 import type { AppType } from "../types";
 import { internalAuth } from "../middleware/internalAuth";
@@ -12,7 +14,7 @@ import { downloadImage } from "../lib/r2";
 import { fetchStaffNamesByIds } from "../lib/staffProfiles";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { CASH_CLOSING_STARTING_FLOAT, resolveAutoSalesSummariesByDate, resolveAutoSalesSummaryForDate, type AutoSalesSummary } from "../services/cashClosingSales";
-import { calculateExtraDays, calculateStorageDays, formatDateJST, toJST, validatePickupTimeWindow } from "../services/storage";
+import { calculateStorageDays, formatDateJST, toJST, validatePickupTimeWindow } from "../services/storage";
 import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
 import { hmacSha256Hex } from "../lib/hmac";
 import { loadCompletionMessages } from "../services/completionMessages";
@@ -389,17 +391,8 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
       c.env.DB.prepare("SELECT sale_date, people, cash, qr, luggage_total FROM luggage_daily_sales WHERE sale_date BETWEEN ? AND ?")
         .bind(range.startDate, range.endDate).all<{ sale_date: string; people: number; cash: number; qr: number; luggage_total: number }>(),
       c.env.DB.prepare(
-        `WITH payment_allocations AS (
-          SELECT order_id, SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) AS cash_amount,
-                 SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) AS qr_amount, COUNT(*) AS payment_count
-          FROM luggage_order_payments GROUP BY order_id
-        )
-        SELECT date(o.created_at, '+9 hours') AS sale_date, SUM(1 + o.companion_count) AS people,
-               SUM(o.suitcase_qty) AS suitcase_total, SUM(o.backpack_qty) AS backpack_total,
-               SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN o.payment_method = 'CASH' OR o.payment_method IS NULL THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) AS cash,
-               SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) AS qr
-        FROM luggage_orders o LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
-        WHERE o.status IN ('PAID', 'PICKED_UP') AND date(o.created_at, '+9 hours') BETWEEN ? AND ? GROUP BY sale_date`
+        `SELECT business_date AS sale_date, people, suitcase_total, backpack_total, cash, qr
+         FROM luggage_sales_daily WHERE business_date BETWEEN ? AND ?`
       ).bind(range.startDate, range.endDate).all<{ sale_date: string; people: number; suitcase_total: number; backpack_total: number; cash: number; qr: number }>(),
       c.env.DB.prepare("SELECT business_date AS sale_date, total_amount, paypay_amount, actual_qr_amount FROM luggage_cash_closings WHERE closing_type = 'FINAL_CLOSE' AND business_date BETWEEN ? AND ?")
         .bind(range.startDate, range.endDate).all<{ sale_date: string; total_amount: number; paypay_amount: number; actual_qr_amount: number }>(),
@@ -434,13 +427,9 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
     });
     const todayRow = dailyRows.find((row) => row.date === today);
     const todayOrders = await c.env.DB.prepare(
-      `WITH payment_allocations AS (SELECT order_id, SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) AS cash_amount, SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) AS qr_amount, COUNT(*) AS payment_count FROM luggage_order_payments GROUP BY order_id)
-       SELECT COUNT(*) AS order_count, SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN 1 ELSE 0 END) AS paid_count, SUM(CASE WHEN o.status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) AS pending_count, SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN 1 + o.companion_count ELSE 0 END) AS people,
-              SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN o.status IN ('PAID','PICKED_UP') AND (o.payment_method = 'CASH' OR o.payment_method IS NULL) THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) AS cash,
-              SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.status IN ('PAID','PICKED_UP') AND o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) AS qr,
-              SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) AS luggage,
-              SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN o.suitcase_qty ELSE 0 END) AS suitcases, SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN o.backpack_qty ELSE 0 END) AS backpacks
-       FROM luggage_orders o LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id WHERE date(o.created_at, '+9 hours') = ?`
+      `SELECT order_count, paid_count, pending_count, people, cash, qr,
+       total_amount AS luggage, suitcase_total AS suitcases, backpack_total AS backpacks
+       FROM luggage_sales_daily WHERE business_date = ?`
     ).bind(today).first<{ order_count: number; paid_count: number; pending_count: number; people: number; cash: number; qr: number; luggage: number; suitcases: number; backpacks: number }>();
     const rows = todayRow ? dailyRows.map((row) => row.date === today ? { ...row, people: Number(todayOrders?.people) || 0, suitcases: Number(todayOrders?.suitcases) || 0, backpacks: Number(todayOrders?.backpacks) || 0, cash: Number(todayOrders?.cash) || 0, qr: Number(todayOrders?.qr) || 0, luggage: Number(todayOrders?.luggage) || 0, realtime: true, settled: false, luggageSource: "orders" } : row) : dailyRows;
     const total = (key: "cash" | "qr" | "luggage" | "people" | "suitcases" | "backpacks") => rows.reduce((sum, row) => sum + row[key], 0);
@@ -873,7 +862,9 @@ function isUniqueCashClosingViolation(error: unknown): boolean {
 
 function cashClosingAutoSalesDto(autoSales: AutoSalesSummary | null) {
   return autoSales
-    ? { cashAmount: autoSales.cashAmount, qrAmount: autoSales.qrAmount, totalAmount: autoSales.totalAmount, orderCount: autoSales.orderCount, source: autoSales.source }
+    ? { cashAmount: autoSales.cashAmount, qrAmount: autoSales.qrAmount, totalAmount: autoSales.totalAmount, orderCount: autoSales.orderCount, source: autoSales.source,
+      ...((autoSales.estimatedAmount ?? 0) > 0 ? { estimatedAmount: autoSales.estimatedAmount, recordedAmount: autoSales.recordedAmount } : {}),
+    }
     : null;
 }
 
@@ -2186,8 +2177,11 @@ internalApi.get("/internal/luggage-orders", async (c) => {
     .filter((order) => order.parentOrderId === null)
     .map((order) => order.orderId);
   const extensionsByParent = new Map<string, LuggageExtensionSummaryDto[]>();
-  if (parentOrderIds.length > 0) {
-    const placeholders = parentOrderIds.map(() => "?").join(",");
+  // This SELECT has no other binds. Keep each IN list below D1's 100-parameter limit.
+  const extensionQueryChunkSize = 75;
+  for (let i = 0; i < parentOrderIds.length; i += extensionQueryChunkSize) {
+    const ids = parentOrderIds.slice(i, i + extensionQueryChunkSize);
+    const placeholders = ids.map(() => "?").join(",");
     const extensionResult = await c.env.DB.prepare(
       `SELECT o.order_id AS orderId,
               o.parent_order_id AS parentOrderId,
@@ -2203,7 +2197,7 @@ internalApi.get("/internal/luggage-orders", async (c) => {
        WHERE o.parent_order_id IN (${placeholders})
        GROUP BY o.order_id
        ORDER BY o.created_at DESC, o.order_id DESC`,
-    ).bind(...parentOrderIds).all<LuggageExtensionSummaryDto>();
+    ).bind(...ids).all<LuggageExtensionSummaryDto>();
     for (const extension of extensionResult.results) {
       const current = extensionsByParent.get(extension.parentOrderId) ?? [];
       current.push(extension);
@@ -2211,8 +2205,10 @@ internalApi.get("/internal/luggage-orders", async (c) => {
     }
   }
 
+  const billings = await getBillingSummaries(c.env.DB, result.results.map(o => o.orderId));
   return c.json({
     orders: result.results.map((order) => ({
+      billing: billings.get(order.orderId) ?? null,
       ...order,
       hasIdImage: Boolean(order.hasIdImage),
       hasLuggageImage: Boolean(order.hasLuggageImage),
@@ -2319,29 +2315,6 @@ type LuggagePickupStatusActor = {
   userId: string;
   name: string;
   role: LuggageNoteActor["role"];
-};
-
-type LuggagePickupStatusOrder = {
-  orderId: string;
-  status: string;
-  createdAt: string;
-  expectedPickupAt: string | null;
-  actualPickupAt: string | null;
-  pricePerDay: number;
-  actualStorageDays: number;
-  extraDays: number;
-  extraAmount: number;
-  updatedAt: string;
-};
-
-type LuggagePickupStatusUpdateDto = {
-  orderId: string;
-  status: "PAID" | "PICKED_UP";
-  actualPickupAt: string | null;
-  actualStorageDays: number;
-  extraDays: number;
-  extraAmount: number;
-  updatedAt: string;
 };
 
 type LuggageExtensionParentOrder = {
@@ -3002,15 +2975,21 @@ internalApi.post("/internal/luggage-orders/:orderId/extensions", async (c) => {
 
   const now = new Date();
   const nowIso = now.toISOString();
-  const expectedPickupAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+  const billingDate = await nextManualExtensionDate(c.env.DB, orderId);
+  if (!billingDate) return c.json({ error: '예정 픽업일을 확인해주세요' }, 409);
+  const expectedPickupAt = `${billingDate}T12:00:00.000Z`;
   const extensionOrderId = `EXT-${await buildOrderId(c.env.DB, now, false, "ext")}`;
-  const { setQty, pricePerDay } = calculatePricePerDay(parent.suitcaseQty, parent.backpackQty);
+  const amounts = await c.env.DB.prepare('SELECT set_qty, price_per_day FROM luggage_orders WHERE order_id = ?').bind(orderId).first<{ set_qty: number; price_per_day: number }>();
+  if (!amounts || !Number.isSafeInteger(amounts.price_per_day) || amounts.price_per_day < 0 || amounts.price_per_day > 500000) return c.json({ error: 'Invalid daily amount' }, 409);
+  const { set_qty: setQty, price_per_day: pricePerDay } = amounts;
   const extensionNote = `연장 주문 (원본: ${orderId})`;
   const auditDetails = JSON.stringify({
     source: "unified-admin",
     action: "create_manual_extension",
     parentOrderId: orderId,
     extensionOrderId,
+    billingDate,
+    pricePerDay,
     actor: normalized.actor,
   });
 
@@ -3032,10 +3011,10 @@ internalApi.post("/internal/luggage-orders/:orderId/extensions", async (c) => {
            actual_storage_days, extra_days, price_per_day, discount_rate, prepaid_amount,
            flying_pass_tier, flying_pass_discount_amount, staff_prepaid_override_amount,
            extra_amount, final_amount, payment_method, status, tag_no, note,
-           manual_entry, staff_id, parent_order_id, in_warehouse
+           manual_entry, staff_id, parent_order_id, in_warehouse, extension_date
          )
          SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, ?, 0, ?, 'NONE', 0, NULL,
-                0, ?, NULL, 'PAYMENT_PENDING', ?, ?, 1, NULL, ?, ?
+                0, ?, NULL, 'PAYMENT_PENDING', ?, ?, 1, NULL, ?, ?, ?
          WHERE changes() = 1
          RETURNING order_id AS orderId, created_at AS createdAt, updated_at AS updatedAt,
                    name, phone, email, suitcase_qty AS suitcaseQty, backpack_qty AS backpackQty,
@@ -3054,7 +3033,7 @@ internalApi.post("/internal/luggage-orders/:orderId/extensions", async (c) => {
       ).bind(
         extensionOrderId, nowIso, nowIso, parent.name, parent.phone, parent.email, parent.companionCount,
         parent.suitcaseQty, parent.backpackQty, setQty, expectedPickupAt, pricePerDay, pricePerDay,
-        pricePerDay, parent.tagNo ?? "", extensionNote, orderId, parent.inWarehouse,
+        pricePerDay, parent.tagNo ?? "", extensionNote, orderId, parent.inWarehouse, billingDate,
       ),
       c.env.DB.prepare(
         `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
@@ -3088,6 +3067,11 @@ internalApi.patch("/internal/luggage-orders/:orderId/payment-status", async (c) 
     return c.json({ error: "Invalid orderId" }, 400);
   }
 
+  if (await requiresCollectionFlow(c.env.DB, orderId)) {
+    const summary = await getBillingSummary(c.env.DB, orderId);
+    return c.json({ error: summary?.root_review_required ? '기존 원주문 정산 확인 필요: 결제 상태 변경이나 재수납으로 처리할 수 없습니다' : '연장/추가금은 직원 상세 화면의 현장 수납 확인을 이용해주세요' }, 409);
+  }
+
   let payload: unknown;
   try {
     payload = await c.req.json();
@@ -3116,9 +3100,11 @@ internalApi.patch("/internal/luggage-orders/:orderId/payment-status", async (c) 
   if (current.status === normalized.targetStatus) {
     return c.json<LuggagePaymentStatusResponse>({ success: true, changed: false, order: serializePaymentStatusOrder(current) });
   }
-  if ((current.status !== "PAYMENT_PENDING" && current.status !== "PAID")
-    || !((current.status === "PAYMENT_PENDING" && normalized.targetStatus === "PAID")
-      || (current.status === "PAID" && normalized.targetStatus === "PAYMENT_PENDING"))) {
+  // A payment recorded as PAID is never reverted directly (collection history is preserved): refused before any statement is prepared.
+  if (current.status === "PAID" && normalized.targetStatus === "PAYMENT_PENDING") {
+    return c.json({ error: "이미 기록된 결제는 직접 취소할 수 없습니다. 관리자에게 확인해 주세요.", code: "PAYMENT_REVERT_NOT_ALLOWED" }, 409);
+  }
+  if (current.status !== "PAYMENT_PENDING" || normalized.targetStatus !== "PAID") {
     return c.json({ error: "Payment status transition is not allowed" }, 409);
   }
   if (normalized.targetStatus === "PAID" && !normalized.payment) {
@@ -3126,54 +3112,31 @@ internalApi.patch("/internal/luggage-orders/:orderId/payment-status", async (c) 
   }
 
   const before = serializePaymentStatusOrder(current);
-  let after: LuggagePaymentStatusResponse["order"];
-  let statements: D1PreparedStatement[];
-  if (normalized.targetStatus === "PAID") {
-    const payableAmount = payableAmountFromOrder({
-      prepaid_amount: current.prepaidAmount,
-      final_amount: current.finalAmount,
-      extra_amount: current.extraAmount,
-    });
-    const allocation = normalizePaymentAllocation({
-      cash_amount: normalized.payment?.cashAmount,
-      qr_amount: normalized.payment?.qrAmount,
-    }, payableAmount);
-    if ("error" in allocation) return c.json({ error: allocation.error }, 400);
-    after = { orderId, status: "PAID", paymentMethod: allocation.paymentMethod, paymentCashAmount: allocation.cashAmount, paymentQrAmount: allocation.qrAmount };
-    const auditDetails = JSON.stringify({ source: "unified-admin", before, after, actor: serializePaymentAuditActor(normalized.actor) });
-    statements = [
-      ...paymentAllocationStatements(c.env.DB, orderId, current.businessDate, null, allocation, "PAYMENT_PENDING"),
-      c.env.DB.prepare(
-        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
-         SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_PAYMENT_STATUS_UPDATE', ?, datetime('now')
-         WHERE EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ? AND status = 'PAYMENT_PENDING')`,
-      ).bind(orderId, auditDetails, orderId),
-      c.env.DB.prepare(
-        `UPDATE luggage_orders SET status = 'PAID', payment_method = ?, updated_at = datetime('now')
-         WHERE order_id = ? AND status = 'PAYMENT_PENDING'
-         RETURNING order_id AS orderId`,
-      ).bind(allocation.paymentMethod, orderId),
-    ];
-  } else {
-    after = { orderId, status: "PAYMENT_PENDING", paymentMethod: current.paymentMethod, paymentCashAmount: 0, paymentQrAmount: 0 };
-    const auditDetails = JSON.stringify({ source: "unified-admin", before, after, actor: serializePaymentAuditActor(normalized.actor) });
-    statements = [
-      c.env.DB.prepare(
-        `DELETE FROM luggage_order_payments
-         WHERE order_id = ? AND EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ? AND status = 'PAID')`,
-      ).bind(orderId, orderId),
-      c.env.DB.prepare(
-        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
-         SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_PAYMENT_STATUS_UPDATE', ?, datetime('now')
-         WHERE EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ? AND status = 'PAID')`,
-      ).bind(orderId, auditDetails, orderId),
-      c.env.DB.prepare(
-        `UPDATE luggage_orders SET status = 'PAYMENT_PENDING', updated_at = datetime('now')
-         WHERE order_id = ? AND status = 'PAID'
-         RETURNING order_id AS orderId`,
-      ).bind(orderId),
-    ];
-  }
+  const payableAmount = payableAmountFromOrder({
+    prepaid_amount: current.prepaidAmount,
+    final_amount: current.finalAmount,
+    extra_amount: current.extraAmount,
+  });
+  const allocation = normalizePaymentAllocation({
+    cash_amount: normalized.payment?.cashAmount,
+    qr_amount: normalized.payment?.qrAmount,
+  }, payableAmount);
+  if ("error" in allocation) return c.json({ error: allocation.error }, 400);
+  const after: LuggagePaymentStatusResponse["order"] = { orderId, status: "PAID", paymentMethod: allocation.paymentMethod, paymentCashAmount: allocation.cashAmount, paymentQrAmount: allocation.qrAmount };
+  const auditDetails = JSON.stringify({ source: "unified-admin", before, after, actor: serializePaymentAuditActor(normalized.actor) });
+  const statements = [
+    ...paymentAllocationStatements(c.env.DB, orderId, current.businessDate, null, allocation, "PAYMENT_PENDING"),
+    c.env.DB.prepare(
+      `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
+       SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_PAYMENT_STATUS_UPDATE', ?, datetime('now')
+       WHERE EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ? AND status = 'PAYMENT_PENDING')`,
+    ).bind(orderId, auditDetails, orderId),
+    c.env.DB.prepare(
+      `UPDATE luggage_orders SET status = 'PAID', payment_method = ?, updated_at = datetime('now')
+       WHERE order_id = ? AND status = 'PAYMENT_PENDING'
+       RETURNING order_id AS orderId`,
+    ).bind(allocation.paymentMethod, orderId),
+  ];
   try {
     const results = await c.env.DB.batch(statements);
     const updateResult = results[results.length - 1];
@@ -3204,105 +3167,14 @@ internalApi.patch("/internal/luggage-orders/:orderId/pickup-status", async (c) =
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
 
-  const current = await c.env.DB.prepare(
-    `SELECT order_id AS orderId, status, created_at AS createdAt,
-            expected_pickup_at AS expectedPickupAt, actual_pickup_at AS actualPickupAt,
-            price_per_day AS pricePerDay, actual_storage_days AS actualStorageDays,
-            extra_days AS extraDays, extra_amount AS extraAmount, updated_at AS updatedAt
-     FROM luggage_orders WHERE order_id = ?`,
-  ).bind(orderId).first<LuggagePickupStatusOrder>();
-  if (!current) return c.json({ error: "Luggage order not found" }, 404);
-  if (current.updatedAt !== normalized.expectedUpdatedAt) {
-    return c.json({ error: "Luggage order was changed by another request" }, 409);
-  }
-
-  const expectedStatus = normalized.action === "mark_picked_up" ? "PAID" : "PICKED_UP";
-  const targetStatus: LuggagePickupStatusUpdateDto["status"] = normalized.action === "mark_picked_up" ? "PICKED_UP" : "PAID";
-  if (current.status !== expectedStatus) {
-    return c.json({ error: "Pickup status transition is not allowed" }, 409);
-  }
-
-  const now = new Date().toISOString();
-  const actualPickupAt = normalized.action === "mark_picked_up" ? now : null;
-  const actualStorageDays = normalized.action === "mark_picked_up"
-    ? calculateStorageDays(current.createdAt, now)
-    : 0;
-  const extraDays = normalized.action === "mark_picked_up" && current.expectedPickupAt
-    ? calculateExtraDays(current.expectedPickupAt, now)
-    : 0;
-  const extraAmount = normalized.action === "mark_picked_up"
-    ? calculateExtraAmount(current.pricePerDay, extraDays)
-    : 0;
-  const before = {
-    orderId,
-    status: current.status,
-    actualPickupAt: current.actualPickupAt,
-    actualStorageDays: current.actualStorageDays,
-    extraDays: current.extraDays,
-    extraAmount: current.extraAmount,
-  };
-  const after = { orderId, status: targetStatus, actualPickupAt, actualStorageDays, extraDays, extraAmount };
-  const auditDetails = JSON.stringify({
-    source: "unified-admin",
-    action: normalized.action,
-    before,
-    after,
-    actor: normalized.actor,
-  });
-
   try {
-    const results = await c.env.DB.batch([
-      normalized.action === "mark_picked_up"
-        ? c.env.DB.prepare(
-          `UPDATE luggage_orders
-           SET status = 'PICKED_UP', actual_pickup_at = ?, actual_storage_days = ?,
-               extra_days = ?, extra_amount = ?, updated_at = datetime('now')
-           WHERE order_id = ? AND status = 'PAID' AND updated_at = ?
-           RETURNING order_id AS orderId, status, actual_pickup_at AS actualPickupAt,
-                     actual_storage_days AS actualStorageDays, extra_days AS extraDays,
-                     extra_amount AS extraAmount, updated_at AS updatedAt`,
-        ).bind(now, actualStorageDays, extraDays, extraAmount, orderId, current.updatedAt)
-        : c.env.DB.prepare(
-          `UPDATE luggage_orders
-           SET status = 'PAID', actual_pickup_at = NULL, actual_storage_days = 0,
-               extra_days = 0, extra_amount = 0, updated_at = datetime('now')
-           WHERE order_id = ? AND status = 'PICKED_UP' AND updated_at = ?
-           RETURNING order_id AS orderId, status, actual_pickup_at AS actualPickupAt,
-                     actual_storage_days AS actualStorageDays, extra_days AS extraDays,
-                     extra_amount AS extraAmount, updated_at AS updatedAt`,
-        ).bind(orderId, current.updatedAt),
-      c.env.DB.prepare(
-        `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
-         SELECT ?, NULL, 'unified-admin', 'UNIFIED_ADMIN_PICKUP_STATUS_UPDATE', ?, datetime('now')
-         WHERE changes() = 1
-           AND EXISTS (
-             SELECT 1 FROM luggage_orders
-             WHERE order_id = ? AND status = ? AND updated_at = datetime('now')
-               AND actual_pickup_at IS ? AND actual_storage_days = ?
-               AND extra_days = ? AND extra_amount = ?
-           )`,
-      ).bind(orderId, auditDetails, orderId, targetStatus, actualPickupAt, actualStorageDays, extraDays, extraAmount),
-    ]);
-    const updatedRows = results[0].results ?? [];
-    if (updatedRows.length !== 1) {
-      return c.json({ error: "Luggage order was changed by another request" }, 409);
-    }
-    if (results[1].meta.changes !== 1) {
-      return c.json({ error: "Unable to write pickup status audit log" }, 500);
-    }
-    const updated = updatedRows[0] as LuggagePickupStatusUpdateDto;
-    return c.json({
-      changed: true,
-      orderId: updated.orderId,
-      status: updated.status,
-      actualPickupAt: updated.actualPickupAt,
-      actualStorageDays: updated.actualStorageDays,
-      extraDays: updated.extraDays,
-      extraAmount: updated.extraAmount,
-      updatedAt: updated.updatedAt,
-    });
-  } catch {
-    return c.json({ error: "Unable to update pickup status" }, 500);
+    const updated = await writePickupTransition(c.env.DB, orderId, normalized.action, {
+      action: 'UNIFIED_ADMIN_PICKUP_STATUS_UPDATE', staffId: null, deviceId: 'unified-admin', actor: normalized.actor,
+    }, normalized.expectedUpdatedAt);
+    return c.json({ changed: true, ...updated });
+  } catch (error) {
+    if (error instanceof PickupTransitionError) return c.json({ error: error.message }, error.status);
+    throw error;
   }
 });
 
@@ -3334,17 +3206,21 @@ internalApi.post("/internal/luggage-orders/:orderId/cancel", async (c) => {
   // instr() instead of LIKE: D1 rejects LIKE patterns longer than its pattern-length limit.
   const requestMarker = `"requestId":"${normalized.requestId}"`;
   const current = await c.env.DB.prepare(
-    `SELECT o.status, o.updated_at AS updatedAt,
+    `SELECT o.status, o.updated_at AS updatedAt, o.parent_order_id AS parentOrderId, o.extension_date AS extensionDate,
+            o.prepaid_amount AS prepaidAmount, o.final_amount AS finalAmount, o.extra_amount AS extraAmount,
             EXISTS (
               SELECT 1 FROM luggage_audit_logs
               WHERE order_id = o.order_id AND action = '${ORDER_CANCEL_AUDIT_ACTION}' AND instr(details, ?) > 0
             ) AS replayed
      FROM luggage_orders o WHERE o.order_id = ?`,
-  ).bind(requestMarker, orderId).first<{ status: string; updatedAt: string; replayed: number }>();
+  ).bind(requestMarker, orderId).first<{ status: string; updatedAt: string; replayed: number; parentOrderId: string | null; extensionDate: string | null; prepaidAmount: number; finalAmount: number | null; extraAmount: number }>();
   if (!current) return c.json({ error: "Luggage order not found", code: "NOT_FOUND" }, 404);
   const before = { status: current.status, updatedAt: current.updatedAt };
   const conflict = classifyOrderCancelConflict(before, normalized.expected, current.replayed === 1);
   if (conflict) return c.json({ error: ORDER_CANCEL_CONFLICT_MESSAGES[conflict], code: conflict }, 409);
+
+  const cancellationBlock = await getCancellationBlock(c.env.DB, orderId);
+  if (cancellationBlock) return c.json({ error: ORDER_CANCEL_CONFLICT_MESSAGES[cancellationBlock], code: cancellationBlock }, 409);
 
   const auditDetails = JSON.stringify({
     source: "unified-admin",
@@ -3352,6 +3228,8 @@ internalApi.post("/internal/luggage-orders/:orderId/cancel", async (c) => {
     requestId: normalized.requestId,
     orderId,
     before,
+    financialBefore: { parentOrderId: current.parentOrderId, extensionDate: current.extensionDate,
+      prepaidAmount: current.prepaidAmount, finalAmount: current.finalAmount, extraAmount: current.extraAmount },
     after: { status: "CANCELLED", updatedAt: null },
     expected: normalized.expected,
     ...unifiedActorAuditSnapshot(normalized.actor, staff),
@@ -3362,12 +3240,13 @@ internalApi.post("/internal/luggage-orders/:orderId/cancel", async (c) => {
       c.env.DB.prepare(
         `UPDATE luggage_orders SET status = 'CANCELLED', updated_at = datetime('now')
          WHERE order_id = ? AND status = '${ORDER_CANCELLABLE_STATUS}' AND updated_at = ?
+           AND parent_order_id IS ? AND extension_date IS ? AND prepaid_amount = ? AND final_amount IS ? AND extra_amount = ?
            AND NOT EXISTS (
              SELECT 1 FROM luggage_audit_logs
              WHERE order_id = ? AND action = '${ORDER_CANCEL_AUDIT_ACTION}' AND instr(details, ?) > 0
            )
          RETURNING order_id AS orderId, status, updated_at AS updatedAt`,
-      ).bind(orderId, current.updatedAt, orderId, requestMarker),
+      ).bind(orderId, current.updatedAt, current.parentOrderId, current.extensionDate, current.prepaidAmount, current.finalAmount, current.extraAmount, orderId, requestMarker),
       c.env.DB.prepare(
         `INSERT INTO luggage_audit_logs (order_id, staff_id, device_id, action, details, timestamp)
          SELECT ?, ?, 'unified-admin', '${ORDER_CANCEL_AUDIT_ACTION}',
@@ -3383,7 +3262,12 @@ internalApi.post("/internal/luggage-orders/:orderId/cancel", async (c) => {
       return c.json({ error: "Unable to write order cancel audit log" }, 500);
     }
     return c.json({ changed: true, order: updated[0] });
-  } catch {
+  } catch (error) {
+    // Recheck at write time too: another request may have issued/collected an extension after the read.
+    if (error instanceof Error && (error.message.includes('Extension cancellation requires an approved policy') || error.message.includes('Preserve original settlement review'))) {
+      const code = await getCancellationBlock(c.env.DB, orderId) ?? 'EXTENSION_POLICY_REQUIRED';
+      return c.json({ error: ORDER_CANCEL_CONFLICT_MESSAGES[code], code }, 409);
+    }
     return c.json({ error: "Unable to cancel luggage order" }, 500);
   }
 });
@@ -3870,6 +3754,8 @@ internalApi.patch("/internal/luggage-orders/:orderId/price", async (c) => {
   ).bind(orderId).first<LuggagePriceOrder>();
   if (!current) return c.json({ error: "Luggage order not found" }, 404);
 
+  const ledger = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM luggage_order_payments WHERE order_id = ?').bind(orderId).first<{ n: number }>();
+  const metadataOnly = (ledger?.n ?? 0) > 0 && !('flyingPassTier' in normalized.update) && !('staffPrepaidOverrideAmount' in normalized.update);
   const flyingPassTier = normalizeFlyingPassTier(normalized.update.flyingPassTier ?? current.flyingPassTier);
   const paymentMethod = normalized.update.paymentMethod ?? current.paymentMethod ?? "CASH";
   if (paymentMethod !== "CASH" && paymentMethod !== "PAY_QR") return c.json({ error: "Invalid payment method" }, 400);
@@ -3881,14 +3767,14 @@ internalApi.patch("/internal/luggage-orders/:orderId/price", async (c) => {
   const staffPrepaidOverrideAmount: number | null = "staffPrepaidOverrideAmount" in normalized.update
     ? normalized.update.staffPrepaidOverrideAmount ?? null
     : current.staffPrepaidOverrideAmount;
-  const prepaidAmount = staffPrepaidOverrideAmount ?? finalPrepaid;
+  const prepaidAmount = metadataOnly ? current.prepaidAmount : staffPrepaidOverrideAmount ?? finalPrepaid;
   const after = {
     orderId,
     paymentMethod,
     flyingPassTier,
-    flyingPassDiscountAmount,
+    flyingPassDiscountAmount: metadataOnly ? current.flyingPassDiscountAmount : flyingPassDiscountAmount,
     prepaidAmount,
-    finalAmount: prepaidAmount,
+    finalAmount: metadataOnly ? current.finalAmount : prepaidAmount,
     staffPrepaidOverrideAmount,
   };
   const before = {
@@ -3900,6 +3786,9 @@ internalApi.patch("/internal/luggage-orders/:orderId/price", async (c) => {
     finalAmount: current.finalAmount,
     staffPrepaidOverrideAmount: current.staffPrepaidOverrideAmount,
   };
+  if ((ledger?.n ?? 0) > 0 && (before.prepaidAmount !== after.prepaidAmount || before.finalAmount !== after.finalAmount)) {
+    return c.json({ error: '수납 원장이 있는 주문의 금액 정정은 별도 정산 확인이 필요합니다', code: 'COLLECTED_PRICE_REVIEW_REQUIRED' }, 409);
+  }
   if (
     before.paymentMethod === after.paymentMethod
     && before.flyingPassTier === after.flyingPassTier
@@ -3963,7 +3852,8 @@ internalApi.patch("/internal/luggage-orders/:orderId/price", async (c) => {
       staffPrepaidOverrideAmount: updated.staffPrepaidOverrideAmount,
       updatedAt: updated.updatedAt,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Collected amounts require a separate correction policy')) return c.json({ error: '수납 내역이 변경되었습니다. 별도 정산 확인이 필요합니다', code: 'COLLECTED_PRICE_REVIEW_REQUIRED' }, 409);
     return c.json({ error: "Unable to update luggage price" }, 500);
   }
 });

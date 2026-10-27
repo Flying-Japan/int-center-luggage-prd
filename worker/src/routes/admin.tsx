@@ -20,6 +20,36 @@ admin.use("/staff/admin/activity-logs*", adminAuth);
 admin.use("/staff/admin/retention*", adminAuth);
 admin.use("/staff/admin/extensions*", adminAuth);
 
+// Read-only review queue. No write-off, refund, ledger edit or extra collection action is offered here.
+admin.get('/staff/admin/billing-reviews', adminAuth, async (c) => {
+  const staff = getStaff(c);
+  const page = Math.max(1, Number.parseInt(c.req.query('page') || '1', 10) || 1);
+  const limit = 100;
+  const [rows, totals] = await Promise.all([
+    c.env.DB.prepare(`SELECT order_id, name, status, billed_amount, recorded_amount, root_review_difference,
+      root_review_reason, reprice_audit_log_id, review_pickup_blocked FROM luggage_billing_lines
+      WHERE parent_order_id IS NULL AND root_review_required = 1 ORDER BY created_at DESC, order_id DESC LIMIT ? OFFSET ?`)
+      .bind(limit, (page - 1) * limit).all<{ order_id: string; name: string | null; status: string; billed_amount: number; recorded_amount: number; root_review_difference: number; root_review_reason: string; reprice_audit_log_id: number | null; review_pickup_blocked: number }>(),
+    c.env.DB.prepare(`SELECT COUNT(*) AS total, COALESCE(SUM(MAX(0, root_review_difference)), 0) AS shortfall,
+      COALESCE(SUM(MAX(0, -root_review_difference)), 0) AS excess FROM luggage_billing_lines
+      WHERE parent_order_id IS NULL AND root_review_required = 1`).first<{ total: number; shortfall: number; excess: number }>(),
+  ]);
+  return c.html(<html lang="ko"><head><meta charset="UTF-8" /><title>원주문 정산 검토</title><link rel="stylesheet" href="/static/styles.css" /></head>
+    <body class="staff-site"><StaffTopbar staff={staff} active="/staff/admin/sales" /><main class="container">
+      <section class="card"><h2>기존 원주문 정산 확인 필요</h2>
+        <p>총 {totals?.total ?? 0}건 · 청구 초과 차이 ¥{(totals?.shortfall ?? 0).toLocaleString()} · 수납 초과 차이 ¥{(totals?.excess ?? 0).toLocaleString()}</p>
+        <p>결제 완료·수령 완료 원주문의 기록 차이입니다. 신규 추가 보관료 미수납과 별도로 검토하며 자동 수납·면제·상계를 하지 않습니다.</p>
+        <p>원장이 없는 결제완료 추정분은 실제 수납액에 포함하지 않습니다.</p>
+        <table><thead><tr><th>주문</th><th>상태</th><th>청구 기록</th><th>실제 원장</th><th>정산 차이</th><th>변경 근거</th></tr></thead><tbody>
+          {rows.results.map(row => <tr><td><a href={`/staff/orders/${row.order_id}`}>{row.order_id} · {row.name || '-'}</a></td><td>{row.status}</td>
+            <td>¥{row.billed_amount.toLocaleString()}</td><td>¥{row.recorded_amount.toLocaleString()}</td><td>¥{row.root_review_difference.toLocaleString()}</td>
+            <td>{row.root_review_reason === 'AUDITED_POST_PAYMENT_REPRICE' ? `수납 후 정정 근거 확인 (감사 #${row.reprice_audit_log_id}) · 정산 검토 유지${row.review_pickup_blocked ? ' · 픽업 보류' : ''}` : '근거 불충분 · 픽업 보류'}</td></tr>)}
+        </tbody></table>
+        {page > 1 && <a href={`/staff/admin/billing-reviews?page=${page - 1}`}>이전</a>}
+        {page * limit < (totals?.total ?? 0) && <a href={`/staff/admin/billing-reviews?page=${page + 1}`}>다음</a>}
+      </section></main></body></html>);
+});
+
 // GET /staff/admin/sales — Sales analytics
 admin.get("/staff/admin/sales", staffAuth, async (c) => {
   const startDate = c.req.query("start_date") || "2025-10-01";
@@ -50,26 +80,8 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
       `SELECT business_date as sale_date, revenue_krw FROM luggage_naver_rental_daily_sales${rentalWhereClause} ORDER BY business_date DESC`
     ).bind(...params).all<{ sale_date: string; revenue_krw: number }>(),
     c.env.DB.prepare(
-      `WITH payment_allocations AS (
-        SELECT order_id,
-               SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) as cash_amount,
-               SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) as qr_amount,
-               COUNT(*) as payment_count
-        FROM luggage_order_payments
-        GROUP BY order_id
-      )
-      SELECT
-        date(o.created_at, '+9 hours') as sale_date,
-        SUM(1 + o.companion_count) as order_count,
-        SUM(o.suitcase_qty) as suitcase_total,
-        SUM(o.backpack_qty) as backpack_total,
-        SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN (o.payment_method = 'CASH' OR o.payment_method IS NULL) THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as cash,
-        SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as qr,
-        SUM(COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount) as luggage_total
-      FROM luggage_orders o
-      LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
-      WHERE o.status IN ('PAID', 'PICKED_UP')${actualWhereClause.replaceAll("created_at", "o.created_at")}
-      GROUP BY sale_date`
+      `SELECT business_date AS sale_date, people AS order_count, suitcase_total, backpack_total,
+        cash, qr, total_amount AS luggage_total FROM luggage_sales_daily WHERE business_date BETWEEN ? AND ?`
     ).bind(...actualParams).all<{ sale_date: string; order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number }>(),
     c.env.DB.prepare(
       `SELECT business_date as sale_date, total_amount, paypay_amount, actual_qr_amount
@@ -150,26 +162,8 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
 
   // Real-time today's sales from luggage_orders
   const todaySales = await c.env.DB.prepare(
-    `WITH payment_allocations AS (
-       SELECT order_id,
-              SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) as cash_amount,
-              SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) as qr_amount,
-              COUNT(*) as payment_count
-       FROM luggage_order_payments
-       GROUP BY order_id
-     )
-     SELECT
-       COUNT(*) as order_count,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN 1 ELSE 0 END) as paid_count,
-       SUM(CASE WHEN o.status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN o.status IN ('PAID','PICKED_UP') AND (o.payment_method = 'CASH' OR o.payment_method IS NULL) THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as cash_total,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.status IN ('PAID','PICKED_UP') AND o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as qr_total,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as revenue_total,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN o.suitcase_qty ELSE 0 END) as suitcase_total,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN o.backpack_qty ELSE 0 END) as backpack_total
-     FROM luggage_orders o
-     LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
-     WHERE date(o.created_at, '+9 hours') = ?`
+    `SELECT order_count, paid_count, pending_count, cash AS cash_total, qr AS qr_total,
+      total_amount AS revenue_total, suitcase_total, backpack_total FROM luggage_sales_daily WHERE business_date = ?`
   ).bind(todayJST).first<{
     order_count: number; paid_count: number; pending_count: number;
     cash_total: number; qr_total: number; revenue_total: number;
@@ -188,22 +182,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
 
   // Real-time luggage breakdown for today (for mergedRows override)
   const todayLuggageRT = await c.env.DB.prepare(
-    `WITH payment_allocations AS (
-       SELECT order_id,
-              SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) as cash_amount,
-              SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) as qr_amount,
-              COUNT(*) as payment_count
-       FROM luggage_order_payments
-       GROUP BY order_id
-     )
-     SELECT
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN 1 + o.companion_count ELSE 0 END) as people,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN (o.payment_method = 'CASH' OR o.payment_method IS NULL) AND o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as cash,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') AND COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' AND o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as qr,
-       SUM(CASE WHEN o.status IN ('PAID','PICKED_UP') THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as luggage_total
-     FROM luggage_orders o
-     LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
-     WHERE date(o.created_at, '+9 hours') = ? AND o.status != 'CANCELLED'`
+    `SELECT people, cash, qr, total_amount AS luggage_total FROM luggage_sales_daily WHERE business_date = ?`
   ).bind(todayJST).first<{ people: number; cash: number; qr: number; luggage_total: number }>();
   const tlrt = {
     people: Number(todayLuggageRT?.people ?? 0),
