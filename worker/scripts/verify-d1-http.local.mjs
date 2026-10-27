@@ -46,6 +46,8 @@ try {
       await db.prepare(sql).run();
     }
   } finally { schema.close(); }
+  // Synthetic historical fixtures opt in explicitly; never relax the operational cutover.
+  await db.prepare("INSERT INTO luggage_automatic_billing_policy(singleton, starts_at) VALUES (1, '1970-01-01T00:00:00Z')").run();
   const { app, env } = fixture(db);
   const one = (sql,...args) => db.prepare(sql).bind(...args).first();
   const run = (sql,...args) => db.prepare(sql).bind(...args).run();

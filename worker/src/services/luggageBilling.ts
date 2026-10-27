@@ -124,10 +124,12 @@ export async function createDatedExtension(
       AND r.status IN ('PAID', 'PAYMENT_PENDING')
       AND r.price_per_day BETWEEN 0 AND 500000 AND r.price_per_day = CAST(r.price_per_day AS INTEGER)
       AND ? > date(r.expected_pickup_at, '+9 hours')
+      AND (? = 1 OR EXISTS (SELECT 1 FROM luggage_unbilled_extension_days d
+        WHERE d.root_id = r.order_id AND d.billing_date = ?))
       AND NOT EXISTS (SELECT 1 FROM luggage_billing_lines e WHERE e.parent_order_id = r.order_id
         AND ? BETWEEN date(e.coverage_end, '-' || (MAX(1, e.expected_storage_days) - 1) || ' days') AND e.coverage_end)
     RETURNING order_id`).bind(id, createdAt, createdAt, billingDate, `${manual ? '수기' : '자동'}연장 (${rootId}, ${billingDate})`,
-      manual ? 1 : 0, staffId, billingDate, rootId, billingDate, billingDate),
+      manual ? 1 : 0, staffId, billingDate, rootId, billingDate, manual ? 1 : 0, billingDate, billingDate),
     db.prepare(`INSERT INTO luggage_audit_logs(order_id, staff_id, action, details, timestamp)
       SELECT ?, ?, 'CREATE_DATED_EXTENSION', json_set(?, '$.amount', final_amount, '$.tagNo', tag_no), ? FROM luggage_orders WHERE order_id = ? AND changes() = 1`)
       .bind(id, staffId, JSON.stringify({ rootId, extensionOrderId: id, billingDate, createdAt, manual }), createdAt, id),

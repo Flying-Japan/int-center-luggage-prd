@@ -27,8 +27,10 @@ function setup(projectionNow?: string, role = 'editor') {
   open.push(sqlite);
   let schema = readFileSync('src/schema.sql', 'utf8');
   // Freeze only the DB's projection clock; actual receipt timestamps still come from the service.
-  if (projectionNow) schema = schema.replaceAll("date('now', '+9 hours')", `date('${projectionNow}', '+9 hours')`);
+  if (projectionNow) schema = schema.replaceAll("'now'", `'${projectionNow}'`);
   sqlite.exec(schema);
+  // Historical fixtures explicitly opt into accrual; production cutover never does.
+  sqlite.exec("UPDATE luggage_automatic_billing_policy SET starts_at = '1970-01-01T00:00:00Z'");
   const queries: Array<{ sql: string; bindings: number }> = [];
   const statement = (sql: string) => {
     const query = { sql, bindings: 0 };
@@ -330,6 +332,116 @@ test('00:00–03:00 JST shows unpaid projected extension before cron/tag assignm
   assert.equal(ctx.sqlite.prepare('SELECT COUNT(*) AS n FROM luggage_orders').get()!.n, 1);
 });
 
+function closeTimeRoot(ctx: Fixture, status = 'PAID', daily = 1600) {
+  ctx.sqlite.prepare(`INSERT INTO luggage_orders(order_id, created_at, expected_pickup_at,
+    expected_storage_days, price_per_day, prepaid_amount, final_amount, status, tag_no)
+    VALUES (?, '2026-10-23T01:00:00Z', '2026-10-23T12:00:00Z', 1, ?, ?, ?, ?, '12')`)
+    .run(ROOT, daily, daily, daily, status);
+  if (status === 'PAID' && daily > 0) ctx.sqlite.prepare(`INSERT INTO luggage_order_payments
+    (order_id, business_date, tender_type, amount, staff_id)
+    VALUES (?, '2026-10-23', 'CASH', ?, ?)`).run(ROOT, daily, STAFF);
+}
+function projectionClock(ctx: Fixture, utc: string) {
+  ctx.sqlite.exec('DROP VIEW luggage_unbilled_extension_days');
+  const sql = readFileSync('migrations/20261028_close_time_extension.sql', 'utf8');
+  ctx.sqlite.exec(sql.slice(sql.indexOf('CREATE VIEW luggage_unbilled_extension_days'))
+    .replaceAll("'now'", `'${utc}'`));
+}
+
+test('Tokyo 21:00 is the charge boundary; midnight never charges the same overnight twice', async () => {
+  for (const [utc, days] of [
+    ['2026-10-23T11:59:00Z', 0], ['2026-10-23T12:00:00Z', 1],
+    ['2026-10-23T12:01:00Z', 1], ['2026-10-23T15:01:00Z', 1],
+    ['2026-10-24T11:59:00Z', 1], ['2026-10-24T12:01:00Z', 2],
+  ] as const) {
+    const ctx = setup(utc); closeTimeRoot(ctx, 'PAID', 1730);
+    const b = (await getBillingSummary(ctx.db, ROOT))!;
+    assert.equal(b.unbilled_days, days, utc);
+    assert.equal(b.outstanding_amount, days * 1730, utc);
+    assert.equal(ctx.sqlite.prepare('SELECT COUNT(*) AS n FROM luggage_orders').get()!.n, 1);
+  }
+});
+
+test('20:59 pickup never gains a later charge; an inconsistent recorded pickup is also excluded', async () => {
+  const ctx = setup('2026-10-23T11:59:00Z'); closeTimeRoot(ctx);
+  const receipts = payments(ctx);
+  ctx.sqlite.prepare("UPDATE luggage_orders SET status='PICKED_UP', actual_pickup_at='2026-10-23T11:59:00Z' WHERE order_id=?").run(ROOT);
+  projectionClock(ctx, '2026-10-25T12:01:00Z');
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 0);
+  assert.equal((await getBillingSummary(ctx.db, ROOT))!.outstanding_amount, 0);
+  ctx.sqlite.prepare("UPDATE luggage_orders SET status='PAID' WHERE order_id=?").run(ROOT);
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 0);
+  assert.deepEqual(payments(ctx), receipts);
+});
+
+test('cutover excludes unverified pre-existing orders from projection, cron and direct automatic insertion', async () => {
+  const ctx = setup('2026-10-24T18:00:00Z'); closeTimeRoot(ctx, 'PAYMENT_PENDING', 2400);
+  ctx.sqlite.exec("UPDATE luggage_automatic_billing_policy SET starts_at='2026-10-24T00:00:00Z'");
+  const orders = ctx.sqlite.prepare('SELECT * FROM luggage_orders').all();
+  const receipts = payments(ctx);
+  assert.equal((await getBillingSummary(ctx.db, ROOT))!.outstanding_amount, 2400);
+  assert.equal((await getBillingSummary(ctx.db, ROOT))!.unbilled_days, 0);
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 0);
+  assert.equal(await createDatedExtension(ctx.db, ROOT, '2026-10-24'), null);
+  assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_orders').all(), orders);
+  assert.deepEqual(payments(ctx), receipts);
+});
+
+test('unconfirmed new pending intake is excluded; recorded partial tender enables only the remaining amounts', async () => {
+  const ctx = setup('2026-10-23T12:01:00Z'); closeTimeRoot(ctx, 'PAYMENT_PENDING');
+  assert.equal((await getBillingSummary(ctx.db, ROOT))!.unbilled_days, 0);
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 0);
+  ctx.sqlite.prepare(`INSERT INTO luggage_order_payments(order_id,business_date,tender_type,amount,staff_id)
+    VALUES (?, '2026-10-23', 'CASH', 600, ?)`).run(ROOT, STAFF);
+  const before = (await getBillingSummary(ctx.db, ROOT))!;
+  assert.equal(before.outstanding_amount, 1000 + 1600);
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 1);
+  assert.equal((await getBillingSummary(ctx.db, ROOT))!.outstanding_amount, 2600);
+  assert.equal(payments(ctx).length, 1);
+});
+
+test('21:01 projection becomes one invoice, duplicate cron adds nothing, and a missed day catches up', async () => {
+  const ctx = setup('2026-10-23T12:01:00Z'); closeTimeRoot(ctx);
+  const before = (await getBillingSummary(ctx.db, ROOT))!;
+  await Promise.all([generateExtensionOrders(ctx.db), generateExtensionOrders(ctx.db)]);
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 0);
+  const after = (await getBillingSummary(ctx.db, ROOT))!;
+  assert.equal(after.total_billed_amount, before.total_billed_amount);
+  assert.equal(after.outstanding_amount, before.outstanding_amount);
+  assert.equal(after.unbilled_days, 0);
+  projectionClock(ctx, '2026-10-25T18:00:00Z');
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 2);
+  assert.equal((await getBillingSummary(ctx.db, ROOT))!.outstanding_amount, 4800);
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 0);
+  const dates = ctx.sqlite.prepare('SELECT extension_date, COUNT(*) AS n FROM luggage_orders WHERE parent_order_id=? GROUP BY extension_date').all(ROOT);
+  assert.equal(dates.length, 3);
+  assert.ok(dates.every(r => r.n === 1));
+});
+
+test('partial extension receipt reduces only its remaining debt and never bills its covered date again', async () => {
+  const ctx = setup('2026-10-23T12:01:00Z'); closeTimeRoot(ctx);
+  await generateExtensionOrders(ctx.db);
+  const child = ctx.sqlite.prepare('SELECT order_id FROM luggage_orders WHERE parent_order_id=?').get(ROOT)!.order_id;
+  const request = crypto.randomUUID();
+  ctx.sqlite.prepare(`INSERT INTO luggage_audit_logs(order_id,staff_id,device_id,action) VALUES (?, ?, ?, 'CONFIRM_COLLECTION')`).run(ROOT, STAFF, request);
+  ctx.sqlite.prepare(`INSERT INTO luggage_order_payments(order_id,business_date,tender_type,amount,staff_id,recorded_at,receipt_request_id)
+    VALUES (?, '2026-10-23', 'PAY_QR', 600, ?, '2026-10-23T12:01:00Z', ?)`).run(child, STAFF, request);
+  assert.equal((await getBillingSummary(ctx.db, ROOT))!.extension_outstanding_amount, 1000);
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 0);
+});
+
+test('invalid chronology, future creation and cancellation do not accrue new automatic debt', async () => {
+  for (const patch of [
+    "expected_pickup_at='2026-10-22T12:00:00Z'",
+    "created_at='2026-10-26T01:00:00Z'",
+    "status='CANCELLED'",
+  ]) {
+    const ctx = setup('2026-10-25T18:00:00Z'); closeTimeRoot(ctx, patch.includes('CANCELLED') ? 'CANCELLED' : 'PAID');
+    if (!patch.includes('CANCELLED')) ctx.sqlite.exec(`UPDATE luggage_orders SET ${patch}`);
+    assert.equal((await generateExtensionOrders(ctx.db)).created, 0, patch);
+  }
+});
+
 test('cash/QR split uses actual receipt JST date for cash closing and sales; old receipt date and amount stay intact', async () => {
   const ctx = setup(); const { today, pickup } = seedRoot(ctx);
   await confirmCollection(ctx.db, ROOT, STAFF, body(1600, { cash_amount: 600, qr_amount: 1000 }));
@@ -479,11 +591,12 @@ test('fresh schema and prepared migration have identical billing views, indexes 
   assert.ok(schema.includes(objectsStart));
   assert.ok(migration.includes(objectsStart));
   // Keep the complete shared definitions byte-identical, not just similar trigger names.
-  assert.equal(schema.slice(schema.indexOf(objectsStart)), migration.slice(migration.indexOf(objectsStart)));
+  assert.equal(schema.slice(schema.indexOf(objectsStart), schema.indexOf("-- 21:00 JST automatic extension cutover")).trim(), migration.slice(migration.indexOf(objectsStart)).trim());
   fresh.exec(schema);
   migrated.exec(schema.slice(0, schema.indexOf('-- Extension billing and receipt guards'))
     .replace('  extension_date TEXT,\n', '').replace('  receipt_request_id TEXT,\n', ''));
   migrated.exec(migration);
+  migrated.exec(readFileSync('migrations/20261028_close_time_extension.sql', 'utf8'));
   const definitions = (db: DatabaseSync) => db.prepare(`SELECT type, name, sql FROM sqlite_master
     WHERE type IN ('view', 'trigger') OR name IN ('idx_luggage_extension_date', 'idx_luggage_receipt_request', 'idx_luggage_collection_request')
     ORDER BY type, name`).all();
@@ -837,10 +950,12 @@ test('prepared policy upgrade preserves claim/receipt/audit rows and matches all
   const schema = readFileSync('src/schema.sql', 'utf8');
   const upgrade = readFileSync('migrations/20261026_root_settlement_review.sql', 'utf8');
   const start = 'CREATE UNIQUE INDEX IF NOT EXISTS idx_luggage_extension_date';
-  assert.equal(upgrade.slice(upgrade.indexOf(start)), schema.slice(schema.indexOf(start)));
+  assert.equal(upgrade.slice(upgrade.indexOf(start)).trim(), schema.slice(schema.indexOf(start), schema.indexOf("-- 21:00 JST automatic extension cutover")).trim());
   const definitions = () => ctx.sqlite.prepare("SELECT type, name, sql FROM sqlite_master WHERE type IN ('view', 'trigger') ORDER BY type, name").all();
   const before = definitions();
   ctx.sqlite.exec(upgrade);
+  ctx.sqlite.exec("DROP TABLE luggage_automatic_billing_policy");
+  ctx.sqlite.exec(readFileSync('migrations/20261028_close_time_extension.sql', 'utf8'));
   assert.deepEqual(definitions(), before);
   assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_orders').all(), orders);
   assert.deepEqual(payments(ctx), ledger);
