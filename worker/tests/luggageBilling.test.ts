@@ -93,8 +93,8 @@ function seedRoot(ctx: Fixture, options: { daysAgo?: number; billed?: number; da
     VALUES (?, ?, ?, 1, ?, ?, ?, ?, '12', 2)`)
     .run(ROOT, pickup, pickup, options.daily ?? 1600, billed, billed, options.status ?? 'PAID');
   if ((options.status ?? 'PAID') === 'PAID' && billed > 0) ctx.sqlite.prepare(`INSERT INTO luggage_order_payments
-    (order_id, business_date, tender_type, amount, staff_id) VALUES (?, ?, 'CASH', ?, ?)`)
-    .run(ROOT, pickup.slice(0, 10), billed, STAFF);
+    (order_id, business_date, tender_type, amount, staff_id, recorded_at) VALUES (?, ?, 'CASH', ?, ?, ?)`)
+    .run(ROOT, pickup.slice(0, 10), billed, STAFF, pickup);
   return { today, pickup };
 }
 
@@ -206,8 +206,8 @@ test('automatic extension creator stores actual UTC creation/audit time across J
     ctx.sqlite.prepare(`INSERT INTO luggage_orders(order_id, created_at, expected_pickup_at, expected_storage_days,
       status, price_per_day, prepaid_amount, final_amount, tag_no)
       VALUES (?, '2026-10-22 01:00:00', '2026-10-22T12:00:00Z', 1, 'PAID', 1600, 1600, 1600, '12')`).run(rootId);
-    ctx.sqlite.prepare(`INSERT INTO luggage_order_payments(order_id, business_date, tender_type, amount, staff_id)
-      VALUES (?, '2026-10-22', 'CASH', 1600, ?)`).run(rootId, STAFF);
+    ctx.sqlite.prepare(`INSERT INTO luggage_order_payments(order_id, business_date, tender_type, amount, staff_id, recorded_at)
+      VALUES (?, '2026-10-22', 'CASH', 1600, ?, '2026-10-22T01:00:00Z')`).run(rootId, STAFF);
     const ledger = payments(ctx);
     const before = (await getBillingSummary(ctx.db, rootId))!;
     // This is the shared creator reached by materializeOutstandingDays/generateExtensionOrders.
@@ -324,6 +324,7 @@ test('00:00–03:00 JST shows unpaid projected extension before cron/tag assignm
   const ctx = setup('2026-10-24T15:30:00Z');
   ctx.sqlite.prepare(`INSERT INTO luggage_orders(order_id, created_at, expected_pickup_at, price_per_day, prepaid_amount, final_amount, status, tag_no)
     VALUES (?, '2026-10-24T01:00:00Z', '2026-10-24T12:00:00Z', 1600, 1600, 1600, 'PAID', '12')`).run(ROOT);
+  ctx.sqlite.prepare("INSERT INTO luggage_audit_logs(order_id, action, timestamp) VALUES (?, 'MARK_PAID', '2026-10-24T01:00:00Z')").run(ROOT);
   const b = (await getBillingSummary(ctx.db, ROOT))!;
   assert.equal(b.outstanding_amount, 1600);
   assert.equal(b.unbilled_days, 1);
@@ -338,8 +339,8 @@ function closeTimeRoot(ctx: Fixture, status = 'PAID', daily = 1600) {
     VALUES (?, '2026-10-23T01:00:00Z', '2026-10-23T12:00:00Z', 1, ?, ?, ?, ?, '12')`)
     .run(ROOT, daily, daily, daily, status);
   if (status === 'PAID' && daily > 0) ctx.sqlite.prepare(`INSERT INTO luggage_order_payments
-    (order_id, business_date, tender_type, amount, staff_id)
-    VALUES (?, '2026-10-23', 'CASH', ?, ?)`).run(ROOT, daily, STAFF);
+    (order_id, business_date, tender_type, amount, staff_id, recorded_at)
+    VALUES (?, '2026-10-23', 'CASH', ?, ?, '2026-10-23T01:00:00Z')`).run(ROOT, daily, STAFF);
 }
 function projectionClock(ctx: Fixture, utc: string) {
   ctx.sqlite.exec('DROP VIEW luggage_unbilled_extension_days');
@@ -391,8 +392,8 @@ test('unconfirmed new pending intake is excluded; recorded partial tender enable
   const ctx = setup('2026-10-23T12:01:00Z'); closeTimeRoot(ctx, 'PAYMENT_PENDING');
   assert.equal((await getBillingSummary(ctx.db, ROOT))!.unbilled_days, 0);
   assert.equal((await generateExtensionOrders(ctx.db)).created, 0);
-  ctx.sqlite.prepare(`INSERT INTO luggage_order_payments(order_id,business_date,tender_type,amount,staff_id)
-    VALUES (?, '2026-10-23', 'CASH', 600, ?)`).run(ROOT, STAFF);
+  ctx.sqlite.prepare(`INSERT INTO luggage_order_payments(order_id,business_date,tender_type,amount,staff_id,recorded_at)
+    VALUES (?, '2026-10-23', 'CASH', 600, ?, '2026-10-23T01:00:00Z')`).run(ROOT, STAFF);
   const before = (await getBillingSummary(ctx.db, ROOT))!;
   assert.equal(before.outstanding_amount, 1000 + 1600);
   assert.equal((await generateExtensionOrders(ctx.db)).created, 1);
@@ -428,6 +429,28 @@ test('partial extension receipt reduces only its remaining debt and never bills 
     VALUES (?, '2026-10-23', 'PAY_QR', 600, ?, '2026-10-23T12:01:00Z', ?)`).run(child, STAFF, request);
   assert.equal((await getBillingSummary(ctx.db, ROOT))!.extension_outstanding_amount, 1000);
   assert.equal((await generateExtensionOrders(ctx.db)).created, 0);
+});
+
+test('late confirmation never retroactively bills unverified nights before actual intake', async () => {
+  const ctx = setup('2026-10-25T12:01:00Z'); closeTimeRoot(ctx, 'PAYMENT_PENDING');
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 0);
+  ctx.sqlite.prepare(`INSERT INTO luggage_order_payments(order_id,business_date,tender_type,amount,staff_id,recorded_at)
+    VALUES (?, '2026-10-25', 'CASH', 1600, ?, '2026-10-25T01:00:00Z')`).run(ROOT, STAFF);
+  ctx.sqlite.prepare("UPDATE luggage_orders SET status='PAID' WHERE order_id=?").run(ROOT);
+  assert.equal((await getBillingSummary(ctx.db, ROOT))!.unbilled_days, 1);
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 1);
+  const row = ctx.sqlite.prepare('SELECT extension_date FROM luggage_orders WHERE parent_order_id=?').get(ROOT);
+  assert.equal(row!.extension_date, '2026-10-26');
+  assert.equal((await getBillingSummary(ctx.db, ROOT))!.outstanding_amount, 1600);
+});
+
+test('a paid flag without tender or audited confirmation cannot prove a chargeable intake', async () => {
+  const ctx = setup('2026-10-25T12:01:00Z'); closeTimeRoot(ctx, 'PAYMENT_PENDING');
+  ctx.sqlite.prepare("UPDATE luggage_orders SET status='PAID' WHERE order_id=?").run(ROOT);
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 0);
+  ctx.sqlite.prepare(`INSERT INTO luggage_audit_logs(order_id,action,timestamp)
+    VALUES (?, 'MARK_PAID', '2026-10-25T01:00:00Z')`).run(ROOT);
+  assert.equal((await generateExtensionOrders(ctx.db)).created, 1);
 });
 
 test('invalid chronology, future creation and cancellation do not accrue new automatic debt', async () => {
@@ -597,6 +620,7 @@ test('fresh schema and prepared migration have identical billing views, indexes 
     .replace('  extension_date TEXT,\n', '').replace('  receipt_request_id TEXT,\n', ''));
   migrated.exec(migration);
   migrated.exec(readFileSync('migrations/20261028_close_time_extension.sql', 'utf8'));
+  migrated.exec(readFileSync('migrations/20261028_confirmed_intake_extension.sql', 'utf8'));
   const definitions = (db: DatabaseSync) => db.prepare(`SELECT type, name, sql FROM sqlite_master
     WHERE type IN ('view', 'trigger') OR name IN ('idx_luggage_extension_date', 'idx_luggage_receipt_request', 'idx_luggage_collection_request')
     ORDER BY type, name`).all();
@@ -956,6 +980,7 @@ test('prepared policy upgrade preserves claim/receipt/audit rows and matches all
   ctx.sqlite.exec(upgrade);
   ctx.sqlite.exec("DROP TABLE luggage_automatic_billing_policy");
   ctx.sqlite.exec(readFileSync('migrations/20261028_close_time_extension.sql', 'utf8'));
+  ctx.sqlite.exec(readFileSync('migrations/20261028_confirmed_intake_extension.sql', 'utf8'));
   assert.deepEqual(definitions(), before);
   assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_orders').all(), orders);
   assert.deepEqual(payments(ctx), ledger);

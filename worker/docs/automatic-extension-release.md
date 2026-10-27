@@ -18,9 +18,10 @@ older F0/F1 database migrations or restore an old Worker/database automatically.
   database cutover instant. All earlier orders are excluded from new automatic
   accrual, including the unverified pending order identified before this release.
   Issued extension claims, original unpaid amounts and settlement reviews remain.
-- New pending intakes without an actual tender record are unconfirmed and do not
-  accrue automatically. PAID orders and partially collected pending orders can
-  accrue while uncollected. A recorded pickup, invalid chronology or invalid
+- Intakes without a tender record or a server-audited payment confirmation are
+  unconfirmed and do not accrue automatically. PAID orders and partially collected
+  pending orders accrue only for 21:00 boundaries after their earliest verified
+  confirmation. Later payment never retroactively proves earlier overnight storage. A recorded pickup, invalid chronology or invalid
   daily rate excludes automatic accrual. Staff must separately review legacy or
   unconfirmed intakes; exclusion is not a waiver of a stored claim.
 - Existing extension coverage, including paid and partially paid lines, excludes
@@ -34,7 +35,8 @@ older F0/F1 database migrations or restore an old Worker/database automatically.
    Leave GitHub Actions disabled and Cloudflare Builds disconnected.
 2. Obtain a fresh SQL export and Time Travel bookmark. Restore only into an
    isolated local database, checking integrity and all original table values.
-3. Apply `20261028_close_time_extension.sql` only, using the verified atomic D1
+3. Apply `20261028_close_time_extension.sql` and then the forward-only
+   `20261028_confirmed_intake_extension.sql`, each using the verified atomic D1
    import path. Never rerun it blindly: its singleton/table creation is deliberate.
    Rehearse actual Wrangler CLI success and full DDL rollback on deliberate
    failure. Keep any CASE-token whitespace formatting token-equivalent.

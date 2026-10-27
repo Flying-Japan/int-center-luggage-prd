@@ -61,8 +61,8 @@ try {
     await run(`INSERT INTO luggage_orders(order_id,created_at,expected_pickup_at,expected_storage_days,
       status,price_per_day,prepaid_amount,final_amount,tag_no) VALUES (?,datetime('now','-1 day'),
       date('now','+9 hours','-1 day')||'T12:00:00Z',1,'PAID',1600,1600,1600,'146')`,id);
-    await run(`INSERT INTO luggage_order_payments(order_id,business_date,tender_type,amount,staff_id)
-      VALUES (?,date('now','+9 hours','-1 day'),'CASH',1600,'d1-test-editor')`,id);
+    await run(`INSERT INTO luggage_order_payments(order_id,business_date,tender_type,amount,staff_id,recorded_at)
+      VALUES (?,date('now','+9 hours','-1 day'),'CASH',1600,'d1-test-editor',datetime('now','-1 day'))`,id);
     await confirmCollection(db,id,'d1-test-editor',{request_id:crypto.randomUUID(),confirm_received:'yes',expected_amount:1600,cash_amount:1600,qr_amount:0});
     return id;
   }
