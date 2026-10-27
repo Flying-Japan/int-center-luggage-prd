@@ -155,6 +155,10 @@ test("stores exactly what the staff detail and inline routes store for the same 
       body: new URLSearchParams({ name: "Synthetic Guest", phone, tag_no: "12", expected_pickup_at: "", note: "fixture" }),
     }, ctx.env);
     assert.equal(detail.status, 302);
+    // A 302 alone can be a validation error. This must be the successful detail redirect.
+    assert.equal(detail.headers.get('location'), '/staff/orders/20260929-010');
+    assert.equal(row(ctx.sqlite, '20260929-010').phone, phone);
+    assert.equal(row(ctx.sqlite, '20260929-010').expected_pickup_at, null);
     const inline = await ctx.app.request("https://luggage.test/staff/api/orders/20260929-011/inline-update", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ phone }),
     }, ctx.env);
@@ -166,6 +170,64 @@ test("stores exactly what the staff detail and inline routes store for the same 
     // The detail form also resubmits the other fields; phone and everything else not in the form still match.
     assert.equal(stored(ctx.sqlite, "20260929-010").phone, unified.phone);
   }
+});
+
+test('detail form preserves an absent deadline while saving phone, even with linked unpaid extension and original receipts', async () => {
+  stubProfiles([EDITOR]);
+  for (const absent of [null, '']) {
+    const ctx = setup();
+    const id = '20260929-015';
+    seedOrder(ctx.sqlite, id);
+    if (absent === '') ctx.sqlite.prepare("UPDATE luggage_orders SET expected_pickup_at = '' WHERE order_id = ?").run(id);
+    ctx.sqlite.prepare(`INSERT INTO luggage_order_payments(order_id, business_date, tender_type, amount)
+      VALUES (?, '2026-09-29', 'CASH', 800)`).run(id);
+    ctx.sqlite.prepare(`INSERT INTO luggage_orders(order_id, parent_order_id, status, extension_date, price_per_day, prepaid_amount, final_amount)
+      VALUES ('EXT-20260929-015', ?, 'PAYMENT_PENDING', date('now', '+9 hours'), 800, 800, 800)`).run(id);
+    const before = stored(ctx.sqlite, id);
+    const ledger = ctx.sqlite.prepare('SELECT * FROM luggage_order_payments').all();
+    const child = ctx.sqlite.prepare("SELECT * FROM luggage_orders WHERE order_id = 'EXT-20260929-015'").get();
+    const response = await ctx.app.request(`https://luggage.test/staff/orders/${id}/update`, {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ phone: '080-9876-5432', expected_pickup_at: '' }),
+    }, ctx.env);
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('location'), `/staff/orders/${id}`);
+    const after = stored(ctx.sqlite, id);
+    assert.equal(after.phone, '080-9876-5432');
+    assert.equal(after.expected_pickup_at, absent);
+    assert.deepEqual({ ...after, phone: before.phone }, before);
+    assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_order_payments').all(), ledger);
+    assert.deepEqual(ctx.sqlite.prepare("SELECT * FROM luggage_orders WHERE order_id = 'EXT-20260929-015'").get(), child);
+    const details = JSON.parse(audits(ctx.sqlite).at(-1)!.details);
+    assert.deepEqual(details.fields, ['phone']);
+    assert.deepEqual(details.values, ['080-9876-5432']);
+  }
+});
+
+test('blank or invalid submitted deadline cannot clear a stored deadline; omitting it allows a phone-only edit', async () => {
+  stubProfiles([EDITOR]);
+  const ctx = setup();
+  const id = '20260929-016';
+  seedOrder(ctx.sqlite, id);
+  const deadline = '2026-09-29T12:00:00.000Z';
+  ctx.sqlite.prepare('UPDATE luggage_orders SET expected_pickup_at = ? WHERE order_id = ?').run(deadline, id);
+  const before = stored(ctx.sqlite, id);
+  for (const value of ['', 'not-a-date']) {
+    const response = await ctx.app.request(`https://luggage.test/staff/orders/${id}/update`, {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ phone: '080-9876-5432', expected_pickup_at: value }),
+    }, ctx.env);
+    assert.equal(response.status, 302);
+    assert.match(response.headers.get('location')!, /\?error=/);
+    assert.deepEqual(stored(ctx.sqlite, id), before);
+    assert.equal(audits(ctx.sqlite).length, 0);
+  }
+  const response = await ctx.app.request(`https://luggage.test/staff/orders/${id}/update`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ phone: '080-9876-5432' }),
+  }, ctx.env);
+  assert.equal(response.headers.get('location'), `/staff/orders/${id}`);
+  assert.equal(row(ctx.sqlite, id).phone, '080-9876-5432');
+  assert.equal(row(ctx.sqlite, id).expected_pickup_at, deadline);
 });
 
 test("no status restriction, like the staff routes; NULL phone can be filled in", async () => {

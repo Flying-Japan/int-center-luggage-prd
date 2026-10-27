@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { Hono } from "hono";
+import type { AppType } from "../src/types";
 import internalApi from "../src/routes/internalApi";
+import staffApi from "../src/routes/staffApi";
 import { signInternalRequest } from "../src/lib/hmac";
 
 const SECRET = "reviewer-test-key";
@@ -141,10 +143,96 @@ test("extension child orders cancel the same way and the parent is untouched", a
   const ctx = setup();
   seedOrder(ctx.sqlite, "20260929-002", "PAID");
   seedOrder(ctx.sqlite, "EXT-20260929-002", "PAYMENT_PENDING", { parentOrderId: "20260929-002" });
+  // Existing contract: this legacy fixture has no confirmed storage date and no child receipts.
+  // It is an editable unpaid draft, not permission to waive a dated/accrued extension invoice.
+  const parentBefore = order(ctx.sqlite, "20260929-002");
   assert.equal((await call(ctx, "EXT-20260929-002", body())).status, 200);
   assert.equal(order(ctx.sqlite, "EXT-20260929-002").status, "CANCELLED");
   assert.deepEqual({ ...order(ctx.sqlite, "20260929-002") }.status, "PAID");
   assert.equal(order(ctx.sqlite, "20260929-002").updated_at, UPDATED_AT);
+  assert.deepEqual(order(ctx.sqlite, "20260929-002"), parentBefore);
+  const [log] = audits(ctx.sqlite);
+  assert.equal(log.action, 'UNIFIED_ADMIN_ORDER_CANCEL');
+  assert.equal(log.staff_id, EDITOR.id);
+  assert.equal(JSON.parse(log.details).actor.userId, actor.userId);
+  assert.deepEqual(JSON.parse(log.details).financialBefore, {
+    parentOrderId: '20260929-002', extensionDate: null, prepaidAmount: 800, finalAmount: 800, extraAmount: 0,
+  });
+  assert.equal(ctx.sqlite.prepare('SELECT prepaid_amount FROM luggage_orders WHERE order_id = ?').get('EXT-20260929-002')!.prepaid_amount, 800);
+});
+
+function seedReceipt(ctx: ReturnType<typeof setup>, id: string) {
+  const requestId = crypto.randomUUID();
+  ctx.sqlite.prepare(`INSERT INTO luggage_audit_logs(order_id, staff_id, device_id, action, details)
+    VALUES (?, ?, ?, 'CONFIRM_COLLECTION', '{}')`).run(id, EDITOR.id, requestId);
+  ctx.sqlite.prepare(`INSERT INTO luggage_order_payments(order_id, business_date, tender_type, amount, staff_id, receipt_request_id)
+    VALUES (?, date('now', '+9 hours'), 'CASH', 400, ?, ?)`).run(id, EDITOR.id, requestId);
+}
+
+test('dated/accrued or partially collected extension cancellation needs a policy, returns 409 and preserves money/history', async () => {
+  stubProfiles([EDITOR]);
+  for (const kind of ['dated', 'accrued-legacy', 'spanning-legacy', 'receipt']) {
+    const ctx = setup();
+    seedOrder(ctx.sqlite, '20260929-003', 'PAID');
+    if (kind === 'accrued-legacy') ctx.sqlite.prepare("UPDATE luggage_orders SET expected_pickup_at = datetime('now', '-2 days') WHERE order_id = ?").run('20260929-003');
+    if (kind === 'dated') {
+      ctx.sqlite.prepare(`INSERT INTO luggage_orders(order_id, parent_order_id, status, updated_at, price_per_day, prepaid_amount, final_amount, extension_date)
+        VALUES ('EXT-20260929-003', '20260929-003', 'PAYMENT_PENDING', ?, 800, 800, 800, date('now', '+9 hours'))`).run(UPDATED_AT);
+    } else if (kind === 'spanning-legacy') {
+      ctx.sqlite.prepare(`INSERT INTO luggage_orders(order_id, parent_order_id, status, updated_at,
+        expected_storage_days, expected_pickup_at, price_per_day, prepaid_amount, final_amount)
+        VALUES ('EXT-20260929-003', '20260929-003', 'PAYMENT_PENDING', ?, 3, datetime('now', '+1 day'), 800, 800, 800)`).run(UPDATED_AT);
+    } else seedOrder(ctx.sqlite, 'EXT-20260929-003', 'PAYMENT_PENDING', { parentOrderId: '20260929-003' });
+    if (kind === 'receipt') seedReceipt(ctx, 'EXT-20260929-003');
+    const before = order(ctx.sqlite, 'EXT-20260929-003');
+    const ledger = ctx.sqlite.prepare('SELECT * FROM luggage_order_payments').all();
+    const logCount = audits(ctx.sqlite).length;
+    const result = await call(ctx, 'EXT-20260929-003', body());
+    assert.equal(result.status, 409, kind);
+    assert.equal(result.json.code, kind === 'receipt' ? 'COLLECTED_EXTENSION' : 'EXTENSION_POLICY_REQUIRED');
+    assert.deepEqual(order(ctx.sqlite, 'EXT-20260929-003'), before);
+    assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_order_payments').all(), ledger);
+    assert.equal(audits(ctx.sqlite).length, logCount);
+  }
+});
+
+test('receipt arriving between cancel read and write is rejected by the DB guard with 409', async () => {
+  stubProfiles([EDITOR]);
+  const ctx = setup();
+  seedOrder(ctx.sqlite, '20260929-004', 'PAID');
+  seedOrder(ctx.sqlite, 'EXT-20260929-004', 'PAYMENT_PENDING', { parentOrderId: '20260929-004' });
+  const originalBatch = ctx.env.DB.batch;
+  ctx.env.DB.batch = async statements => {
+    seedReceipt(ctx, 'EXT-20260929-004');
+    return originalBatch(statements);
+  };
+  const result = await call(ctx, 'EXT-20260929-004', body());
+  assert.deepEqual([result.status, result.json.code], [409, 'COLLECTED_EXTENSION']);
+  assert.equal(order(ctx.sqlite, 'EXT-20260929-004').status, 'PAYMENT_PENDING');
+  assert.equal(ctx.sqlite.prepare('SELECT SUM(amount) AS n FROM luggage_order_payments').get()!.n, 400);
+  assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM luggage_audit_logs WHERE action = 'UNIFIED_ADMIN_ORDER_CANCEL'").get()!.n, 0);
+});
+
+test('legacy draft cancellation is atomic with its audit and has the same staff JSON policy', async () => {
+  stubProfiles([EDITOR]);
+  const ctx = setup();
+  seedOrder(ctx.sqlite, '20260929-005', 'PAID');
+  seedOrder(ctx.sqlite, 'EXT-20260929-005', 'PAYMENT_PENDING', { parentOrderId: '20260929-005' });
+  ctx.sqlite.exec("CREATE TRIGGER fail_draft_audit BEFORE INSERT ON luggage_audit_logs BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END;");
+  assert.equal((await call(ctx, 'EXT-20260929-005', body())).status, 500);
+  assert.equal(order(ctx.sqlite, 'EXT-20260929-005').status, 'PAYMENT_PENDING');
+  ctx.sqlite.exec('DROP TRIGGER fail_draft_audit');
+  const app = new Hono<AppType>();
+  app.use('/staff/*', async (c, next) => { c.set('staff', { ...EDITOR, created_at: '' }); await next(); });
+  app.route('/', staffApi);
+  const response = await app.request('/staff/api/orders/EXT-20260929-005/cancel', { method: 'POST' }, ctx.env);
+  assert.equal(response.status, 200);
+  assert.equal(order(ctx.sqlite, 'EXT-20260929-005').status, 'CANCELLED');
+  assert.equal(order(ctx.sqlite, '20260929-005').status, 'PAID');
+  const [audit] = audits(ctx.sqlite);
+  assert.equal(audit.staff_id, EDITOR.id);
+  assert.equal(audit.action, 'CANCEL');
+  assert.equal(JSON.parse(audit.details).before.parent_order_id, '20260929-005');
 });
 
 test("status restrictions: already cancelled, PAID, PICKED_UP and unknown statuses are refused with distinct codes", async () => {

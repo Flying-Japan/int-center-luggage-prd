@@ -12,9 +12,7 @@ export type PaymentOrderAmounts = {
 };
 
 export function payableAmountFromOrder(order: PaymentOrderAmounts): number {
-  const base = order.final_amount && order.final_amount > 0
-    ? order.final_amount
-    : order.prepaid_amount;
+  const base = order.final_amount ?? order.prepaid_amount;
   return (base || 0) + (order.extra_amount || 0);
 }
 

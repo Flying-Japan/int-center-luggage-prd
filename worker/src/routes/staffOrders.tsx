@@ -1,3 +1,5 @@
+import { writePickupTransition, PickupTransitionError } from '../services/orderPickupWrites';
+import { confirmCollection, createDatedExtension, pickupBillingError, getBillingSummary, nextManualExtensionDate, requiresCollectionFlow } from '../services/luggageBilling';
 /**
  * Staff order detail routes — HTML pages for order management.
  * US-008: Order detail, mark-paid, update, pickup, undo, extension, manual entry, images.
@@ -7,8 +9,8 @@ import type { AppType } from "../types";
 import { staffAuth, editorAuth, getStaff, insertAuditLog } from "../middleware/auth";
 import { downloadImage, logImageView } from "../lib/r2";
 import { buildOrderId, buildSameDayTag, buildOvernightTag } from "../services/orderNumber";
-import { calculatePricePerDay, calculatePrepaidAmount, normalizeFlyingPassTier, flyingPassDiscountAmount, calculateExtraAmount } from "../services/pricing";
-import { calculateStorageDays, calculateExtraDays } from "../services/storage";
+import { calculatePricePerDay, calculatePrepaidAmount, normalizeFlyingPassTier, flyingPassDiscountAmount } from "../services/pricing";
+import { calculateStorageDays } from "../services/storage";
 import { createBugTask } from "../lib/asana";
 import { createSupabaseAdmin } from "../lib/supabase";
 import { captureOperationalError } from "../lib/observability";
@@ -71,16 +73,23 @@ staffOrders.get("/staff/orders/:id", async (c) => {
 
   if (!order) return c.html(<p>Order not found</p>, 404);
 
+  const billing = await getBillingSummary(c.env.DB, orderId);
+  const linkedCollection = await requiresCollectionFlow(c.env.DB, orderId);
+  // Preserve the existing confirmation path for orders already priced free; no new waiver control.
+  const collectionRequired = linkedCollection && !(billing && billing.total_billed_amount === 0 && billing.outstanding_amount === 0 && !billing.invalid_amount);
+  const collectionRequestId = crypto.randomUUID();
+
   // Run independent queries in parallel
   const [auditLogs, extensions] = await Promise.all([
     c.env.DB.prepare(
       `SELECT a.* FROM luggage_audit_logs a
-       WHERE a.order_id = ? ORDER BY a.timestamp DESC LIMIT 50`
+       WHERE a.order_id IN (SELECT order_id FROM luggage_orders WHERE order_id = ? OR parent_order_id = ?)
+       ORDER BY a.timestamp DESC LIMIT 50`
     )
-      .bind(orderId)
+      .bind(order.parent_order_id || orderId, order.parent_order_id || orderId)
       .all(),
     c.env.DB.prepare(
-      "SELECT order_id, created_at, status, prepaid_amount FROM luggage_orders WHERE parent_order_id = ? ORDER BY created_at DESC"
+      "SELECT order_id, created_at, status, COALESCE(final_amount, prepaid_amount, 0) + COALESCE(extra_amount, 0) AS prepaid_amount FROM luggage_orders WHERE parent_order_id = ? ORDER BY created_at DESC"
     )
       .bind(orderId)
       .all(),
@@ -184,7 +193,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
           <section class="card">
             <h3 class="card-title">요약</h3>
             <div class="summary-grid">
-              <p><strong>상태</strong><span class={`status-pill status-${order.status.toLowerCase()}`}>{displayOrderStatus(order.status)}</span></p>
+              <p><strong>상태</strong><span class={`status-pill status-${order.status.toLowerCase()}`}>{billing?.root_review_required ? '기존 원주문 정산 확인 필요' : billing && billing.outstanding_amount > 0 && collectionRequired ? '추가 결제 필요' : displayOrderStatus(order.status)}</span></p>
               <p><strong>수기접수 여부</strong><span>{order.manual_entry ? "예" : "아니오"}</span></p>
               <p><strong>생성</strong><span>{fmtJST(order.created_at)}</span></p>
               <p><strong>최종 수정시각</strong><span>{fmtJST(order.updated_at)}</span></p>
@@ -240,7 +249,32 @@ staffOrders.get("/staff/orders/:id", async (c) => {
               {/* 결제 처리 */}
               <section class="detail-action-box">
                 <h4 class="detail-action-title">결제 처리</h4>
-                {order.status === "PAYMENT_PENDING" ? (
+                {billing && <div class="card-desc">
+                  <p>원주문 + 연장 청구 기록(정산 검토 포함) ¥{billing.total_billed_amount.toLocaleString()} / 실제 수납 ¥{billing.recorded_amount.toLocaleString()}</p>
+                  {billing.legacy_paid_estimate > 0 && <p>기존 결제완료 추정 ¥{billing.legacy_paid_estimate.toLocaleString()} (수납 원장 없는 과거 주문)</p>}
+                  <p><strong>확정 미수납 ¥{billing.outstanding_amount.toLocaleString()}</strong></p>
+                  {!!billing.root_review_required && <div role="note">
+                    <p><strong>기존 원주문 정산 확인 필요 · 차이 ¥{billing.root_review_difference.toLocaleString()}</strong></p>
+                    <p>이 차이는 자동 추가 수납·상계·면제 대상이 아닙니다. 청구 기록과 수납 원장을 보존하여 검토합니다.</p>
+                    <p>{billing.root_review_reason === 'AUDITED_POST_PAYMENT_REPRICE' ? `수납 이후 가격 변경 근거 확인됨 (감사 #${billing.reprice_audit_log_id}) · 정산 검토는 유지됩니다.` : '가격 변경 근거 또는 시각 순서가 불충분하여 픽업을 보류합니다.'}</p>
+                    {staff.role === 'admin' && <a href="/staff/admin/billing-reviews">원주문 정산 검토 목록</a>}
+                  </div>}
+                  {billing.extension_outstanding_amount > 0 && <p><strong>추가 보관료 미수납 · ¥{billing.extension_outstanding_amount.toLocaleString()}</strong></p>}
+                  {billing.overpaid_amount > 0 && <p>초과 수납 ¥{billing.overpaid_amount.toLocaleString()} · 정산 확인 필요</p>}
+                  {billing.unbilled_days > 0 && <p>주문 생성 전 추가 보관 {billing.unbilled_days}일 포함 · 태그 배정/03시 작업과 무관</p>}
+                  {billing.invalid_amount !== 0 && <p>금액 확인 필요 · 수납 및 수령 차단</p>}
+                </div>}
+                {collectionRequired && billing && billing.outstanding_amount > 0 && <span class="status-pill status-payment_pending">추가 결제 필요 · ¥{billing.outstanding_amount.toLocaleString()}</span>}
+                {collectionRequired && billing && billing.outstanding_amount > 0 && !billing.invalid_amount && ['PAID', 'PAYMENT_PENDING'].includes(order.status) && <form action={`/staff/orders/${orderId}/confirm-collection`} method="post" class="detail-action-form">
+                  <p class="card-desc">실제 현금 수령 또는 QR 입금을 확인한 후 확정하세요. 이 버튼은 자동 입금/결제 요청을 실행하지 않습니다. 실제 수납일(JST)로 기록합니다.</p>
+                  <input type="hidden" name="request_id" value={collectionRequestId} />
+                  <input type="hidden" name="expected_amount" value={String(billing.outstanding_amount)} />
+                  <label class="field"><span>현금 수납액</span><input class="control" type="number" name="cash_amount" min="0" step="1" max="500000" required value="0" /></label>
+                  <label class="field"><span>QR 수납액</span><input class="control" type="number" name="qr_amount" min="0" step="1" max="500000" required value="0" /></label>
+                  <label><input type="checkbox" name="confirm_received" value="yes" required /> 현장에서 위 금액을 실제 수납했습니다</label>
+                  <button class="btn btn-primary" type="submit">현장 수납 확인 확정</button>
+                </form>}
+                {!collectionRequired && order.status === "PAYMENT_PENDING" ? (
                   <>
                     <p class="card-desc">짐번호는 접수 순서대로 자동 부여됩니다.</p>
                     <form action={`/staff/orders/${orderId}/mark-paid`} method="post" class="detail-action-form">
@@ -262,13 +296,13 @@ staffOrders.get("/staff/orders/:id", async (c) => {
                           <input class="control" type="number" name="qr_amount" min="0" step="1" placeholder="분할일 때만" />
                         </label>
                       </div>
-                      <button class="btn btn-primary" type="submit">결제 완료</button>
+                      <p class="card-desc">현금 수령 또는 QR 입금 확인을 기록합니다. 자동 입금 기능이 아닙니다. 무료로 확정된 0엔 주문은 수납할 금액이 없습니다.</p>
+                      <button class="btn btn-primary" type="submit">현장 수납 확인 완료</button>
                     </form>
                   </>
                 ) : (
                   <>
-                    <p class="card-desc">현재 결제 상태는 결제완료입니다.</p>
-                    <span class="status-pill status-paid">결제완료</span>
+                    <p class="card-desc">{billing?.root_review_required ? '기존 원주문 정산 검토가 남아 있습니다.' : billing?.outstanding_amount ? '추가 수납 후 전체 결제가 완료됩니다.' : '미수납액 없음'}</p>
                   </>
                 )}
               </section>
@@ -276,10 +310,10 @@ staffOrders.get("/staff/orders/:id", async (c) => {
               {/* 수령 처리 */}
               <section class="detail-action-box">
                 <h4 class="detail-action-title">수령 처리</h4>
-                <p class="card-desc">초과일은 할인 없이 정가 후불 계산됩니다.</p>
+                <p class="card-desc">추가 보관료는 연장 주문으로 수납합니다. 연장 주문이 연결된 원주문에서 수령 처리하세요.</p>
                 {order.status !== "PICKED_UP" ? (
                   <form action={`/staff/orders/${orderId}/mark-picked-up`} method="post" class="detail-action-form">
-                    <button class="btn btn-primary" type="submit">수령 완료</button>
+                    <button class="btn btn-primary" type="submit" disabled={!!order.parent_order_id || !!pickupBillingError(billing)}>수령 완료</button>
                   </form>
                 ) : (
                   <>
@@ -349,39 +383,67 @@ staffOrders.get("/staff/orders/:id", async (c) => {
   );
 });
 
+staffOrders.post('/staff/orders/:id/confirm-collection', editorAuth, async (c) => {
+  const id = c.req.param('id');
+  if (!id || !id.trim()) return c.redirect('/staff/dashboard');
+  try {
+    const body = await c.req.parseBody();
+    await confirmCollection(c.env.DB, id, getStaff(c).id, body as Record<string, unknown>);
+    return c.redirect(`/staff/orders/${id}`);
+  } catch (error) {
+    return c.redirect(`/staff/orders/${id}?error=${encodeURIComponent(error instanceof Error ? error.message : '수납 처리 실패')}`);
+  }
+});
+
 // POST /staff/orders/:id/mark-paid
 staffOrders.post("/staff/orders/:id/mark-paid", editorAuth, async (c) => {
   const orderId = c.req.param("id");
   if (!orderId) return c.redirect("/staff/dashboard");
+  if (await requiresCollectionFlow(c.env.DB, orderId)) {
+    const billing = await getBillingSummary(c.env.DB, orderId);
+    if (billing?.root_review_required) return c.redirect(`/staff/orders/${orderId}?error=${encodeURIComponent('기존 원주문 정산 확인 필요: 결제 토글이나 재수납으로 정산 차이를 처리할 수 없습니다')}`);
+    if (!billing || billing.total_billed_amount !== 0 || billing.outstanding_amount !== 0 || billing.invalid_amount) return c.redirect(`/staff/orders/${orderId}?error=${encodeURIComponent('추가금은 현장 수납 확인으로 처리해주세요')}`);
+  }
   const body = await c.req.parseBody();
   const staff = getStaff(c);
 
   const order = await c.env.DB.prepare(
-    `SELECT order_id, date(created_at, '+9 hours') as business_date,
+    `SELECT order_id, status, date(created_at, '+9 hours') as business_date,
             prepaid_amount, final_amount, extra_amount
      FROM luggage_orders WHERE order_id = ?`
   )
     .bind(orderId)
     .first<{
       order_id: string;
+      status: string;
       business_date: string;
       prepaid_amount: number;
       final_amount: number | null;
       extra_amount: number | null;
     }>();
   if (!order) return c.redirect("/staff/dashboard");
+  // Only a PAYMENT_PENDING order can be marked paid. A recorded payment is never rewritten, and a picked-up/cancelled order is never revived.
+  const notPendingMessage = '결제 대기 상태의 주문만 결제 완료 처리할 수 있습니다. 이미 결제되었다면 새로고침 후 확인해주세요.';
+  if (order.status !== 'PAYMENT_PENDING') return c.redirect(`/staff/orders/${orderId}?error=${encodeURIComponent(notPendingMessage)}`);
 
   const allocation = normalizePaymentAllocation(body as Record<string, unknown>, payableAmountFromOrder(order));
   if ("error" in allocation) return c.redirect(`/staff/orders/${orderId}?error=${encodeURIComponent(allocation.error)}`);
 
-  await c.env.DB.batch([
-    ...paymentAllocationStatements(c.env.DB, orderId, order.business_date, staff.id, allocation),
+  // The status is checked again where the write happens (the SELECT above can be stale): payment rows, audit row and the
+  // status change all require the order to still be PAYMENT_PENDING inside this one batch, so a concurrent or repeated
+  // submit changes nothing (and the audit row is committed or rolled back with the rest).
+  const results = await c.env.DB.batch([
+    ...paymentAllocationStatements(c.env.DB, orderId, order.business_date, staff.id, allocation, 'PAYMENT_PENDING'),
     c.env.DB.prepare(
-      "UPDATE luggage_orders SET status = 'PAID', payment_method = ?, updated_at = datetime('now') WHERE order_id = ?"
+      `INSERT INTO luggage_audit_logs (order_id, staff_id, action, details, timestamp)
+       SELECT ?, ?, 'MARK_PAID', ?, datetime('now')
+       WHERE EXISTS (SELECT 1 FROM luggage_orders WHERE order_id = ? AND status = 'PAYMENT_PENDING')`
+    ).bind(orderId, staff.id, paymentAllocationDetails(allocation), orderId),
+    c.env.DB.prepare(
+      "UPDATE luggage_orders SET status = 'PAID', payment_method = ?, updated_at = datetime('now') WHERE order_id = ? AND status = 'PAYMENT_PENDING' RETURNING order_id"
     ).bind(allocation.paymentMethod, orderId),
   ]);
-
-  await insertAuditLog(c.env.DB, orderId, staff.id, "MARK_PAID", paymentAllocationDetails(allocation));
+  if (!results[results.length - 1].results?.[0]) return c.redirect(`/staff/orders/${orderId}?error=${encodeURIComponent(notPendingMessage)}`);
 
   return c.redirect(`/staff/orders/${orderId}`);
 });
@@ -395,7 +457,21 @@ staffOrders.post("/staff/orders/:id/update", editorAuth, async (c) => {
 
   const allowedFields = ["name", "phone", "tag_no", "note", "expected_pickup_at"];
   const updates: string[] = [];
+  const updatedFields: string[] = [];
   const values: (string | number)[] = [];
+
+  // Older orders can have no pickup deadline. The detail form resubmits that
+  // empty input even for a phone-only edit; preserve the absent value as a no-op.
+  // An existing deadline must still never be cleared by this form.
+  if ('expected_pickup_at' in body && !String(body.expected_pickup_at).trim()) {
+    const current = await c.env.DB.prepare('SELECT expected_pickup_at FROM luggage_orders WHERE order_id = ?')
+      .bind(orderId).first<{ expected_pickup_at: string | null }>();
+    if (!current) return c.redirect('/staff/dashboard');
+    if (current.expected_pickup_at !== null && current.expected_pickup_at !== '') {
+      return c.redirect(`/staff/orders/${orderId}?error=${encodeURIComponent('픽업 날짜는 비울 수 없습니다')}`);
+    }
+    delete body.expected_pickup_at;
+  }
 
   const requestedTagNo = String(body.tag_no || "").trim();
   if (requestedTagNo && (!/^\d+$/.test(requestedTagNo) || Number(requestedTagNo) < 1 || Number(requestedTagNo) > 150)) {
@@ -405,11 +481,13 @@ staffOrders.post("/staff/orders/:id/update", editorAuth, async (c) => {
   for (const field of allowedFields) {
     if (field in body) {
       updates.push(`${field} = ?`);
+      updatedFields.push(field);
       let val = String(body[field]);
       // Convert JST datetime-local to UTC ISO for storage
-      if (field === "expected_pickup_at" && val && !val.endsWith("Z")) {
-        const normalized = val.replace(/:\d{2}$/, "").slice(0, 16);
-        val = new Date(normalized + ":00+09:00").toISOString();
+      if (field === "expected_pickup_at") {
+        const parsed = new Date(val.endsWith('Z') ? val : val.slice(0, 16) + ':00+09:00');
+        if (!val.trim() || !Number.isFinite(parsed.getTime())) return c.redirect(`/staff/orders/${orderId}?error=${encodeURIComponent('유효한 픽업 날짜가 필요합니다')}`);
+        val = parsed.toISOString();
       }
       values.push(val);
     }
@@ -418,14 +496,20 @@ staffOrders.post("/staff/orders/:id/update", editorAuth, async (c) => {
   if (updates.length > 0) {
     updates.push("updated_at = datetime('now')");
     values.push(orderId);
-    await c.env.DB.prepare(
-      `UPDATE luggage_orders SET ${updates.join(", ")} WHERE order_id = ?`
-    )
-      .bind(...values)
-      .run();
+    try {
+      await c.env.DB.batch([
+        c.env.DB.prepare(`UPDATE luggage_orders SET ${updates.join(', ')} WHERE order_id = ?`).bind(...values),
+        c.env.DB.prepare(`INSERT INTO luggage_audit_logs(order_id, staff_id, action, details)
+          SELECT ?, ?, 'UPDATE', ? WHERE changes() = 1`).bind(orderId, staff.id,
+          JSON.stringify({ fields: updatedFields, values: values.slice(0, -1) })),
+      ]);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Preserve accrued extension coverage')) {
+        return c.redirect(`/staff/orders/${orderId}?error=${encodeURIComponent('이미 확정된 연장 보관일은 변경할 수 없습니다')}`);
+      }
+      throw error;
+    }
   }
-
-  await insertAuditLog(c.env.DB, orderId, staff.id, "UPDATE");
 
   return c.redirect(`/staff/orders/${orderId}`);
 });
@@ -434,117 +518,43 @@ staffOrders.post("/staff/orders/:id/update", editorAuth, async (c) => {
 staffOrders.post("/staff/orders/:id/mark-picked-up", editorAuth, async (c) => {
   const orderId = c.req.param("id");
   if (!orderId) return c.redirect("/staff/dashboard");
-  const staff = getStaff(c);
-  const now = new Date().toISOString();
-
-  const order = await c.env.DB.prepare(
-    "SELECT status, price_per_day, created_at, expected_pickup_at FROM luggage_orders WHERE order_id = ?"
-  )
-    .bind(orderId)
-    .first<{ status: string; price_per_day: number; created_at: string; expected_pickup_at: string | null }>();
-
-  if (!order) return c.redirect("/staff/dashboard");
-  if (order.status !== "PAID") return c.redirect(`/staff/orders/${orderId}?error=결제 완료된 주문만 수령 처리 가능`);
-
-  const actualStorageDays = calculateStorageDays(order.created_at, now);
-  const extraDays = order.expected_pickup_at ? calculateExtraDays(order.expected_pickup_at, now) : 0;
-  const extraAmount = calculateExtraAmount(order.price_per_day, extraDays);
-
-  await c.env.DB.prepare(
-    `UPDATE luggage_orders
-     SET status = 'PICKED_UP', actual_pickup_at = ?, actual_storage_days = ?,
-         extra_days = ?, extra_amount = ?, updated_at = datetime('now')
-     WHERE order_id = ?`
-  )
-    .bind(now, actualStorageDays, extraDays, extraAmount, orderId)
-    .run();
-
-  await insertAuditLog(c.env.DB, orderId, staff.id, "MARK_PICKED_UP");
-
-  return c.redirect(`/staff/orders/${orderId}`);
+  try {
+    await writePickupTransition(c.env.DB, orderId, 'mark_picked_up', { action: 'MARK_PICKED_UP', staffId: getStaff(c).id });
+    return c.redirect(`/staff/orders/${orderId}`);
+  } catch (error) {
+    if (!(error instanceof PickupTransitionError)) throw error;
+    if (error.status === 500) return c.text(error.message, 500);
+    if (error.status === 404) return c.redirect('/staff/dashboard');
+    return c.redirect(`/staff/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
+  }
 });
 
 // POST /staff/orders/:id/undo-picked-up
 staffOrders.post("/staff/orders/:id/undo-picked-up", editorAuth, async (c) => {
   const orderId = c.req.param("id");
   if (!orderId) return c.redirect("/staff/dashboard");
-  const staff = getStaff(c);
-
-  const current = await c.env.DB.prepare(
-    "SELECT status FROM luggage_orders WHERE order_id = ?"
-  )
-    .bind(orderId)
-    .first<{ status: string }>();
-
-  if (!current || current.status !== "PICKED_UP") {
-    return c.redirect(`/staff/orders/${orderId}?error=수령완료 상태인 주문만 취소할 수 있습니다`);
+  try {
+    await writePickupTransition(c.env.DB, orderId, 'undo_picked_up', { action: 'UNDO_PICKED_UP', staffId: getStaff(c).id });
+    return c.redirect(`/staff/orders/${orderId}`);
+  } catch (error) {
+    if (!(error instanceof PickupTransitionError)) throw error;
+    if (error.status === 500) return c.text(error.message, 500);
+    return c.redirect(`/staff/orders/${orderId}?error=${encodeURIComponent(error.message)}`);
   }
-
-  await c.env.DB.prepare(
-    `UPDATE luggage_orders
-     SET status = 'PAID', actual_pickup_at = NULL, actual_storage_days = 0,
-         extra_days = 0, extra_amount = 0, updated_at = datetime('now')
-     WHERE order_id = ?`
-  )
-    .bind(orderId)
-    .run();
-
-  await insertAuditLog(c.env.DB, orderId, staff.id, "UNDO_PICKED_UP");
-
-  return c.redirect(`/staff/orders/${orderId}`);
 });
 
-// POST /staff/orders/:id/create-extension
-staffOrders.post("/staff/orders/:id/create-extension", editorAuth, async (c) => {
-  const parentOrderId = c.req.param("id");
-  if (!parentOrderId) return c.redirect("/staff/dashboard");
-  const staff = getStaff(c);
-
-  const parent = await c.env.DB.prepare("SELECT * FROM luggage_orders WHERE order_id = ?")
-    .bind(parentOrderId)
-    .first<Order>();
-
-  if (!parent) return c.redirect("/staff/dashboard");
-  if (parent.status === "CANCELLED" || parent.status === "PICKED_UP") return c.redirect(`/staff/orders/${parentOrderId}`);
-
-  // Find root order (follow parent chain)
-  const rootId = parent.parent_order_id || parentOrderId;
-
-  const newOrderId = await buildOrderId(c.env.DB, undefined, false, "ext");
-  // Reuse parent's tag_no — extension is for the same physical luggage.
-  // Consistent with auto-extension behavior (extension.ts:51).
-  const tagNo = parent.tag_no ?? "";
-  const { setQty, pricePerDay } = calculatePricePerDay(parent.suitcase_qty, parent.backpack_qty);
-
+// Manual and automatic extensions share one date/coverage guard.
+staffOrders.post('/staff/orders/:id/create-extension', editorAuth, async (c) => {
+  const id = c.req.param('id');
+  if (!id || !id.trim()) return c.redirect('/staff/dashboard');
+  const date = await nextManualExtensionDate(c.env.DB, id);
+  if (!date) return c.redirect(`/staff/orders/${id}?error=${encodeURIComponent('보관 중인 원주문과 예정 픽업일을 확인해주세요')}`);
   try {
-    await c.env.DB.prepare(
-      `INSERT INTO luggage_orders (
-         order_id, name, phone, companion_count, suitcase_qty, backpack_qty, set_qty,
-         price_per_day, flying_pass_tier, status, tag_no, manual_entry, staff_id, parent_order_id, note
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING', ?, 1, ?, ?, ?)`
-    )
-      .bind(
-        newOrderId, parent.name, parent.phone, parent.companion_count,
-        parent.suitcase_qty, parent.backpack_qty, setQty, pricePerDay,
-        parent.flying_pass_tier, tagNo, staff.id, rootId,
-        `연장 주문 (원본: ${parentOrderId})`
-      )
-      .run();
-  } catch (e) {
-    console.error("Extension order insert failed:", e);
-    captureOperationalError(e, {
-      operation: "staff.orders.create_extension",
-      tags: { phase: "order_insert" },
-      context: { parentOrderId, newOrderId, staffId: staff.id, rootId },
-      fingerprint: ["staff.orders.create_extension", parentOrderId],
-    });
-    return c.redirect(`/staff/orders/${parentOrderId}?error=연장접수 실패`);
+    const extensionId = await createDatedExtension(c.env.DB, id, date, getStaff(c).id, true);
+    return c.redirect(`/staff/orders/${extensionId || id}`);
+  } catch {
+    return c.redirect(`/staff/orders/${id}?error=${encodeURIComponent('연장 일자가 이미 처리되었거나 주문이 변경되었습니다')}`);
   }
-
-  await insertAuditLog(c.env.DB, newOrderId, staff.id, "CREATE_EXTENSION", `원본: ${parentOrderId}`);
-  await insertAuditLog(c.env.DB, parentOrderId, staff.id, "CREATE_EXTENSION", `연장접수 생성: ${newOrderId}`);
-
-  return c.redirect(`/staff/orders/${newOrderId}`);
 });
 
 // POST /staff/orders/manual — Manual order creation

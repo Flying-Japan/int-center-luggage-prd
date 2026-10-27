@@ -86,6 +86,9 @@ export async function runMidnightRollover(db: D1Database): Promise<RolloverResul
                )
              RETURNING order_id`
           ).bind(newTag, order.order_id, targetTag),
+          db.prepare(`INSERT INTO luggage_audit_logs(order_id, action, details)
+            SELECT ?, 'MIDNIGHT_TAG_ROLLOVER', ? WHERE changes() = 1`)
+            .bind(order.order_id, JSON.stringify({ beforeTag: order.tag_no, afterTag: newTag })),
           db.prepare(
             `UPDATE luggage_orders
              SET tag_no = ?, updated_at = datetime('now')

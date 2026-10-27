@@ -8,6 +8,9 @@ export type AutoSalesSummary = {
   totalAmount: number;
   orderCount: number;
   source: "daily_sales" | "live_orders";
+  /** Present only when the legacy reconciliation total contains PAID estimates without tender rows. */
+  estimatedAmount?: number;
+  recordedAmount?: number;
 };
 
 function buildDateRange(businessDates: string[]): { uniqueDates: string[]; rangeStart: string; rangeEnd: string } | null {
@@ -37,32 +40,16 @@ async function fetchLiveOrderSalesSummariesByDate(db: D1Database, businessDates:
   const dateRange = buildDateRange(businessDates);
   if (!dateRange) return new Map();
   const rows = await db.prepare(
-    `WITH payment_allocations AS (
-       SELECT order_id,
-              SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) as cash_amount,
-              SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) as qr_amount,
-              COUNT(*) as payment_count
-       FROM luggage_order_payments
-       GROUP BY order_id
-     )
-     SELECT
-       date(o.created_at, '+9 hours') as business_date,
-       SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.qr_amount WHEN o.payment_method = 'PAY_QR' THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as qr_amount,
-       SUM(CASE WHEN COALESCE(pa.payment_count, 0) > 0 THEN pa.cash_amount WHEN o.payment_method = 'CASH' OR o.payment_method IS NULL THEN COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount ELSE 0 END) as cash_amount,
-       SUM(COALESCE(NULLIF(o.final_amount, 0), o.prepaid_amount) + o.extra_amount) as total_amount,
-       COUNT(*) as order_count
-     FROM luggage_orders o
-     LEFT JOIN payment_allocations pa ON pa.order_id = o.order_id
-     WHERE date(o.created_at, '+9 hours') >= ?
-       AND date(o.created_at, '+9 hours') <= ?
-       AND o.status IN ('PAID', 'PICKED_UP')
-     GROUP BY date(o.created_at, '+9 hours')`,
+    `SELECT business_date, cash AS cash_amount, qr AS qr_amount, total_amount, paid_count AS order_count, legacy_estimated_amount, recorded_amount
+     FROM luggage_sales_daily WHERE business_date >= ? AND business_date <= ?`,
   ).bind(dateRange.rangeStart, dateRange.rangeEnd).all<{
-    business_date: string; cash_amount: number; qr_amount: number; total_amount: number; order_count: number;
+    business_date: string; cash_amount: number; qr_amount: number; total_amount: number; order_count: number; legacy_estimated_amount: number; recorded_amount: number;
   }>();
   const result = new Map<string, AutoSalesSummary>();
   for (const row of rows.results) {
-    result.set(row.business_date, { cashAmount: row.cash_amount ?? 0, qrAmount: row.qr_amount ?? 0, totalAmount: row.total_amount ?? 0, orderCount: row.order_count ?? 0, source: "live_orders" });
+    result.set(row.business_date, { cashAmount: row.cash_amount ?? 0, qrAmount: row.qr_amount ?? 0, totalAmount: row.total_amount ?? 0, orderCount: row.order_count ?? 0, source: "live_orders",
+      ...(row.legacy_estimated_amount > 0 ? { estimatedAmount: row.legacy_estimated_amount, recordedAmount: row.recorded_amount } : {}),
+    });
   }
   return result;
 }
