@@ -276,9 +276,41 @@ test('confirm revalidates exact amount, actual payout acknowledgement, owner and
   }, new Date(Date.now()+86400000)), /지급일/);
 });
 
-test('phase-1 public mount stays OFF even with flag ON; local default flag OFF, HMAC and staff verification enforced', async () => {
+test('production mount: new payouts default OFF, flag ON opens them, recovery lookup is not flag-gated', async () => {
   const s = await setup(); const productionMount = new Hono().route('/', internalApi);
-  assert.equal((await s.call('preview', { targetTier: 'GOLD' }, productionMount)).body.code, 'REFUND_SETTLEMENT_NOT_READY');
+  s.env.APP_ENV = 'production'; delete (s.env as Record<string, unknown>).LUGGAGE_FLYING_PASS_REFUNDS_ENABLED;
+  for (const op of ['preview', 'register'] as const) assert.equal((await s.call(op, { targetTier: 'GOLD' }, productionMount)).body.code, 'REFUNDS_DISABLED');
+  const lookup = await s.call(`${crypto.randomUUID()}/lookup`, {}, productionMount);
+  assert.ok(![503, 401].includes(lookup.status), `lookup must reach the handler, got ${lookup.status}`);
+  s.env.LUGGAGE_FLYING_PASS_REFUNDS_ENABLED = 'true';
+  assert.ok((await s.call('preview', { targetTier: 'GOLD' }, productionMount)).body.quote, 'flag ON opens preview on the production mount');
+  s.env.LUGGAGE_FLYING_PASS_REFUNDS_ENABLED = 'false';
+  assert.equal((await s.call('preview', { targetTier: 'GOLD' }, productionMount)).body.code, 'REFUNDS_DISABLED');
+});
+
+test('production mount keeps HMAC, the actor role allowlist, one-pending-refund and replay protection when the flag is ON', async () => {
+  const s = await setup(); const productionMount = new Hono().route('/', internalApi);
+  s.env.APP_ENV = 'production'; s.env.LUGGAGE_FLYING_PASS_REFUNDS_ENABLED = 'true';
+  const refundId = crypto.randomUUID();
+  for (const op of ['preview', 'register', `${refundId}/lookup`, `${refundId}/confirm`, `${refundId}/cancel`]) assert.equal((await s.call(op, {}, productionMount, ID, false)).status, 401, `unsigned ${op}`);
+  const partTime = { userId: '22222222-2222-4222-8222-222222222222', name: 'Synthetic Part Time', email: '22222222-2222-4222-8222-222222222222@part-time.local', role: 'part_time' };
+  for (const [op, payload] of [['preview', { targetTier: 'GOLD' }], [`${refundId}/lookup`, {}], [`${refundId}/confirm`, { cashPaid: true, expectedAmount: 400 }], [`${refundId}/cancel`, { confirmNotPaid: true, reason: '테스트' }]] as Array<[string, Record<string, unknown>]>)
+    assert.equal((await s.call(op, { ...payload, actor: partTime }, productionMount)).status, 403, `part_time ${op}`);
+  const preview = await s.call('preview', { targetTier: 'GOLD' }, productionMount);
+  const input = { refundId, targetTier: 'GOLD', reason: '카페 가입·등급 확인', expectedFingerprint: preview.body.quote.fingerprint };
+  assert.equal((await s.call('register', input, productionMount)).status, 201);
+  assert.equal((await s.call('register', input, productionMount)).body.replayed, true, 'same refund ID replays instead of registering twice');
+  const second = await s.call('register', { ...input, refundId: crypto.randomUUID() }, productionMount);
+  assert.notEqual(second.status, 201, 'a second payout for the same order while one is pending is refused');
+  assert.equal(await s.scalar('SELECT COUNT(*) AS n FROM luggage_flying_pass_refunds'), 1);
+  s.env.LUGGAGE_FLYING_PASS_REFUNDS_ENABLED = 'false'; // confirm is recovery: not gated by the flag
+  assert.equal((await s.call(`${refundId}/confirm`, { cashPaid: true, expectedAmount: 400 }, productionMount)).status, 200);
+  assert.equal((await s.call(`${refundId}/confirm`, { cashPaid: true, expectedAmount: 400 }, productionMount)).body.replayed, true);
+  assert.equal(await s.scalar("SELECT COUNT(*) AS n FROM luggage_flying_pass_refunds WHERE status = 'CONFIRMED'"), 1);
+});
+
+test('test-only router refuses outside APP_ENV=test; local default flag OFF, HMAC and staff verification enforced', async () => {
+  const s = await setup();
   s.env.APP_ENV = 'production';
   assert.equal((await s.call('preview', { targetTier: 'GOLD' })).body.code, 'REFUND_SETTLEMENT_NOT_READY');
   s.env.APP_ENV = 'test'; s.env.LUGGAGE_FLYING_PASS_REFUNDS_ENABLED = '';

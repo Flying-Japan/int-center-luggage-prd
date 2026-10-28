@@ -17,14 +17,15 @@ function targetTier(value: unknown): FlyingPassTier {
   return value as FlyingPassTier;
 }
 
-/** Parent must install internalAuth. The production mount has NO activation path before phase 3, even with the flag on.
- * Local D1 tests explicitly construct a test-only router; enabling real payouts requires the later settlement work.
+/** Parent must install internalAuth. New payouts (preview/register) open only when LUGGAGE_FLYING_PASS_REFUNDS_ENABLED === 'true'
+ * (default unset = OFF). lookup/confirm/cancel stay available for recovery of an already registered payout, regardless of the flag.
+ * The test-only router (localTestOnly) still refuses to run outside APP_ENV=test.
  */
 export function createFlyingPassRefundRoutes(localTestOnly = false) {
   const routes = new Hono<AppType>();
   const handle = (operation: 'preview' | 'register' | 'lookup' | 'confirm' | 'cancel') => async (c: Context<AppType>) => {
     c.header('Cache-Control', 'no-store');
-    if (!localTestOnly || c.env.APP_ENV !== 'test') {
+    if (localTestOnly && c.env.APP_ENV !== 'test') {
       return c.json({ error: '3단계 UI 및 운영 검증 완료 전에는 환급 기능을 사용할 수 없습니다', code: 'REFUND_SETTLEMENT_NOT_READY' }, 503);
     }
     if (['preview','register'].includes(operation) && c.env.LUGGAGE_FLYING_PASS_REFUNDS_ENABLED !== 'true') {

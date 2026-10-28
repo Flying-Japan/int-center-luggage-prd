@@ -2,7 +2,9 @@
 
 ## 사용 상태
 
-**운영 사용 불가.** 공개 internal API의 기본 router는 `REFUND_SETTLEMENT_NOT_READY`(503)를 반환한다.
+**(2026-10-29 갱신)** 공개 mount의 잠금(`REFUND_SETTLEMENT_NOT_READY` 503)은 해제 준비 코드에서 제거됐다(별도 승인 Worker 배포 전까지 운영은 잠금 상태). 해제 후에도 새 지급(preview·register)은 `LUGGAGE_FLYING_PASS_REFUNDS_ENABLED === 'true'`일 때만 열리고(기본 OFF, `REFUNDS_DISABLED` 503), lookup·confirm·cancel은 이미 등록된 지급의 복구를 위해 flag와 무관하게 열려 있다. `/internal/*`의 HMAC(`internalAuth`)와 actor 역할 허용 목록(center_staff·manager·super_admin, part_time 거부)은 그대로다. 테스트 전용 router(`createFlyingPassRefundRoutes(true)`)는 `APP_ENV=test` 밖에서 계속 거부한다.
+
+(이전 문구) **운영 사용 불가.** 공개 internal API의 기본 router는 `REFUND_SETTLEMENT_NOT_READY`(503)를 반환한다.
 `LUGGAGE_FLYING_PASS_REFUNDS_ENABLED=true`만으로 열리지 않는다. 정산 연동 완료 후 별도 변경이 필요하다.
 로컬 D1 테스트만 `createFlyingPassRefundRoutes(true)`와 `APP_ENV=test`, 위 기능 플래그를 함께 사용한다.
 Wrangler 설정과 운영 환경에는 플래그를 추가/설정하지 않았다.
