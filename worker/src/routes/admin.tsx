@@ -80,16 +80,16 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
       `SELECT business_date as sale_date, revenue_krw FROM luggage_naver_rental_daily_sales${rentalWhereClause} ORDER BY business_date DESC`
     ).bind(...params).all<{ sale_date: string; revenue_krw: number }>(),
     c.env.DB.prepare(
-      `SELECT business_date AS sale_date, people AS order_count, suitcase_total, backpack_total,
+      `SELECT business_date AS sale_date, people AS order_count, suitcase_total, backpack_total, cash_refund_amount,
         cash, qr, total_amount AS luggage_total FROM luggage_sales_daily WHERE business_date BETWEEN ? AND ?`
-    ).bind(...actualParams).all<{ sale_date: string; order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number }>(),
+    ).bind(...actualParams).all<{ sale_date: string; order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number; cash_refund_amount?: number }>(),
     c.env.DB.prepare(
-      `SELECT business_date as sale_date, total_amount, paypay_amount, actual_qr_amount
-       FROM luggage_cash_closings
+      `SELECT c.business_date as sale_date, c.total_amount, c.paypay_amount, c.actual_qr_amount, COALESCE(rs.cash_refund_amount,0) as refund_amount, rs.net_cash as refund_net_cash, rs.gross_qr as refund_gross_qr, rs.net_total as refund_net_total
+       FROM luggage_cash_closings c LEFT JOIN luggage_cash_closing_refund_snapshots rs ON rs.closing_id = c.closing_id
        WHERE closing_type = 'FINAL_CLOSE'
-         AND business_date BETWEEN ? AND ?
-       ORDER BY business_date DESC`
-    ).bind(...params).all<{ sale_date: string; total_amount: number; paypay_amount: number; actual_qr_amount: number }>(),
+         AND c.business_date BETWEEN ? AND ?
+       ORDER BY c.business_date DESC`
+    ).bind(...params).all<{ sale_date: string; total_amount: number; paypay_amount: number; actual_qr_amount: number; refund_amount: number; refund_net_cash: number; refund_gross_qr: number; refund_net_total: number }>(),
   ]);
 
   const rentalKrwByDate = new Map<string, number>();
@@ -98,15 +98,15 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
   }
 
   // Build lookup map for actual luggage data by date
-  const actualByDate = new Map<string, { order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number }>();
+  const actualByDate = new Map<string, { order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number; cash_refund_amount?: number }>();
   for (const row of actualLuggageRows.results) {
     actualByDate.set(row.sale_date, row);
   }
 
-  const finalClosingByDate = new Map<string, { cash: number; qr: number; luggage_total: number }>();
+  const finalClosingByDate = new Map<string, { cash: number; qr: number; luggage_total: number; cash_refund_amount?: number }>();
   for (const row of finalClosingRows.results) {
-    const cash = Math.max(0, (row.total_amount || 0) - STARTING_FLOAT);
-    const qr = row.actual_qr_amount || row.paypay_amount || 0;
+    const cash = row.refund_amount > 0 ? row.refund_net_cash : Math.max(0, (row.total_amount || 0) - STARTING_FLOAT);
+    const qr = row.refund_amount > 0 ? row.refund_gross_qr : row.actual_qr_amount || row.paypay_amount || 0;
     finalClosingByDate.set(row.sale_date, { cash, qr, luggage_total: cash + qr });
   }
 
@@ -116,7 +116,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     sheetByDate.set(r.sale_date, r);
   }
 
-  interface MergedRow { date: string; dateJP: string; orders: number; suitcases: number; backpacks: number; cash: number; qr: number; luggage: number; rentalKrw: number; isSettled?: boolean; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
+  interface MergedRow { date: string; dateJP: string; orders: number; suitcases: number; backpacks: number; cash: number; qr: number; luggage: number; cashRefundAmount: number; rentalKrw: number; isSettled?: boolean; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
   // Build rows from all data sources
   const allDates = new Set([
     ...actualLuggageRows.results.map(r => r.sale_date),
@@ -152,6 +152,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
       cash,
       qr,
       luggage,
+      cashRefundAmount: actual?.cash_refund_amount || 0,
       rentalKrw,
       isSettled: useFinalClosing,
       isWeekend: flags.isWeekend,
@@ -182,8 +183,8 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
 
   // Real-time luggage breakdown for today (for mergedRows override)
   const todayLuggageRT = await c.env.DB.prepare(
-    `SELECT people, cash, qr, total_amount AS luggage_total FROM luggage_sales_daily WHERE business_date = ?`
-  ).bind(todayJST).first<{ people: number; cash: number; qr: number; luggage_total: number }>();
+    `SELECT people, cash, qr, cash_refund_amount, total_amount AS luggage_total FROM luggage_sales_daily WHERE business_date = ?`
+  ).bind(todayJST).first<{ people: number; cash: number; qr: number; luggage_total: number; cash_refund_amount?: number }>();
   const tlrt = {
     people: Number(todayLuggageRT?.people ?? 0),
     cash: Number(todayLuggageRT?.cash ?? 0),
@@ -205,6 +206,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     cash: tlrt.cash,
     qr: tlrt.qr,
     luggage: tlrt.luggage_total,
+    cashRefundAmount: Number(todayLuggageRT?.cash_refund_amount || 0),
     rentalKrw: todayRentalKrw,
     isWeekend: todayFlags.isWeekend,
     jpHoliday: todayFlags.jp,
@@ -233,7 +235,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
   const totalQr = mergedRows.reduce((s, r) => s + r.qr, 0);
 
   // Min / Max stats (only from days with data)
-  const activeDays = mergedRows.filter(r => r.luggage > 0);
+  const activeDays = mergedRows.filter(r => (r.luggage !== 0 || r.cashRefundAmount > 0));
   const activePastDays = activeDays.filter(r => r.date !== todayJST);
   const minSrc = activePastDays.length > 0 ? activePastDays : activeDays;
   const minMax = activeDays.length > 0 ? {
@@ -251,7 +253,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
   } : null;
 
   // Average daily revenue (excluding today's real-time row for a fair historical avg)
-  const historicalRows = mergedRows.filter(r => r.date !== todayJST && r.luggage > 0);
+  const historicalRows = mergedRows.filter(r => r.date !== todayJST && (r.luggage !== 0 || r.cashRefundAmount > 0));
   const histDayCount = historicalRows.length || 1;
   const avgDailyRevenue = Math.round(historicalRows.reduce((s, r) => s + r.luggage, 0) / histDayCount);
   const todayVsAvgDiff = ts.revenue_total - avgDailyRevenue;
@@ -355,8 +357,9 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
         })()}
 
         {(() => {
-          const cashPct = totalCash + totalQr > 0 ? Math.round(totalCash / (totalCash + totalQr) * 100) : 0;
-          const qrPct = 100 - cashPct;
+          const grossCash = totalCash + mergedRows.reduce((sum, row) => sum + row.cashRefundAmount, 0);
+          const cashPct = grossCash + totalQr > 0 ? Math.round(grossCash / (grossCash + totalQr) * 100) : 0;
+          const qrPct = grossCash + totalQr > 0 ? 100 - cashPct : 0;
           return (
         <div class="stat-grid">
           <div class="card stat-card stat-card--highlight">

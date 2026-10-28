@@ -608,7 +608,7 @@ test('prepared migration preserves historical original, manual-extension and pay
 test('fresh schema and prepared migration have identical billing views, indexes and triggers', () => {
   const fresh = new DatabaseSync(':memory:'); open.push(fresh);
   const migrated = new DatabaseSync(':memory:'); open.push(migrated);
-  const schema = readFileSync('src/schema.sql', 'utf8');
+  const schema = readFileSync('src/schema.sql', 'utf8').split('-- Flying Pass phase 2:')[0].trimEnd() + '\n';
   const migration = readFileSync('migrations/20261025_extension_receipts.sql', 'utf8');
   const objectsStart = 'CREATE UNIQUE INDEX IF NOT EXISTS idx_luggage_extension_date';
   assert.ok(schema.includes(objectsStart));
@@ -971,7 +971,7 @@ test('prepared policy upgrade preserves claim/receipt/audit rows and matches all
   const orders = ctx.sqlite.prepare('SELECT * FROM luggage_orders').all();
   const ledger = payments(ctx);
   const logs = ctx.sqlite.prepare('SELECT * FROM luggage_audit_logs').all();
-  const schema = readFileSync('src/schema.sql', 'utf8');
+  const schema = readFileSync('src/schema.sql', 'utf8').split('-- Flying Pass phase 2:')[0].trimEnd() + '\n';
   const upgrade = readFileSync('migrations/20261026_root_settlement_review.sql', 'utf8');
   const start = 'CREATE UNIQUE INDEX IF NOT EXISTS idx_luggage_extension_date';
   assert.equal(upgrade.slice(upgrade.indexOf(start)).trim(), schema.slice(schema.indexOf(start), schema.indexOf("-- 21:00 JST automatic extension cutover")).trim());
@@ -981,6 +981,7 @@ test('prepared policy upgrade preserves claim/receipt/audit rows and matches all
   ctx.sqlite.exec("DROP TABLE luggage_automatic_billing_policy");
   ctx.sqlite.exec(readFileSync('migrations/20261028_close_time_extension.sql', 'utf8'));
   ctx.sqlite.exec(readFileSync('migrations/20261028_confirmed_intake_extension.sql', 'utf8'));
+  ctx.sqlite.exec(readFileSync('migrations/20261028_flying_pass_refund_settlement.sql', 'utf8'));
   assert.deepEqual(definitions(), before);
   assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_orders').all(), orders);
   assert.deepEqual(payments(ctx), ledger);

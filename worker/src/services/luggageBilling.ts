@@ -2,6 +2,16 @@ import { buildOrderId } from './orderNumber';
 import { normalizePaymentAllocation, type PaymentAllocation } from '../lib/payments';
 
 export type BillingSummary = {
+  refund_settlement_version: 2;
+  effective_flying_pass_tier: string;
+  latest_confirmed_refund_id: string | null;
+  pending_refund_id: string | null;
+  discount_credit_amount: number;
+  cash_refunded_amount: number;
+  net_received_amount: number;
+  total_effective_billed_amount: number;
+  pending_refund_count: number;
+  refund_count: number;
   root_id: string;
   extension_count: number;
   total_billed_amount: number;
@@ -73,6 +83,7 @@ export async function getBillingSummaries(db: D1Database, orderIds: string[]): P
 /** Physical pickup and monetary reconciliation are separate decisions. Nothing here waives a stored claim. */
 export function pickupBillingError(summary: BillingSummary | null): string | null {
   if (!summary) return '주문 금액을 확인해주세요';
+  if (summary.pending_refund_count > 0) return '진행 중 현금 환급의 지급 여부를 먼저 확인해주세요. 현금을 다시 지급하지 마세요';
   if (summary.extension_outstanding_amount > 0) return '추가 보관료 미수납 · 추가 결제 필요: 원주문에서 수납 후 수령 처리해주세요';
   if (summary.invalid_amount) return '금액 확인 필요: 기존 원주문 정산 또는 비정상 금액을 확인해주세요';
   if (summary.review_pickup_blocked) return '기존 원주문 정산 확인 필요: 변경 근거가 불충분하여 픽업을 보류합니다';

@@ -120,7 +120,7 @@ export async function writePickupTransition(db: D1Database, orderId: string, act
       db.prepare(`SELECT json_extract('{}', CASE WHEN ${familyMatches} THEN '$' ELSE 'PICKUP_STALE' END)`)
         .bind(orderId, orderId, beforeJson, beforeJson),
       db.prepare(`SELECT json_extract('{}', CASE WHEN EXISTS (SELECT 1 FROM luggage_billing_balances
-        WHERE root_id = ? AND outstanding_amount = 0 AND invalid_amount = 0 AND review_pickup_blocked = 0
+        WHERE root_id = ? AND outstanding_amount = 0 AND invalid_amount = 0 AND review_pickup_blocked = 0 AND pending_refund_count = 0
           AND (? = 1 OR root_review_required = 0)) THEN '$' ELSE 'PICKUP_BILLING_CONFLICT' END)`)
         .bind(orderId, pickup ? 1 : 0),
       db.prepare(`INSERT INTO luggage_audit_logs(order_id, staff_id, device_id, action, details, timestamp)

@@ -84,7 +84,8 @@ function uniqueStaffIds(values: Array<string | null | undefined>): string[] {
 ops.get("/staff/cash-closing", async (c) => {
   // Show the latest closing per date with closing count to detect multi-closing dates
   const closings = await c.env.DB.prepare(
-    `SELECT c.*, latest.closing_count FROM luggage_cash_closings c
+    `SELECT c.*, rs.net_total AS refund_net_total, rs.gross_qr AS refund_gross_qr, latest.closing_count FROM luggage_cash_closings c
+     LEFT JOIN luggage_cash_closing_refund_snapshots rs ON rs.closing_id = c.closing_id
      INNER JOIN (
        SELECT business_date, MAX(closing_id) as max_id, COUNT(*) as closing_count
        FROM luggage_cash_closings
@@ -217,7 +218,7 @@ ops.get("/staff/cash-closing", async (c) => {
                     const businessDate = cl.business_date as string;
                     const dateDisplay = formatClosingDate(businessDate);
                     const currentAutoSales = autoSalesByDate.get(businessDate);
-                    const autoAmount = currentAutoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
+                    const autoAmount = (cl.refund_net_total as number | null) ?? currentAutoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
                     const diff = currentAutoSales
                       ? ((cl.actual_amount as number) || 0) - currentAutoSales.totalAmount
                       : ((cl.difference_amount as number) || 0);
@@ -258,7 +259,7 @@ ops.get("/staff/cash-closing", async (c) => {
                       date: cl.business_date as string,
                       total: (cl.total_amount as number) || 0,
                       paypay: (cl.paypay_amount as number) || 0,
-                      auto: currentAutoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0),
+                      auto: (cl.refund_net_total as number | null) ?? currentAutoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0),
                       diff: currentAutoSales
                         ? ((cl.actual_amount as number) || 0) - currentAutoSales.totalAmount
                         : ((cl.difference_amount as number) || 0),
@@ -355,7 +356,10 @@ ops.post("/staff/cash-closing", editorAuth, async (c) => {
   const differenceAmount = actualAmount - expectedAmount;
   const qrDifferenceAmount = actualQrForTotal - (autoSales?.qrAmount ?? 0);
 
-  await c.env.DB.prepare(
+  const auditPayload = JSON.stringify({ auditEventId: crypto.randomUUID(), autoSalesSnapshot: autoSales });
+  try {
+    await c.env.DB.batch([
+      c.env.DB.prepare(
     `INSERT INTO luggage_cash_closings (
        business_date, closing_type, workflow_status,
        count_10000, count_5000, count_2000, count_1000, count_500,
@@ -376,18 +380,18 @@ ops.post("/staff/cash-closing", editorAuth, async (c) => {
       rentalCash, wandRefund,
       floor4fCount, floor8fCount,
       staff.id, String(body.note || "") || null
-    )
-    .run();
-
-  // Get the new closing_id for audit log
-  const newClosing = await c.env.DB.prepare(
-    "SELECT closing_id FROM luggage_cash_closings WHERE business_date = ? AND closing_type = ?"
-  ).bind(businessDate, closingType).first<{ closing_id: number }>();
-
-  if (newClosing) {
-    await c.env.DB.prepare(
-      "INSERT INTO luggage_cash_closing_audits (closing_id, action, staff_id) VALUES (?, 'SUBMIT', ?)"
-    ).bind(newClosing.closing_id, staff.id).run();
+    ),
+      c.env.DB.prepare(`INSERT INTO luggage_cash_closing_audits(closing_id, action, payload, staff_id)
+        SELECT closing_id, 'SUBMIT', ?, ? FROM luggage_cash_closings WHERE business_date = ? AND closing_type = ? AND changes() = 1`)
+        .bind(auditPayload, staff.id, businessDate, closingType),
+      c.env.DB.prepare(`SELECT json_extract('{}', CASE WHEN EXISTS (SELECT 1 FROM luggage_cash_closing_audits WHERE action = 'SUBMIT' AND payload = ? AND staff_id = ?) THEN '$' ELSE 'CLOSING_AUDIT_FAILED' END)`)
+        .bind(auditPayload, staff.id),
+    ]);
+  } catch (error) {
+    if (/REFUND_PAYOUT_PENDING|REFUND_CLOSING_STALE/.test(String(error instanceof Error ? error.cause ?? error : error))) {
+      return c.redirect('/staff/cash-closing?error=' + encodeURIComponent('환급 지급 또는 매출 상태가 변경되었습니다. 지급 여부 확인 후 새로고침해주세요'));
+    }
+    throw error;
   }
 
   return c.redirect("/staff/cash-closing");
@@ -397,8 +401,8 @@ ops.post("/staff/cash-closing", editorAuth, async (c) => {
 ops.get("/staff/cash-closing/:id", async (c) => {
   const closingId = c.req.param("id");
   const closing = await c.env.DB.prepare(
-    `SELECT * FROM luggage_cash_closings
-     WHERE closing_id = ?`
+    `SELECT c.*, rs.net_total AS refund_net_total, rs.gross_qr AS refund_gross_qr FROM luggage_cash_closings c
+     LEFT JOIN luggage_cash_closing_refund_snapshots rs ON rs.closing_id = c.closing_id WHERE c.closing_id = ?`
   )
     .bind(closingId)
     .first<Record<string, unknown>>();
@@ -439,12 +443,12 @@ ops.get("/staff/cash-closing/:id", async (c) => {
   }));
 
   const cl = closing as Record<string, unknown>;
-  const autoAmount = autoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
-  const differenceAmount = autoSales
+  const autoAmount = (cl.refund_net_total as number | null) ?? autoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
+  const differenceAmount = cl.refund_net_total != null ? Number(cl.actual_amount) - Number(cl.refund_net_total) : autoSales
     ? ((cl.actual_amount as number) || 0) - autoSales.totalAmount
     : ((cl.difference_amount as number) || 0);
   const effectiveActualQrAmount = ((cl.actual_qr_amount as number) || 0) || ((cl.paypay_amount as number) || 0);
-  const qrDifferenceAmount = autoSales
+  const qrDifferenceAmount = cl.refund_net_total != null ? effectiveActualQrAmount - Number(cl.refund_gross_qr) : autoSales
     ? effectiveActualQrAmount - autoSales.qrAmount
     : ((cl.qr_difference_amount as number) || 0);
   const closingStaffName = (cl.staff_id as string | null)
@@ -722,7 +726,9 @@ ops.post("/staff/cash-closing/:id/edit", editorAuth, async (c) => {
   const expectedQrAmount = previousActualQrAmount - ((cl.qr_difference_amount as number) || 0);
   const qrDiff = actualQrForTotal - expectedQrAmount;
 
-  await c.env.DB.prepare(
+  const editPayload = JSON.stringify({ auditEventId: crypto.randomUUID(), preservedAutoSales: expectedAmount });
+  await c.env.DB.batch([
+      c.env.DB.prepare(
     `UPDATE luggage_cash_closings SET
        count_10000 = ?, count_5000 = ?, count_2000 = ?, count_1000 = ?, count_500 = ?,
        count_100 = ?, count_50 = ?, count_10 = ?, count_5 = ?, count_1 = ?,
@@ -739,12 +745,12 @@ ops.post("/staff/cash-closing/:id/edit", editorAuth, async (c) => {
       rentalCash, wandRefund,
       floor4fCount, floor8fCount,
       String(body.note || "") || null, closingId
-    )
-    .run();
-
-  await c.env.DB.prepare(
-    "INSERT INTO luggage_cash_closing_audits (closing_id, action, staff_id) VALUES (?, 'EDIT', ?)"
-  ).bind(closingId, staff.id).run();
+    ),
+    c.env.DB.prepare(`INSERT INTO luggage_cash_closing_audits(closing_id, action, payload, staff_id)
+      SELECT ?, 'EDIT', ?, ? WHERE changes() = 1`).bind(closingId, editPayload, staff.id),
+    c.env.DB.prepare(`SELECT json_extract('{}', CASE WHEN EXISTS (SELECT 1 FROM luggage_cash_closing_audits WHERE closing_id = ? AND action = 'EDIT' AND payload = ? AND staff_id = ?) THEN '$' ELSE 'CLOSING_AUDIT_FAILED' END)`)
+      .bind(closingId, editPayload, staff.id),
+  ]);
 
   return c.redirect(`/staff/cash-closing/${closingId}`);
 });

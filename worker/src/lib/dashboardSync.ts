@@ -76,7 +76,7 @@ export async function getDashboardSyncToken(
     params.dateTo
   );
 
-  const [counts, filtered, latestVisibleUpdate] = await Promise.all([
+  const [counts, filtered, latestVisibleUpdate, refundState] = await Promise.all([
     db.prepare(
       `SELECT
         SUM(CASE WHEN o.status = 'PAYMENT_PENDING' THEN 1 ELSE 0 END) as pending_count,
@@ -105,6 +105,10 @@ export async function getDashboardSyncToken(
        FROM luggage_orders o
        WHERE 1=1${statusFilter.clause}${context.clause}`
     ).bind(...statusFilter.params, ...context.params).first<{ max_updated_at: string }>(),
+    db.prepare(`SELECT COUNT(*) AS count, SUM(f.status = 'PAYOUT_PENDING') AS pending, SUM(f.status = 'CONFIRMED') AS confirmed
+      FROM luggage_flying_pass_refunds f JOIN luggage_orders o ON o.order_id = f.order_id
+      WHERE 1=1${statusFilter.clause}${context.clause}`).bind(...statusFilter.params, ...context.params)
+      .first<{ count: number; pending: number; confirmed: number }>(),
   ]);
 
   const safeCounts = counts || {
@@ -126,5 +130,6 @@ export async function getDashboardSyncToken(
     safeCounts.total_count ?? 0,
     filtered?.total ?? 0,
     latestVisibleUpdate?.max_updated_at ?? "",
+    refundState?.count ?? 0, refundState?.pending ?? 0, refundState?.confirmed ?? 0,
   ].join(":");
 }

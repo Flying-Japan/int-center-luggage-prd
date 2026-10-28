@@ -11,6 +11,10 @@ export type AutoSalesSummary = {
   /** Present only when the legacy reconciliation total contains PAID estimates without tender rows. */
   estimatedAmount?: number;
   recordedAmount?: number;
+  grossCashAmount?: number;
+  grossQrAmount?: number;
+  cashRefundAmount?: number;
+  refundCount?: number;
 };
 
 function buildDateRange(businessDates: string[]): { uniqueDates: string[]; rangeStart: string; rangeEnd: string } | null {
@@ -40,14 +44,15 @@ async function fetchLiveOrderSalesSummariesByDate(db: D1Database, businessDates:
   const dateRange = buildDateRange(businessDates);
   if (!dateRange) return new Map();
   const rows = await db.prepare(
-    `SELECT business_date, cash AS cash_amount, qr AS qr_amount, total_amount, paid_count AS order_count, legacy_estimated_amount, recorded_amount
+    `SELECT business_date, cash AS cash_amount, qr AS qr_amount, total_amount, paid_count AS order_count, legacy_estimated_amount, recorded_amount, gross_cash, gross_qr, cash_refund_amount, refund_count
      FROM luggage_sales_daily WHERE business_date >= ? AND business_date <= ?`,
   ).bind(dateRange.rangeStart, dateRange.rangeEnd).all<{
-    business_date: string; cash_amount: number; qr_amount: number; total_amount: number; order_count: number; legacy_estimated_amount: number; recorded_amount: number;
+    business_date: string; cash_amount: number; qr_amount: number; total_amount: number; order_count: number; legacy_estimated_amount: number; recorded_amount: number; gross_cash: number; gross_qr: number; cash_refund_amount: number; refund_count: number;
   }>();
   const result = new Map<string, AutoSalesSummary>();
   for (const row of rows.results) {
     result.set(row.business_date, { cashAmount: row.cash_amount ?? 0, qrAmount: row.qr_amount ?? 0, totalAmount: row.total_amount ?? 0, orderCount: row.order_count ?? 0, source: "live_orders",
+      ...(row.refund_count > 0 ? { grossCashAmount: row.gross_cash, grossQrAmount: row.gross_qr, cashRefundAmount: row.cash_refund_amount, refundCount: row.refund_count } : {}),
       ...(row.legacy_estimated_amount > 0 ? { estimatedAmount: row.legacy_estimated_amount, recordedAmount: row.recorded_amount } : {}),
     });
   }
@@ -66,7 +71,7 @@ export async function resolveAutoSalesSummariesByDate(db: D1Database, businessDa
   for (const businessDate of uniqueDates) {
     const daily = dailySalesByDate.get(businessDate);
     const live = liveOrdersByDate.get(businessDate);
-    if (live && (live.totalAmount > 0 || live.orderCount > 0 || businessDate === today)) {
+    if (live && ((live.refundCount ?? 0) > 0 || live.totalAmount > 0 || live.orderCount > 0 || businessDate === today)) {
       result.set(businessDate, live);
       continue;
     }

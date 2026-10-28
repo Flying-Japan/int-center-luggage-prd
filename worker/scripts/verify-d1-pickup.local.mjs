@@ -81,7 +81,7 @@ function canonicalSqlTokens(sql) {
   // a literal or body, and never collapse whitespace/escapes inside quoted tokens.
   const kindIndex = tokens[1]?.word === 'UNIQUE' ? 2 : 1;
   const clause = kindIndex + 1;
-  if (tokens[0]?.word === 'CREATE' && ['INDEX', 'VIEW', 'TRIGGER'].includes(tokens[kindIndex]?.word)
+  if (tokens[0]?.word === 'CREATE' && ['TABLE', 'INDEX', 'VIEW', 'TRIGGER'].includes(tokens[kindIndex]?.word)
     && tokens[clause]?.word === 'IF' && tokens[clause + 1]?.word === 'NOT' && tokens[clause + 2]?.word === 'EXISTS') {
     tokens.splice(clause, 3);
   }
@@ -168,7 +168,7 @@ try {
   assert.deepEqual(await readdir(dbDir), [], 'An existing D1 target is never accepted');
   console.log(`ISOLATED LOCAL D1: ${dbDir}\nREPORT: ${reportFile}`);
   const sourceFiles = ['src/schema.sql', 'migrations/20261025_extension_receipts.sql',
-    'migrations/20261026_root_settlement_review.sql', 'src/services/luggageBilling.ts',
+    'migrations/20261026_root_settlement_review.sql', 'migrations/20261028_flying_pass_refund_settlement.sql', 'src/services/luggageBilling.ts',
     'src/services/orderNumber.ts', 'src/services/storage.ts', 'src/lib/payments.ts',
     'src/services/cashClosingSales.ts'];
   const sources = {};
@@ -176,7 +176,9 @@ try {
     sources[name] = await readFile(join(workerDir, name), 'utf8');
     report.sourceHashes[name] = createHash('sha256').update(sources[name]).digest('hex');
   }
-  const schema = sources['src/schema.sql'];
+  const currentSchema = sources['src/schema.sql'];
+  const schema = currentSchema.split('-- Flying Pass phase 2:')[0].trimEnd() + '\n';
+  const refundSettlement = sources['migrations/20261028_flying_pass_refund_settlement.sql'];
   const firstMigration = sources['migrations/20261025_extension_receipts.sql'];
   const policyMigration = sources['migrations/20261026_root_settlement_review.sql'];
   const policyStart = 'CREATE UNIQUE INDEX IF NOT EXISTS idx_luggage_extension_date';
@@ -190,7 +192,7 @@ try {
     assertSameSql(name ?? `financial statement ${index + 1}`, migrationDefinitions[index], expected,
       'settlement policy migration', 'src/schema.sql');
   }
-  // Reconstruct only the empty pre-feature schema, then actually apply both migrations locally.
+  // Reconstruct only the empty pre-feature schema, then actually apply the legacy migrations and the refund settlement migration locally.
   // Do not ALTER, patch, clock-rewrite or disable any final financial trigger/view.
   let baseSchema = schema.slice(0, schema.indexOf(policyStart));
   for (const column of ['extension_date', 'receipt_request_id']) {
@@ -220,17 +222,23 @@ try {
   const run = (sql, ...values) => statement(sql, ...values).run();
   activeStep = 'initialize-empty-local-d1-and-apply-two-migrations';
   assert.equal((await one("SELECT COUNT(*) AS n FROM sqlite_master WHERE name LIKE 'luggage_%'")).n, 0);
-  for (const [name, sql] of [['base schema', baseSchema], ['extension receipts', firstMigration], ['settlement policy', policyMigration]]) {
+  for (const [name, sql] of [['base schema', baseSchema], ['extension receipts', firstMigration], ['settlement policy', policyMigration], ['refund settlement', refundSettlement]]) {
     for (const query of splitSql(sql)) await run(query);
     console.log(`LOCAL SCHEMA OK: ${name}`);
   }
-  // Compare every final financial index/view/trigger to the actual definitions D1 installed.
-  for (const query of expectedDefinitions) {
-    const match = query.match(/^CREATE\s+(?:UNIQUE\s+)?(?:INDEX|VIEW|TRIGGER)\s+(?:IF NOT EXISTS\s+)?(\w+)/i);
-    assert.ok(match, `Unexpected financial DDL: ${query.slice(0, 80)}`);
-    const installed = await one('SELECT sql FROM sqlite_master WHERE name = ?', match[1]);
-    assert.ok(installed, `Missing D1 financial definition: ${match[1]}`);
-    assertSameSql(match[1], installed.sql, query);
+  // Keep the historical policy comparison above, then verify the effective phase-2 definitions.
+  const finalDefinitions = new Map();
+  for (const query of [...expectedDefinitions, ...splitSql(refundSettlement)]) {
+    const drop = query.match(/^DROP\s+(?:TABLE|INDEX|VIEW|TRIGGER)\s+IF EXISTS\s+(\w+)/i);
+    if (drop) { finalDefinitions.delete(drop[1]); continue; }
+    const create = query.match(/^CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|VIEW|TRIGGER)\s+(?:IF NOT EXISTS\s+)?(\w+)/i);
+    assert.ok(create, `Unexpected financial DDL: ${query.slice(0, 80)}`);
+    finalDefinitions.set(create[1], query);
+  }
+  for (const [name, query] of finalDefinitions) {
+    const installed = await one('SELECT sql FROM sqlite_master WHERE name = ?', name);
+    assert.ok(installed, `Missing D1 financial definition: ${name}`);
+    assertSameSql(name, installed.sql, query);
   }
   const calendar = await one("SELECT date('now', '+9 hours') AS today, date('now', '+9 hours', '-1 day') AS yesterday");
   report.calendar = calendar;

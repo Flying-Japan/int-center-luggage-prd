@@ -9,6 +9,9 @@ export type Env = {
   INTERNAL_API_SECRET: string;
   CENTER_INVENTORY_API_SECRET?: string;
 
+  // Default OFF. Public routes stay hard-gated until phase-3 UI and operational validation are complete.
+  LUGGAGE_FLYING_PASS_REFUNDS_ENABLED?: string;
+
   // Supabase (staff auth + staff profiles)
   SUPABASE_URL: string;
   SUPABASE_ANON_KEY: string;

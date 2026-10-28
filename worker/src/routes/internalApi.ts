@@ -1,3 +1,4 @@
+import flyingPassRefundRoutes from "./flyingPassRefunds";
 import { writePickupTransition, PickupTransitionError } from '../services/orderPickupWrites';
 import { getBillingSummary, getBillingSummaries, getCancellationBlock, nextManualExtensionDate, requiresCollectionFlow } from '../services/luggageBilling';
 import { Hono, type Context } from "hono";
@@ -101,6 +102,7 @@ const internalApi = new Hono<AppType>();
 // would swallow every request on the worker. Scope the auth middleware to the
 // prefix we actually own so /customer, /login, /admin, etc. stay untouched.
 internalApi.use("/internal/*", internalAuth);
+internalApi.route("/", flyingPassRefundRoutes);
 
 const EXPERIENCE_STATUSES = new Set(["SCHEDULED", "VISITED", "RECEIVED", "CANCELLED"]);
 const EXPERIENCE_VISITOR_TYPES = new Set(["BLOGGER", "INFLUENCER", "YOUTUBER", "OTHER"]);
@@ -391,19 +393,20 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
       c.env.DB.prepare("SELECT sale_date, people, cash, qr, luggage_total FROM luggage_daily_sales WHERE sale_date BETWEEN ? AND ?")
         .bind(range.startDate, range.endDate).all<{ sale_date: string; people: number; cash: number; qr: number; luggage_total: number }>(),
       c.env.DB.prepare(
-        `SELECT business_date AS sale_date, people, suitcase_total, backpack_total, cash, qr
+        `SELECT business_date AS sale_date, people, suitcase_total, backpack_total, cash, qr, gross_cash, gross_qr, cash_refund_amount, refund_count
          FROM luggage_sales_daily WHERE business_date BETWEEN ? AND ?`
-      ).bind(range.startDate, range.endDate).all<{ sale_date: string; people: number; suitcase_total: number; backpack_total: number; cash: number; qr: number }>(),
-      c.env.DB.prepare("SELECT business_date AS sale_date, total_amount, paypay_amount, actual_qr_amount FROM luggage_cash_closings WHERE closing_type = 'FINAL_CLOSE' AND business_date BETWEEN ? AND ?")
-        .bind(range.startDate, range.endDate).all<{ sale_date: string; total_amount: number; paypay_amount: number; actual_qr_amount: number }>(),
+      ).bind(range.startDate, range.endDate).all<{ sale_date: string; people: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; gross_cash: number; gross_qr: number; cash_refund_amount: number; refund_count: number }>(),
+      c.env.DB.prepare("SELECT c.business_date AS sale_date, c.total_amount, c.paypay_amount, c.actual_qr_amount, COALESCE(rs.cash_refund_amount,0) AS refund_amount, rs.net_cash AS refund_net_cash, rs.gross_qr AS refund_gross_qr, rs.net_total AS refund_net_total FROM luggage_cash_closings c LEFT JOIN luggage_cash_closing_refund_snapshots rs ON rs.closing_id = c.closing_id WHERE closing_type = 'FINAL_CLOSE' AND c.business_date BETWEEN ? AND ?")
+        .bind(range.startDate, range.endDate).all<{ sale_date: string; total_amount: number; paypay_amount: number; actual_qr_amount: number; refund_amount: number; refund_net_cash: number; refund_gross_qr: number; refund_net_total: number }>(),
     ]);
 
     const sheetByDate = new Map(sheetRows.results.map((row) => [row.sale_date, row]));
     const actualByDate = new Map(actualRows.results.map((row) => [row.sale_date, row]));
     const closingByDate = new Map(closingRows.results.map((row) => {
-      const cash = Math.max(0, (Number(row.total_amount) || 0) - SALES_STARTING_FLOAT);
-      const qr = Number(row.actual_qr_amount) || Number(row.paypay_amount) || 0;
-      return [row.sale_date, { cash, qr, luggage: cash + qr }] as const;
+      const cash = row.refund_amount > 0 ? row.refund_net_cash : Math.max(0, (Number(row.total_amount) || 0) - SALES_STARTING_FLOAT);
+      const actualQr = Number(row.actual_qr_amount) || Number(row.paypay_amount) || 0;
+      const qr = row.refund_amount > 0 ? row.refund_gross_qr : actualQr;
+      return [row.sale_date, { cash, qr, luggage: cash + qr, closingDifferenceAmount: row.refund_amount > 0 ? Number(row.total_amount) - SALES_STARTING_FLOAT + actualQr - row.refund_net_total : null }] as const;
     }));
     const today = jstToday();
     const dates = new Set([...sheetByDate.keys(), ...actualByDate.keys(), ...closingByDate.keys()]);
@@ -421,6 +424,9 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
         date, weekdayJst: JST_DOW_JP[new Date(`${date}T12:00:00Z`).getUTCDay()], isWeekend: flags.isWeekend,
         japaneseHoliday: flags.jp, koreanHoliday: flags.kr, people: Math.max(Number(actual?.people) || 0, Number(sheet?.people) || 0),
         suitcases: Number(actual?.suitcase_total) || 0, backpacks: Number(actual?.backpack_total) || 0, cash, qr, luggage,
+        grossCash: cash + Number(actual?.cash_refund_amount || 0), grossQr: qr,
+        cashRefundAmount: Number(actual?.cash_refund_amount || 0), refundCount: Number(actual?.refund_count || 0),
+        ...(settled && closing?.closingDifferenceAmount != null ? { closingDifferenceAmount: closing.closingDifferenceAmount } : {}),
         realtime: date === today,
         settled, luggageSource: settled ? "final_close" : actual ? "orders" : sheet ? "daily_sales_fallback" : "none",
       };
@@ -433,12 +439,13 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
     ).bind(today).first<{ order_count: number; paid_count: number; pending_count: number; people: number; cash: number; qr: number; luggage: number; suitcases: number; backpacks: number }>();
     const rows = todayRow ? dailyRows.map((row) => row.date === today ? { ...row, people: Number(todayOrders?.people) || 0, suitcases: Number(todayOrders?.suitcases) || 0, backpacks: Number(todayOrders?.backpacks) || 0, cash: Number(todayOrders?.cash) || 0, qr: Number(todayOrders?.qr) || 0, luggage: Number(todayOrders?.luggage) || 0, realtime: true, settled: false, luggageSource: "orders" } : row) : dailyRows;
     const total = (key: "cash" | "qr" | "luggage" | "people" | "suitcases" | "backpacks") => rows.reduce((sum, row) => sum + row[key], 0);
-    const activeRows = rows.filter((row) => row.luggage > 0);
+    const activeRows = rows.filter((row) => row.luggage !== 0 || row.cashRefundAmount > 0);
     const historical = activeRows.filter((row) => row.date !== today);
     const historicalAverage = historical.length ? Math.round(historical.reduce((sum, row) => sum + row.luggage, 0) / historical.length) : 0;
     const minRows = historical.length ? historical : activeRows;
     const totalCash = total("cash"); const totalQr = total("qr");
-    return c.json({ status: "ok", range, today: { date: today, orders: Number(todayOrders?.order_count) || 0, paid: Number(todayOrders?.paid_count) || 0, pending: Number(todayOrders?.pending_count) || 0, cash: Number(todayOrders?.cash) || 0, qr: Number(todayOrders?.qr) || 0, luggage: Number(todayOrders?.luggage) || 0, suitcases: Number(todayOrders?.suitcases) || 0, backpacks: Number(todayOrders?.backpacks) || 0, versusHistoricalAverage: { amount: (Number(todayOrders?.luggage) || 0) - historicalAverage, percent: historicalAverage ? Math.round(((Number(todayOrders?.luggage) || 0) - historicalAverage) / historicalAverage * 100) : 0 } }, summary: { luggage: total("luggage"), cash: totalCash, qr: totalQr, cashPercent: totalCash + totalQr ? Math.round(totalCash / (totalCash + totalQr) * 100) : 0, qrPercent: totalCash + totalQr ? Math.round(totalQr / (totalCash + totalQr) * 100) : 0, people: total("people"), suitcases: total("suitcases"), backpacks: total("backpacks"), dailyAverage: historicalAverage, activeMin: minRows.length ? Math.min(...minRows.map((row) => row.luggage)) : null, activeMax: activeRows.length ? Math.max(...activeRows.map((row) => row.luggage)) : null }, dailyRows: rows });
+    const grossCash = rows.reduce((sum,row) => sum + row.grossCash, 0), grossQr = rows.reduce((sum,row) => sum + row.grossQr, 0);
+    return c.json({ status: "ok", range, today: { date: today, orders: Number(todayOrders?.order_count) || 0, paid: Number(todayOrders?.paid_count) || 0, pending: Number(todayOrders?.pending_count) || 0, cash: Number(todayOrders?.cash) || 0, qr: Number(todayOrders?.qr) || 0, luggage: Number(todayOrders?.luggage) || 0, suitcases: Number(todayOrders?.suitcases) || 0, backpacks: Number(todayOrders?.backpacks) || 0, versusHistoricalAverage: { amount: (Number(todayOrders?.luggage) || 0) - historicalAverage, percent: historicalAverage ? Math.round(((Number(todayOrders?.luggage) || 0) - historicalAverage) / historicalAverage * 100) : 0 } }, summary: { luggage: total("luggage"), cash: totalCash, qr: totalQr, grossCash, grossQr, cashRefundAmount: rows.reduce((sum,row) => sum + row.cashRefundAmount,0), refundCount: rows.reduce((sum,row) => sum + row.refundCount,0), cashPercent: grossCash + grossQr ? Math.round(grossCash / (grossCash + grossQr) * 100) : 0, qrPercent: grossCash + grossQr ? Math.round(grossQr / (grossCash + grossQr) * 100) : 0, people: total("people"), suitcases: total("suitcases"), backpacks: total("backpacks"), dailyAverage: historicalAverage, activeMin: minRows.length ? Math.min(...minRows.map((row) => row.luggage)) : null, activeMax: activeRows.length ? Math.max(...activeRows.map((row) => row.luggage)) : null }, dailyRows: rows });
   } catch {
     return c.json({ status: "error", error: "failed to read luggage sales analytics" }, 500);
   }
@@ -575,6 +582,7 @@ type LuggageCashClosingDto = {
   createdAt: string | null;
   updatedAt: string | null;
   submittedAt: string | null;
+  refundSnapshot?: { grossCashAmount: number; grossQrAmount: number; cashRefundAmount: number; refundCount: number; refundIds: string[]; netCashAmount: number; netTotalAmount: number };
   morningHandover: {
     closingId: number;
     createdAt: string | null;
@@ -618,12 +626,14 @@ function serializeCashClosing(
   const actualQrAmount = rawActualQrAmount === null || rawActualQrAmount === 0 ? paypayAmount : rawActualQrAmount;
   const actualAmount = nullableFiniteNumber(row.actualAmount);
   const currentAutoSales = businessDate ? autoSalesByDate.get(businessDate) : undefined;
-  const autoSalesAmount = currentAutoSales?.totalAmount ?? nullableFiniteNumber(row.storedAutoSalesAmount);
+  const autoSalesAmount = row.refundNetTotal != null ? nullableFiniteNumber(row.refundNetTotal) : currentAutoSales?.totalAmount ?? nullableFiniteNumber(row.storedAutoSalesAmount);
   const cashTotal = nullableFiniteNumber(row.cashTotal);
-  const differenceAmount = currentAutoSales
+  const differenceAmount = row.refundNetTotal != null
+    ? (actualAmount === null ? null : actualAmount - Number(row.refundNetTotal)) : currentAutoSales
     ? (actualAmount === null ? null : actualAmount - currentAutoSales.totalAmount)
     : nullableFiniteNumber(row.differenceAmount);
-  const qrDifferenceAmount = currentAutoSales
+  const qrDifferenceAmount = row.refundNetTotal != null
+    ? (actualQrAmount === null ? null : actualQrAmount - Number(row.refundGrossQr)) : currentAutoSales
     ? (actualQrAmount === null ? null : actualQrAmount - currentAutoSales.qrAmount)
     : nullableFiniteNumber(row.qrDifferenceAmount);
   return {
@@ -648,6 +658,7 @@ function serializeCashClosing(
     createdAt: nullableString(row.createdAt),
     updatedAt: nullableString(row.updatedAt),
     submittedAt: nullableString(row.submittedAt),
+    ...(row.refundNetTotal != null ? { refundSnapshot: { grossCashAmount: Number(row.refundGrossCash), grossQrAmount: Number(row.refundGrossQr), cashRefundAmount: Number(row.refundAmount), refundCount: Number(row.refundCount), refundIds: JSON.parse(String(row.refundIds)) as string[], netCashAmount: Number(row.refundNetCash), netTotalAmount: Number(row.refundNetTotal) } } : {}),
     morningHandover: morningClosingId === null ? null : {
       closingId: morningClosingId,
       createdAt: nullableString(row.morningCreatedAt),
@@ -691,8 +702,11 @@ const CASH_CLOSING_SELECT = `
          morning.closing_id AS morningClosingId,
          morning.created_at AS morningCreatedAt,
          morning.staff_id AS morningStaffId,
-         morning.owner_name AS morningOwnerName
+         morning.owner_name AS morningOwnerName,
+         rs.gross_cash AS refundGrossCash, rs.gross_qr AS refundGrossQr, rs.cash_refund_amount AS refundAmount, rs.refund_count AS refundCount,
+         rs.refund_ids AS refundIds, rs.net_cash AS refundNetCash, rs.net_total AS refundNetTotal
   FROM luggage_cash_closings c
+  LEFT JOIN luggage_cash_closing_refund_snapshots rs ON rs.closing_id = c.closing_id
   LEFT JOIN luggage_cash_closings morning
     ON morning.business_date = c.business_date
    AND c.closing_type = 'FINAL_CLOSE'
@@ -863,6 +877,7 @@ function isUniqueCashClosingViolation(error: unknown): boolean {
 function cashClosingAutoSalesDto(autoSales: AutoSalesSummary | null) {
   return autoSales
     ? { cashAmount: autoSales.cashAmount, qrAmount: autoSales.qrAmount, totalAmount: autoSales.totalAmount, orderCount: autoSales.orderCount, source: autoSales.source,
+      ...((autoSales.refundCount ?? 0) > 0 ? { grossCashAmount: autoSales.grossCashAmount, grossQrAmount: autoSales.grossQrAmount, cashRefundAmount: autoSales.cashRefundAmount, refundCount: autoSales.refundCount } : {}),
       ...((autoSales.estimatedAmount ?? 0) > 0 ? { estimatedAmount: autoSales.estimatedAmount, recordedAmount: autoSales.recordedAmount } : {}),
     }
     : null;
@@ -983,12 +998,14 @@ internalApi.post("/internal/luggage-cash-closings", async (c) => {
          SELECT last_insert_rowid(), 'SUBMIT', NULL, json_set(?, '$.closingId', last_insert_rowid()), ?
          WHERE changes() = 1`,
       ).bind(auditPayload, staff.id),
+      c.env.DB.prepare(`SELECT json_extract('{}', CASE WHEN EXISTS (SELECT 1 FROM luggage_cash_closing_audits WHERE action = 'SUBMIT' AND instr(payload, ?) > 0) THEN '$' ELSE 'CLOSING_AUDIT_FAILED' END)`).bind(requestMarker),
     ]);
     const created = (results[0].results ?? []) as Array<Record<string, unknown>>;
     if (created.length === 0) return duplicate();
     if (results[1].meta.changes !== 1) return c.json({ error: "Unable to write cash-closing audit" }, 500);
     return c.json({ closing: cashClosingSnapshotOf(created[0]), autoSales: cashClosingAutoSalesDto(autoSales) }, 201);
   } catch (error) {
+    if (/REFUND_PAYOUT_PENDING|REFUND_CLOSING_STALE/.test(String(error instanceof Error ? error.cause ?? error : error))) return c.json({ error: "환급 지급 또는 자동 매출 상태가 변경되었습니다. 지급 여부 확인 후 새로고침해주세요", code: "REFUND_CLOSING_CONFLICT" }, 409);
     if (isUniqueCashClosingViolation(error)) return duplicate();
     return c.json({ error: "Unable to create cash closing" }, 500);
   }
@@ -1022,6 +1039,7 @@ internalApi.patch("/internal/luggage-cash-closings/:closingId", async (c) => {
   }
   const computed = computeCashClosingEdit(normalized, before);
   const auditPayload = JSON.stringify({
+    auditEventId: crypto.randomUUID(),
     source: "unified-admin",
     closingId,
     before,
@@ -1036,6 +1054,7 @@ internalApi.patch("/internal/luggage-cash-closings/:closingId", async (c) => {
 
   try {
     const results = await c.env.DB.batch([
+      c.env.DB.prepare(`SELECT json_extract('{}', CASE WHEN EXISTS (SELECT 1 FROM luggage_cash_closings WHERE closing_id = ? AND ${CASH_CLOSING_SNAPSHOT_WHERE}) THEN '$' ELSE 'CLOSING_STALE' END)`).bind(closingId, ...cashClosingSnapshotBinds(before)),
       c.env.DB.prepare(
         `UPDATE luggage_cash_closings SET
            ${CASH_CLOSING_DENOMS.map((d) => `count_${d} = ?`).join(", ")},
@@ -1056,12 +1075,14 @@ internalApi.patch("/internal/luggage-cash-closings/:closingId", async (c) => {
         `INSERT INTO luggage_cash_closing_audits (closing_id, action, reason, payload, staff_id)
          SELECT ?, 'EDIT', NULL, ?, ? WHERE changes() = 1`,
       ).bind(closingId, auditPayload, staff.id),
+      c.env.DB.prepare(`SELECT json_extract('{}', CASE WHEN EXISTS (SELECT 1 FROM luggage_cash_closing_audits WHERE closing_id = ? AND action = 'EDIT' AND payload = ? AND staff_id = ?) THEN '$' ELSE 'CLOSING_AUDIT_FAILED' END)`).bind(closingId, auditPayload, staff.id),
     ]);
-    const updated = (results[0].results ?? []) as Array<Record<string, unknown>>;
+    const updated = (results[1].results ?? []) as Array<Record<string, unknown>>;
     if (updated.length !== 1) return c.json({ error: "Cash closing was changed by another request", code: "STALE" }, 409);
-    if (results[1].meta.changes !== 1) return c.json({ error: "Unable to write cash-closing audit" }, 500);
+    if (results[2].meta.changes !== 1) return c.json({ error: "Unable to write cash-closing audit" }, 500);
     return c.json({ closing: cashClosingSnapshotOf(updated[0]), expectedQrAmount: computed.expectedQrAmount });
-  } catch {
+  } catch (error) {
+    if (String(error instanceof Error ? error.cause ?? error : error).includes('CLOSING_STALE')) return c.json({ error: "Cash closing was changed by another request", code: "STALE" }, 409);
     return c.json({ error: "Unable to update cash closing" }, 500);
   }
 });
