@@ -26,6 +26,7 @@ Wrangler 설정과 운영 환경에는 플래그를 추가/설정하지 않았�
 | `/:refundId/lookup` | 없음 | 저장 기록 및 재지급 금지 안내 |
 | `/:refundId/confirm` | `cashPaid: true`, `expectedAmount` 정수 엔 | 확정 기록; 동일 확인 재요청은 기존 결과 200 |
 | `/:refundId/cancel` | `confirmNotPaid: true`, `reason` 1~200자 | 미지급 취소; 동일 요청 재전송 가능 |
+| `/:refundId/late-confirm` | `cashPaid: true`, `expectedAmount`, `paidAtJst`(JST `YYYY-MM-DDTHH:mm[:ss]`), `reason` 1~200자 | 등록일(JST)이 지난 지급 대기 건의 **매니저·최고관리자 지연 확정**(2026-10-29, migration 필요). 환경 플래그와 무관(확정과 같은 복구 경로) |
 
 `PAYOUT_PENDING`은 지급 여부가 미확정인 기록이다. 발견했다고 다시 현금을 지급하면 안 된다.
 ~~지급 건을 등록한 동일 사용자·직원만 확정/취소할 수 있다.~~ (2026-10-29 개정, migration `20261029_flying_pass_refund_handover.sql` 필요) 교대 시 다른 직원(center_staff·part_time·manager)도 확정/취소할 수 있고 처리자는 `terminal_by_staff_id`와 연결된 audit에 따로 남는다. part_time actor는 환급 route에서만 `LUGGAGE_PART_TIME_REFUND_ACTORS_ENABLED=true`일 때 `pt:<uid>`로 받는다(user_profiles 조회·생성 없음). 기능 플래그를 OFF해도 로컬 테스트의 기존 기록 조회·확정·미지급 취소는 가능하다.
@@ -79,3 +80,16 @@ node scripts/test-flying-pass-refunds-d1.local.mjs --run-local
 4. 정상 정산된 확정 환급만 수령 가능하도록 Worker·DB·통합 어드민 검증을 함께 갱신하고 1단계 DB hold를 교체한다.
 5. 정산 검토/매출/마감/UI에 원 수납·환급·순액과 현재 등급을 표시한다.
 6. 관리자 복구 절차, 자정 경계, 마감 후 환급 정책 및 연동 회귀 검증을 완료한 후 공개 router의 준비 상태를 변경한다.
+
+## 지연 확정(2026-10-29 사용자 승인, 로컬 구현·검증, 미배포·migration 미적용)
+
+- 대상: 등록일(`business_date`, JST)이 오늘보다 이전인 `PAYOUT_PENDING`. 일반 `/confirm`은 계속 `PAYOUT_DAY_CHANGED`(날짜를 바꿔 기록하지 않음). 현금을 주지 않았으면 기존 `/cancel`(누구나, 사유 필수).
+- 권한: 서명된 actor `role`이 `manager`·`super_admin`일 때만(아니면 403 `MANAGER_REQUIRED`). 직원 매핑은 기존 `resolveInternalActorStaff`(같은 이메일의 활성 editor/admin `user_profiles`) 그대로, 위장·가짜 레코드 없음.
+- 입력: 실제 현금 지급 일시(JST, 존재하는 일시만), 사유. `paid_at`은 등록 시각 이상·현재 시각 미만(`PAID_AT_INVALID` 400), 오늘 등록 건은 `LATE_CONFIRM_NOT_NEEDED` 409, 금액 불일치 `AMOUNT_CHANGED`. 원 주문·수납·정산 자격 재검증(미수납·연장 미청구가 있으면 `OUTSTANDING`)은 일반 확정과 같다.
+- **정산 귀속일 = 실제 지급일(`date(paid_at,+9h)`)**, 등록일이 아니다. `luggage_sales_daily`의 환급 집계, FINAL_CLOSE 환급 snapshot의 `refund_ids`, 마감 수정 guard가 모두 지급일 기준이다. 일반 확정은 `paid_at = terminal_at`이고 그 날짜 = 등록일이므로 기존 행·기존 마감 snapshot은 값이 바뀌지 않는다.
+- **현금마감 경계:** 실제 지급일에 FINAL_CLOSE가 이미 있으면 `CLOSING_ALREADY_FINALIZED` 409로 차단한다(과거 마감·snapshot·원장 자동 수정 없음, D1 전이 trigger도 같은 조건으로 거부). 이때는 해결 경로가 없으므로 책임자 판단이 필요하다(아래 "정책 결정 필요").
+- 감사: 같은 `FLYING_PASS_REFUND_CONFIRM` audit에 `lateConfirm {paidAt, reason}`, `settlementDate`, `businessDate`(등록일), 처리 관리자 `actor`(userId·role)·`legacyStaff.id`가 남고 `terminal_by_staff_id`가 관리자다. 등록자 기록(`registered_by_staff_id`·`actor_user_id`·REGISTER audit)은 그대로. 같은 요청 재전송은 replay, 다른 내용은 `TERMINAL_CONFLICT`.
+- DB 불변식(D1이 지킴): CONFIRMED는 (`paid_at = terminal_at` AND 지급일 = 등록일) 또는 (등록 시각 ≤ `paid_at` < `terminal_at` AND 등록일 < 확정일). 지연 확정 행은 terminal audit에 `$.lateConfirm.paidAt = paid_at`, 사유 1~200자, `$.actor.role ∈ {manager, super_admin}`가 있어야 하고, 등록일 < 오늘, `paid_at` ≤ 현재, 지급일 FINAL_CLOSE 없음. 일반 확정은 `$.lateConfirm`이 없어야 한다.
+- 서비스 불변식(Worker만 지킴): actor role의 진위(HMAC 서명 + Worker role 검사). DB는 audit에 적힌 role이 manager/super_admin인지만 확인할 수 있고 실제 역할을 알 수 없다(원시 SQL 접근 권한자는 audit도 쓸 수 있음).
+- 알려진 한계: (1) 실제 지급일 마감이 이미 끝난 건은 기록할 방법이 없다(정책 결정 필요). (2) 등록일 이후의 날짜 P에 지급했는데 P의 FINAL_CLOSE가 먼저 끝나면 같은 상황이 된다(등록일의 마감만 진행 중 건으로 막힘). (3) 지연 확정 사이에 연장 미수납이 생기면 먼저 수납해야 확정된다(수납은 진행 중 환급과 무관하게 가능, 테스트로 확인).
+

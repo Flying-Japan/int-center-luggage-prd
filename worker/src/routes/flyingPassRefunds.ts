@@ -12,6 +12,14 @@ function reason(value: unknown): string {
   if (typeof value !== 'string' || value.trim().length < 1 || value.trim().length > 200) invalid('1~200자의 사유가 필요합니다');
   return value.trim();
 }
+// Late confirmation input: the real payout time as JST wall clock "YYYY-MM-DDTHH:mm[:ss]" (round-trip checked), stored as UTC ISO.
+function paidAtFromJst(value: unknown): string {
+  const match = typeof value === 'string' ? /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.exec(value) : null;
+  const local = match ? `${value}${match[1] ? '' : ':00'}` : '';
+  const time = local ? Date.parse(`${local}+09:00`) : NaN;
+  if (!Number.isFinite(time) || new Date(time + 9 * 3600000).toISOString().slice(0, 19) !== local) invalid('실제 지급 일시(JST, YYYY-MM-DDTHH:mm)가 필요합니다');
+  return new Date(time).toISOString();
+}
 function targetTier(value: unknown): FlyingPassTier {
   if (typeof value !== 'string' || value === 'NONE' || !FLYING_PASS_TIERS.includes(value as FlyingPassTier)) invalid('환급 대상 Flying Pass 등급이 올바르지 않습니다');
   return value as FlyingPassTier;
@@ -23,7 +31,7 @@ function targetTier(value: unknown): FlyingPassTier {
  */
 export function createFlyingPassRefundRoutes(localTestOnly = false) {
   const routes = new Hono<AppType>();
-  const handle = (operation: 'preview' | 'register' | 'lookup' | 'confirm' | 'cancel') => async (c: Context<AppType>) => {
+  const handle = (operation: 'preview' | 'register' | 'lookup' | 'confirm' | 'late-confirm' | 'cancel') => async (c: Context<AppType>) => {
     c.header('Cache-Control', 'no-store');
     if (localTestOnly && c.env.APP_ENV !== 'test') {
       return c.json({ error: '3단계 UI 및 운영 검증 완료 전에는 환급 기능을 사용할 수 없습니다', code: 'REFUND_SETTLEMENT_NOT_READY' }, 503);
@@ -36,7 +44,7 @@ export function createFlyingPassRefundRoutes(localTestOnly = false) {
       if (!orderId || !orderIdPattern.test(orderId)) invalid('PAID 원주문 식별자가 필요합니다');
       const body: unknown = await c.req.json().catch(() => null);
       if (!bodyRecord(body)) invalid('올바른 JSON 요청이 필요합니다');
-      const keys = { preview: ['targetTier'], register: ['refundId','targetTier','reason','expectedFingerprint'], lookup: [], confirm: ['cashPaid','expectedAmount'], cancel: ['confirmNotPaid','reason'] }[operation];
+      const keys = { preview: ['targetTier'], register: ['refundId','targetTier','reason','expectedFingerprint'], lookup: [], confirm: ['cashPaid','expectedAmount'], 'late-confirm': ['cashPaid','expectedAmount','paidAtJst','reason'], cancel: ['confirmNotPaid','reason'] }[operation];
       if (Object.keys(body).some(key => !['actor', ...keys].includes(key))) invalid('허용되지 않은 요청 항목입니다');
       let actor;
       try { actor = normalizeRefundWriteActor(body.actor); }
@@ -54,9 +62,10 @@ export function createFlyingPassRefundRoutes(localTestOnly = false) {
       const refundId = c.req.param('refundId');
       if (!refundId || !REFUND_UUID.test(refundId)) invalid('유효한 환급 UUID가 필요합니다');
       if (operation === 'lookup') return c.json({ refund: await getFlyingPassRefund(c.env.DB, orderId, refundId), instruction: '기록을 조회한 것만으로 현금을 다시 지급하지 마세요. 진행 중이면 담당 직원의 실제 지급 여부를 먼저 확인하세요' });
-      if (operation === 'confirm') {
+      if (operation === 'confirm' || operation === 'late-confirm') {
         if (body.cashPaid !== true || typeof body.expectedAmount !== 'number' || !Number.isSafeInteger(body.expectedAmount) || body.expectedAmount < 1 || body.expectedAmount > 500000) invalid('실제 현금 지급 완료 확인과 정확한 지급액이 필요합니다');
-        return c.json(await finishFlyingPassRefund(c.env.DB, orderId, refundId, { action: 'confirm', cashPaid: true, expectedAmount: body.expectedAmount }, who));
+        const lateConfirm = operation === 'late-confirm' ? { paidAt: paidAtFromJst(body.paidAtJst), reason: reason(body.reason) } : undefined;
+        return c.json(await finishFlyingPassRefund(c.env.DB, orderId, refundId, { action: 'confirm', cashPaid: true, expectedAmount: body.expectedAmount, ...(lateConfirm ? { lateConfirm } : {}) }, who));
       }
       if (body.confirmNotPaid !== true) invalid('현금을 지급하지 않았다는 명시적 확인이 필요합니다');
       return c.json(await finishFlyingPassRefund(c.env.DB, orderId, refundId, { action: 'cancel', confirmNotPaid: true, reason: reason(body.reason) }, who));
@@ -70,6 +79,8 @@ export function createFlyingPassRefundRoutes(localTestOnly = false) {
   routes.post(`${prefix}/register`, handle('register'));
   routes.post(`${prefix}/:refundId/lookup`, handle('lookup'));
   routes.post(`${prefix}/:refundId/confirm`, handle('confirm'));
+  // Manager/super_admin only (checked in the service): a past JST day's PAYOUT_PENDING whose cash was really paid. Not flag-gated, like confirm.
+  routes.post(`${prefix}/:refundId/late-confirm`, handle('late-confirm'));
   routes.post(`${prefix}/:refundId/cancel`, handle('cancel'));
   return routes;
 }

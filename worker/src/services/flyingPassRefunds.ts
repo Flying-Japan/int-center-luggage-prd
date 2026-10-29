@@ -55,11 +55,15 @@ function guard(db: D1Database, orderId: string, c: Context): D1PreparedStatement
   return db.prepare(`SELECT json_extract('{}', CASE WHEN ${snapshotQueries.map(sql => `(${sql}) IS ?`).join(' AND ')} THEN '$' ELSE 'REFUND_STALE' END)`)
     .bind(...c.snapshots.flatMap(snapshot => [orderId, snapshot]));
 }
-async function openDay(db: D1Database, day: string) {
+async function openDay(db: D1Database, day: string, late = false) {
   if (await db.prepare("SELECT 1 FROM luggage_cash_closings WHERE business_date = ? AND closing_type = 'FINAL_CLOSE'").bind(day).first()) {
+    // Late confirmation never rewrites a finished day's closing, refund snapshot or ledger (policy: block and escalate).
+    if (late) fail('CLOSING_ALREADY_FINALIZED', `실제 지급일(${day}, JST)의 최종 현금마감이 이미 완료되어 지연 확정할 수 없습니다. 과거 마감·원장은 자동으로 수정하지 않습니다. 현금을 다시 지급하지 말고 책임자에게 보고하세요`);
     fail('CLOSING_CLOSED', '환급 지급일의 최종 현금마감이 완료되어 지급을 시작하거나 확정할 수 없습니다');
   }
 }
+const LATE_CONFIRM_ROLES = new Set(['manager', 'super_admin']);
+const jstTime = (ms: number) => new Date(ms + 9 * 3600000).toISOString().slice(0, 19).replace('T', ' ');
 function eligibility(c: Context, pendingId?: string) {
   const r = c.root, b = c.billing;
   if (r.parent_order_id !== null) fail('ROOT_ORDER_REQUIRED', '원주문에서 환급을 처리해주세요');
@@ -154,11 +158,15 @@ export async function registerFlyingPassRefund(db: D1Database, orderId: string, 
     return writeError(error);
   }
 }
+export type LateConfirm = { paidAt: string; reason: string };
 export async function finishFlyingPassRefund(db: D1Database, orderId: string, refundId: string, input:
-  { action: 'confirm'; cashPaid: true; expectedAmount: number } | { action: 'cancel'; confirmNotPaid: true; reason: string },
+  { action: 'confirm'; cashPaid: true; expectedAmount: number; lateConfirm?: LateConfirm } | { action: 'cancel'; confirmNotPaid: true; reason: string },
   who: RefundActor, now = new Date()): Promise<{ refund: FlyingPassRefund; replayed: boolean }> {
+  // Late confirmation = recording a past JST day's real cash payout. Manager/super_admin only (signed actor role; the DB re-checks the audited role).
+  const late = input.action === 'confirm' ? input.lateConfirm : undefined;
+  if (late && !LATE_CONFIRM_ROLES.has(who.actor.role)) fail('MANAGER_REQUIRED', '날짜가 지난 지급 건의 지연 확정은 매니저·최고관리자만 할 수 있습니다. 현금을 다시 지급하지 마세요', 403);
   const terminalHash = await sha256({ ...input, userId: who.actor.userId, staffId: who.staff.id });
-  // Shift handover: any permitted staff (center_staff/part_time/manager) may finish another staff's payout.
+  // Shift handover: any permitted staff (center_staff/part_time/manager/super_admin) may finish another staff's payout.
   // The terminal actor is recorded separately (terminal_by_staff_id + terminal audit actor); terminalHash binds the replay to that actor.
   const row = await getFlyingPassRefund(db, orderId, refundId);
   const status = input.action === 'confirm' ? 'CONFIRMED' : 'CANCELLED';
@@ -170,18 +178,26 @@ export async function finishFlyingPassRefund(db: D1Database, orderId: string, re
   try {
     let c: Context | null = null;
     if (input.action === 'confirm') {
-      if (row.business_date !== jstDay(now)) fail('PAYOUT_DAY_CHANGED', '지급일이 변경되었습니다. 실제 지급일 확인 전에는 자동 확정하거나 재지급하지 마세요');
+      if (late) {
+        if (row.business_date >= jstDay(now)) fail('LATE_CONFIRM_NOT_NEEDED', '오늘 등록한 지급 건은 일반 지급 완료 확인을 사용하세요');
+        const paid = Date.parse(late.paidAt), created = Date.parse(row.created_at);
+        if (!Number.isFinite(paid) || new Date(paid).toISOString() !== late.paidAt) fail('PAID_AT_INVALID', '실제 지급 일시 형식이 올바르지 않습니다', 400);
+        if (paid < created) fail('PAID_AT_INVALID', `실제 지급 일시는 지급 건 등록 시각(${jstTime(created)} JST) 이후여야 합니다`, 400);
+        if (paid >= now.getTime()) fail('PAID_AT_INVALID', '실제 지급 일시는 현재 시각 이전이어야 합니다', 400);
+      } else if (row.business_date !== jstDay(now)) fail('PAYOUT_DAY_CHANGED', '지급일이 변경되었습니다. 실제 지급일 확인 전에는 자동 확정하거나 재지급하지 마세요');
       if (input.expectedAmount !== row.amount) fail('AMOUNT_CHANGED', '확인한 현금 지급액이 등록 금액과 다릅니다');
       c = await context(db, orderId);
       eligibility(c, refundId);
       const q = await quote(c, row.after_tier, now);
       if (row.root_snapshot !== c.snapshots[0] || row.receipt_snapshot !== c.snapshots[1] || q.amount !== row.amount
         || q.previousRefundId !== row.previous_refund_id || q.beforeTier !== row.before_tier) fail('STALE', '원 수납 또는 계산 근거가 변경되었습니다');
-      await openDay(db, row.business_date);
+      // Settlement attribution = JST day of the real payout (late) or of registration (same-day confirm; identical by construction).
+      await openDay(db, late ? jstDay(new Date(late.paidAt)) : row.business_date, Boolean(late));
     }
     const action = input.action === 'confirm' ? 'FLYING_PASS_REFUND_CONFIRM' : 'FLYING_PASS_REFUND_CANCEL';
     const at = now.toISOString();
-    const details = JSON.stringify({ refundId, ...input, amount: row.amount, businessDate: row.business_date, terminalHash, ...unifiedActorAuditSnapshot(who.actor, who.staff) });
+    const details = JSON.stringify({ refundId, ...input, amount: row.amount, businessDate: row.business_date,
+      ...(late ? { settlementDate: jstDay(new Date(late.paidAt)) } : {}), terminalHash, ...unifiedActorAuditSnapshot(who.actor, who.staff) });
     await db.batch([
       ...(c ? [guard(db, orderId, c)] : []),
       db.prepare(`SELECT json_extract('{}', CASE WHEN EXISTS (SELECT 1 FROM luggage_flying_pass_refunds WHERE refund_id = ? AND order_id = ? AND status = 'PAYOUT_PENDING' AND request_hash = ?) THEN '$' ELSE 'REFUND_STALE' END)`)
@@ -191,7 +207,7 @@ export async function finishFlyingPassRefund(db: D1Database, orderId: string, re
       db.prepare(`UPDATE luggage_flying_pass_refunds SET status = ?, terminal_hash = ?, terminal_by_staff_id = ?, terminal_at = ?,
         terminal_audit_id = (SELECT log_id FROM luggage_audit_logs WHERE device_id = ? AND action = ?), paid_at = ?, cancel_reason = ?
         WHERE refund_id = ? AND order_id = ? AND status = 'PAYOUT_PENDING'`)
-        .bind(status, terminalHash, who.staff.id, at, refundId, action, input.action === 'confirm' ? at : null,
+        .bind(status, terminalHash, who.staff.id, at, refundId, action, input.action === 'confirm' ? late?.paidAt ?? at : null,
           input.action === 'cancel' ? input.reason : null, refundId, orderId),
       db.prepare(`SELECT json_extract('{}', CASE WHEN EXISTS (SELECT 1 FROM luggage_flying_pass_refunds f JOIN luggage_audit_logs a ON a.log_id = f.terminal_audit_id
         WHERE f.refund_id = ? AND f.status = ? AND f.terminal_hash = ? AND a.details = ?) THEN '$' ELSE 'REFUND_ATOMICITY_FAILED' END)`)
