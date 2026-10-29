@@ -12,7 +12,9 @@
 --    A late confirmation is refused when its payout day already has a FINAL_CLOSE: past closings/snapshots are never rewritten.
 -- Apply BEFORE the Worker that drops the registrant-only rule; the older Worker (same actor, same day only) keeps working on the new schema.
 -- Rows are copied before the insert guard is recreated (the guard rejects non-pending or past-day inserts). Other views/triggers that
--- reference this table are not touched (DROP/CREATE does not re-validate them; RENAME would). Repeatable.
+-- reference this table are not touched (DROP/CREATE does not re-validate them; RENAME would). Repeatable only after a COMPLETE run:
+-- if an import stops between DROP TABLE luggage_flying_pass_refunds and the INSERT from the copy, do NOT re-run (the first statement drops
+-- the copy); restore the refund rows from luggage_flying_pass_refunds_handover_copy / the pre-apply export first. D1 import atomicity is unverified.
 DROP TABLE IF EXISTS luggage_flying_pass_refunds_handover_copy;
 CREATE TABLE luggage_flying_pass_refunds_handover_copy AS SELECT * FROM luggage_flying_pass_refunds;
 DROP TABLE luggage_flying_pass_refunds;
