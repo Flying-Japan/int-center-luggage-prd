@@ -341,3 +341,96 @@ test("audit failure rolls back create and edit", async () => {
   assert.deepEqual((await editSnapshot(ctx, snap.closingId)).snapshot, snap);
   assert.equal(audits(ctx).length, 1);
 });
+
+test("staff closing list, details and statistics keep saved differences when current sales change", async () => {
+  stubProfiles([EDITOR]);
+  for (const [savedDifference, currentTotal] of [[10, 600], [0, 1400], [-10, 1000]]) {
+    const ctx = setup();
+    const date = "2026-10-27";
+    ctx.sqlite.prepare(`INSERT INTO luggage_cash_closings
+      (business_date, closing_type, workflow_status, total_amount, paypay_amount, actual_qr_amount,
+       qr_difference_amount, check_auto_amount, expected_amount, actual_amount, difference_amount)
+      VALUES (?, 'FINAL_CLOSE', 'SUBMITTED', ?, 200, 200, 0, 1000, 1000, ?, ?)`)
+      .run(date, 40800 + savedDifference, 1000 + savedDifference, savedDifference);
+    ctx.sqlite.prepare("INSERT INTO luggage_daily_sales(sale_date, cash, qr, luggage_total) VALUES (?, ?, 300, ?)")
+      .run(date, currentTotal - 300, currentTotal);
+    const before = ctx.sqlite.prepare("SELECT * FROM luggage_cash_closings").all();
+    const currentDifference = 1000 + savedDifference - currentTotal;
+    const signed = (n: number) => `${n > 0 ? "+" : ""}${n.toLocaleString()}`;
+    for (const path of ["/staff/cash-closing", "/staff/cash-closing/1"]) {
+      const response = await ctx.app.request(`https://luggage.test${path}`, {}, ctx.env);
+      assert.equal(response.status, 200);
+      const html = await response.text();
+      assert.match(html, /마감 저장 매출/);
+      assert.match(html, /마감 저장 차액/);
+      assert.ok(html.includes(`현재 집계 ¥${signed(currentDifference)} · 저장 대비 ${signed(1000 - currentTotal)}엔`));
+      assert.ok(html.includes(`현재 집계 ¥${signed(currentTotal)} · 저장 대비 ${signed(currentTotal - 1000)}엔`));
+      if (path.endsWith("/1")) {
+        assert.ok(html.includes(`>¥${signed(savedDifference)}</p>`), "main difference stays saved");
+        assert.ok(html.includes("현재 집계 ¥-100 · 저장 대비 -100엔"), "QR comparison stays separate from saved zero");
+        assert.ok(html.includes(` / ${signed(savedDifference)}엔)`), "copyable summary stays saved");
+      } else {
+        const footer = html.split("<tfoot")[1].split("</tfoot>")[0];
+        assert.equal((footer.match(new RegExp(`>${savedDifference}</td>`, "g")) || []).length, 3, "average/min/max use saved differences");
+        assert.equal((footer.match(/>¥1,000<\/td>/g) || []).length, 3, "average/min/max use saved sales");
+        assert.ok(html.includes(`>${signed(savedDifference)}<span`), "list main difference stays saved");
+      }
+    }
+    assert.deepEqual(ctx.sqlite.prepare("SELECT * FROM luggage_cash_closings").all(), before);
+    assert.equal(audits(ctx).length, 0, "viewing must not write an audit or closing");
+    ctx.sqlite.close();
+  }
+});
+
+test("staff closing missing and zero current totals are distinguished", async () => {
+  stubProfiles([EDITOR]);
+  const ctx = setup();
+  ctx.sqlite.exec(`INSERT INTO luggage_cash_closings
+    (business_date, closing_type, workflow_status, check_auto_amount, expected_amount, actual_amount, difference_amount)
+    VALUES ('2026-10-27', 'FINAL_CLOSE', 'SUBMITTED', 1000, 1000, 1010, 10)`);
+  for (const hasCurrent of [false, true]) {
+    if (hasCurrent) ctx.sqlite.exec("INSERT INTO luggage_daily_sales(sale_date, cash, qr, luggage_total) VALUES ('2026-10-27', 0, 0, 0)");
+    for (const path of ["/staff/cash-closing", "/staff/cash-closing/1"]) {
+      const response = await ctx.app.request(`https://luggage.test${path}`, {}, ctx.env);
+      assert.equal(response.status, 200);
+      const html = await response.text();
+      if (hasCurrent) {
+        assert.ok(html.includes("현재 집계 ¥0 · 저장 대비 -1,000엔"));
+        assert.ok(html.includes("현재 집계 ¥+1,010 · 저장 대비 +1,000엔"));
+        assert.ok(!html.includes("현재 집계 없음"));
+      } else {
+        assert.ok(html.includes("현재 집계 없음"));
+        assert.ok(!html.includes("현재 집계 ¥0"));
+      }
+    }
+  }
+  ctx.sqlite.close();
+});
+
+test("staff display respects saved refund closing values and leaves all database rows and schema unchanged", async () => {
+  stubProfiles([EDITOR]);
+  const ctx = setup();
+  ctx.sqlite.exec(`INSERT INTO luggage_cash_closings
+    (business_date, closing_type, workflow_status, check_auto_amount, expected_amount, actual_amount, difference_amount)
+    VALUES ('2026-10-27', 'FINAL_CLOSE', 'SUBMITTED', 1000, 1000, 1010, 10)`);
+  const payload = JSON.stringify({grossCash:1200,grossQr:0,cashRefundAmount:200,refundCount:1,netCash:1000,netTotal:1000,refundIds:["isolated-refund"]});
+  ctx.sqlite.prepare("INSERT INTO luggage_cash_closing_audits(closing_id, action, payload) VALUES (1, 'REFUND_SNAPSHOT', ?)").run(payload);
+  ctx.sqlite.exec(`INSERT INTO luggage_cash_closing_refund_snapshots
+    (closing_id,business_date,gross_cash,gross_qr,cash_refund_amount,refund_count,refund_ids,net_cash,net_total,audit_id)
+    VALUES (1,'2026-10-27',1200,0,200,1,'["isolated-refund"]',1000,1000,1);
+    INSERT INTO luggage_daily_sales(sale_date,cash,qr,luggage_total) VALUES ('2026-10-27',600,0,600);`);
+  const snapshot = () => JSON.stringify(ctx.sqlite.prepare("SELECT name FROM sqlite_schema WHERE type='table' ORDER BY name").all().map(({name}) => [name, ctx.sqlite.prepare(`SELECT * FROM "${name}"`).all()]));
+  const before = snapshot();
+  const schemaBefore = ctx.sqlite.prepare("SELECT * FROM sqlite_schema ORDER BY name").all();
+  for (const path of ["/staff/cash-closing", "/staff/cash-closing/1"]) {
+    const response = await ctx.app.request(`https://luggage.test${path}`, {}, ctx.env);
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.ok(html.includes("현재 집계 ¥+410 · 저장 대비 +400엔"));
+    assert.ok(html.includes("¥1,000"));
+  }
+  assert.equal(snapshot(), before);
+  assert.deepEqual(ctx.sqlite.prepare("SELECT * FROM sqlite_schema ORDER BY name").all(), schemaBefore);
+  assert.throws(() => ctx.sqlite.exec("UPDATE luggage_cash_closings SET check_auto_amount=600, expected_amount=600 WHERE closing_id=1"), /REFUND_PRESERVE_CLOSING_SNAPSHOT/);
+  ctx.sqlite.close();
+});
