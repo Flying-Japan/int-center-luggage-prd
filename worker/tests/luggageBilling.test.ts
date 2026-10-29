@@ -22,10 +22,137 @@ const ROOT = '20261024-001';
 const STAFF = 'test-editor';
 const SECRET = 'billing-tests-only';
 
-function setup(projectionNow?: string, role = 'editor') {
+const CORRECTED_ORDER = '20261023-087';
+const correctionInsert = `INSERT INTO luggage_order_price_corrections
+  (correction_id, order_id, approval_reference, operator_reference, evidence_sha256)
+  VALUES ('087-long-stay-discount-20261029', '20261023-087', 'user-approved:087-normal-discount:2026-10-29', 'local-test-operator', '${'a'.repeat(64)}')`;
+
+function seed087(ctx: Fixture, options: { receiptAmount?: number; extraAmount?: number } = {}) {
+  ctx.sqlite.prepare(`INSERT INTO luggage_orders(order_id, created_at, updated_at, status, tag_no,
+    backpack_qty, expected_pickup_at, expected_storage_days, price_per_day, discount_rate,
+    prepaid_amount, final_amount, staff_prepaid_override_amount, payment_method, in_warehouse)
+    VALUES (?, '2026-10-23 08:19:18', '2026-10-27 10:44:46', 'PAID', '146', 2,
+      '2026-10-31T08:30:00.000Z', 9, 1000, 0.05, 9000, 9000, 9000, 'CASH', 1)`).run(CORRECTED_ORDER);
+  ctx.sqlite.prepare('UPDATE luggage_orders SET extra_amount = ? WHERE order_id = ?').run(options.extraAmount ?? 0, CORRECTED_ORDER);
+  ctx.sqlite.exec(`INSERT INTO luggage_order_payments(payment_id, order_id, business_date, tender_type, amount, recorded_at)
+    VALUES (12067, '${CORRECTED_ORDER}', '2026-10-23', 'CASH', ${options.receiptAmount ?? 8550}, '2026-10-23 08:22:42');
+    INSERT INTO luggage_audit_logs(log_id, order_id, action, details, timestamp) VALUES
+      (53907, '${CORRECTED_ORDER}', 'TOGGLE_PAYMENT', '결제 완료', '2026-10-23 08:22:42'),
+      (54341, '${CORRECTED_ORDER}', 'UPDATE_PRICE', '금액: ¥9000', '2026-10-24 11:47:11');`);
+}
+
+test('approved 087 correction restores 5% price without changing receipts, audits, 44 closings or another review', async () => {
+  const ctx = setup('2026-10-29T06:00:00Z'); seed087(ctx);
+  seedRoot(ctx, { billed: 9000, daysAgo: 0 });
+  // Seed a separate unresolved root without modifying any collected amount.
+  ctx.sqlite.prepare(`INSERT INTO luggage_orders(order_id, status, prepaid_amount, final_amount)
+    VALUES ('other-review', 'PAID', 9000, 9000)`).run();
+  ctx.sqlite.prepare(`INSERT INTO luggage_order_payments(order_id, business_date, tender_type, amount)
+    VALUES ('other-review', '2026-10-29', 'CASH', 8550)`).run();
+  for (let i = 1; i <= 44; i++) ctx.sqlite.prepare(`INSERT INTO luggage_cash_closings(closing_id, business_date,
+    closing_type, actual_amount, check_auto_amount, difference_amount, actual_qr_amount)
+    VALUES (?, date('2026-09-01', '+' || ? || ' days'), 'EVENING', 162450, 159550, 2900, 12300)`).run(i, i);
+  const receiptsBefore = payments(ctx);
+  const auditsBefore = ctx.sqlite.prepare('SELECT * FROM luggage_audit_logs ORDER BY log_id').all();
+  const closingsBefore = ctx.sqlite.prepare('SELECT * FROM luggage_cash_closings ORDER BY closing_id').all();
+  const otherBefore = ctx.sqlite.prepare('SELECT * FROM luggage_orders WHERE order_id != ? ORDER BY order_id').all(CORRECTED_ORDER);
+  const salesBefore = ctx.sqlite.prepare('SELECT * FROM luggage_sales_daily ORDER BY business_date').all();
+  assert.equal((await getBillingSummary(ctx.db, CORRECTED_ORDER))?.review_pickup_blocked, 1);
+  ctx.sqlite.exec(correctionInsert);
+  const b = (await getBillingSummary(ctx.db, CORRECTED_ORDER))!;
+  assert.equal(b.total_billed_amount, 8550); assert.equal(b.recorded_amount, 8550);
+  assert.equal(b.root_review_required, 0); assert.equal(b.root_review_amount, 0);
+  assert.equal(b.outstanding_amount, 0); assert.equal(b.review_pickup_blocked, 0);
+  assert.equal(b.refund_count, 0); assert.equal(b.cash_refunded_amount, 0); assert.equal(b.discount_credit_amount, 0);
+  assert.equal(ctx.sqlite.prepare('SELECT staff_prepaid_override_amount FROM luggage_orders WHERE order_id = ?').get(CORRECTED_ORDER)?.staff_prepaid_override_amount, null);
+  assert.deepEqual(payments(ctx), receiptsBefore);
+  assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_audit_logs WHERE log_id <= 54341 ORDER BY log_id').all(), auditsBefore);
+  assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_cash_closings ORDER BY closing_id').all(), closingsBefore);
+  assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_orders WHERE order_id != ? ORDER BY order_id').all(CORRECTED_ORDER), otherBefore);
+  assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_sales_daily ORDER BY business_date').all(), salesBefore);
+  assert.equal((await getBillingSummary(ctx.db, 'other-review'))?.root_review_amount, 450);
+  const audit = ctx.sqlite.prepare("SELECT * FROM luggage_audit_logs WHERE action = 'CORRECT_COLLECTED_PRICE'").get()!;
+  const evidence = JSON.parse(String(audit.details));
+  assert.equal(evidence.before.finalAmount, 9000); assert.equal(evidence.after.finalAmount, 8550);
+  assert.equal(evidence.longStayDiscountAmount, 450); assert.equal(evidence.paymentId, 12067); assert.equal(audit.staff_id, null);
+  // Exercise the actual pickup service/DB protections locally; production is never picked up by this task.
+  ctx.sqlite.prepare("UPDATE luggage_orders SET status = 'PICKED_UP' WHERE order_id = ?").run(CORRECTED_ORDER);
+  assert.equal(ctx.sqlite.prepare('SELECT status FROM luggage_orders WHERE order_id = ?').get(CORRECTED_ORDER)?.status, 'PICKED_UP');
+});
+
+test('087 correction does not authorize direct price edits or corrections for any other order', () => {
+  const ctx = setup('2026-10-29T06:00:00Z'); seed087(ctx); seedRoot(ctx);
+  assert.throws(() => ctx.sqlite.exec(`UPDATE luggage_orders SET prepaid_amount = 8550, final_amount = 8550 WHERE order_id = '${CORRECTED_ORDER}'`), /separate correction policy/);
+  assert.throws(() => ctx.sqlite.exec(correctionInsert.replaceAll(CORRECTED_ORDER, ROOT)), /PRECONDITION|CHECK/);
+  assert.throws(() => ctx.sqlite.exec(correctionInsert.replace('user-approved:', 'not-approved:')), /CHECK/);
+  ctx.sqlite.exec(correctionInsert);
+  assert.throws(() => ctx.sqlite.exec(correctionInsert), /PRECONDITION|UNIQUE/);
+  assert.throws(() => ctx.sqlite.exec(`UPDATE luggage_orders SET final_amount = 9000 WHERE order_id = '${CORRECTED_ORDER}'`), /separate correction policy/);
+  assert.throws(() => ctx.sqlite.exec(`UPDATE luggage_orders SET final_amount = 8550 WHERE order_id = '${ROOT}'`), /separate correction policy/);
+});
+
+for (const [name, change] of [
+  ['stale order', "UPDATE luggage_orders SET updated_at = '2026-10-29 01:00:00' WHERE order_id = '20261023-087'"],
+  ['wrong period', "UPDATE luggage_orders SET expected_storage_days = 8 WHERE order_id = '20261023-087'"],
+  ['different manual price', "UPDATE luggage_orders SET staff_prepaid_override_amount = 8750 WHERE order_id = '20261023-087'"],
+  ['wrong discount', "UPDATE luggage_orders SET discount_rate = 0 WHERE order_id = '20261023-087'"],
+  ['new price audit', "INSERT INTO luggage_audit_logs(order_id, action, details) VALUES ('20261023-087', 'UPDATE_PRICE', 'another price')"],
+] as const) test(`087 correction aborts and appends no audit when ${name}`, () => {
+  const ctx = setup('2026-10-29T06:00:00Z'); seed087(ctx); ctx.sqlite.exec(change);
+  assert.throws(() => ctx.sqlite.exec(correctionInsert), /PRECONDITION/);
+  assert.equal(ctx.sqlite.prepare('SELECT COUNT(*) AS n FROM luggage_order_price_corrections').get()?.n, 0);
+  assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM luggage_audit_logs WHERE action = 'CORRECT_COLLECTED_PRICE'").get()?.n, 0);
+  assert.equal(ctx.sqlite.prepare('SELECT final_amount FROM luggage_orders WHERE order_id = ?').get(CORRECTED_ORDER)?.final_amount, 9000);
+});
+
+test('087 correction event, real receipt and all old/new audits resist update/delete/replace', () => {
+  const ctx = setup('2026-10-29T06:00:00Z'); seed087(ctx); ctx.sqlite.exec(correctionInsert);
+  for (const sql of [
+    "UPDATE luggage_order_price_corrections SET operator_reference = 'other'",
+    'DELETE FROM luggage_order_price_corrections',
+    correctionInsert.replace('INSERT INTO', 'INSERT OR REPLACE INTO'),
+    'UPDATE luggage_order_payments SET amount = 9000 WHERE payment_id = 12067',
+    'DELETE FROM luggage_order_payments WHERE payment_id = 12067',
+    "INSERT OR REPLACE INTO luggage_order_payments(payment_id, order_id, business_date, tender_type, amount) VALUES (12067, '20261023-087', '2026-10-23', 'CASH', 9000)",
+    "UPDATE luggage_audit_logs SET details = 'changed' WHERE order_id = '20261023-087'",
+    "DELETE FROM luggage_audit_logs WHERE order_id = '20261023-087'",
+    "INSERT OR REPLACE INTO luggage_audit_logs(log_id, action) VALUES (53907, 'REPLACE')",
+  ]) assert.throws(() => ctx.sqlite.exec(sql), /Preserve|PRECONDITION/);
+});
+
+test('087 correction rejects a different receipt or a genuine extra charge', () => {
+  for (const options of [{ receiptAmount: 8500 }, { extraAmount: 1000 }]) {
+    const ctx = setup('2026-10-29T06:00:00Z'); seed087(ctx, options);
+    assert.throws(() => ctx.sqlite.exec(correctionInsert), /PRECONDITION/);
+    assert.equal(ctx.sqlite.prepare('SELECT COUNT(*) AS n FROM luggage_order_price_corrections').get()?.n, 0);
+  }
+});
+
+test('087 correction failure rolls back its event, audit and price together', () => {
+  const ctx = setup('2026-10-29T06:00:00Z'); seed087(ctx);
+  ctx.sqlite.exec("CREATE TRIGGER simulate_failure AFTER UPDATE OF final_amount ON luggage_orders BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END");
+  assert.throws(() => ctx.sqlite.exec(correctionInsert), /simulated write failure/);
+  assert.equal(ctx.sqlite.prepare('SELECT COUNT(*) AS n FROM luggage_order_price_corrections').get()?.n, 0);
+  assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) AS n FROM luggage_audit_logs WHERE action='CORRECT_COLLECTED_PRICE'").get()?.n, 0);
+  assert.equal(ctx.sqlite.prepare('SELECT final_amount FROM luggage_orders WHERE order_id=?').get(CORRECTED_ORDER)?.final_amount, 9000);
+});
+
+test('genuine later automatic extension remains collectible and blocks pickup after 087 correction', async () => {
+  const ctx = setup('2026-10-29T06:00:00Z'); seed087(ctx); ctx.sqlite.exec(correctionInsert);
+  // Advance the projection clock only, keeping the policy and extension service unchanged.
+  const views = ctx.sqlite.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'view' AND sql LIKE '%2026-10-29T06:00:00Z%'").all();
+  for (const view of views) { ctx.sqlite.exec(`DROP VIEW ${view.name}`); ctx.sqlite.exec(String(view.sql).replaceAll('2026-10-29T06:00:00Z', '2026-11-01T13:00:00Z')); }
+  await materializeOutstandingDays(ctx.db, CORRECTED_ORDER);
+  const b = (await getBillingSummary(ctx.db, CORRECTED_ORDER))!;
+  assert.ok(b.extension_outstanding_amount > 0); assert.equal(b.root_review_amount, 0);
+  assert.throws(() => ctx.sqlite.prepare("UPDATE luggage_orders SET status = 'PICKED_UP' WHERE order_id = ?").run(CORRECTED_ORDER), /Outstanding collection/);
+});
+
+function setup(projectionNow?: string, role = 'editor', correctionPolicy = true) {
   const sqlite = new DatabaseSync(':memory:');
   open.push(sqlite);
   let schema = readFileSync('src/schema.sql', 'utf8');
+  if (!correctionPolicy) schema = schema.split('-- Operator-only correction policy.')[0];
   // Freeze only the DB's projection clock; actual receipt timestamps still come from the service.
   if (projectionNow) schema = schema.replaceAll("'now'", `'${projectionNow}'`);
   sqlite.exec(schema);
@@ -967,7 +1094,7 @@ test('a receipt arriving during price correction is preserved and the guarded tr
 });
 
 test('prepared policy upgrade preserves claim/receipt/audit rows and matches all fresh-schema financial guards', () => {
-  const ctx = setup(); seedRootReview(ctx, { status: 'PICKED_UP', evidence: 'text' });
+  const ctx = setup(undefined, 'editor', false); seedRootReview(ctx, { status: 'PICKED_UP', evidence: 'text' });
   const orders = ctx.sqlite.prepare('SELECT * FROM luggage_orders').all();
   const ledger = payments(ctx);
   const logs = ctx.sqlite.prepare('SELECT * FROM luggage_audit_logs').all();
@@ -976,13 +1103,15 @@ test('prepared policy upgrade preserves claim/receipt/audit rows and matches all
   const start = 'CREATE UNIQUE INDEX IF NOT EXISTS idx_luggage_extension_date';
   assert.equal(upgrade.slice(upgrade.indexOf(start)).trim(), schema.slice(schema.indexOf(start), schema.indexOf("-- 21:00 JST automatic extension cutover")).trim());
   const definitions = () => ctx.sqlite.prepare("SELECT type, name, sql FROM sqlite_master WHERE type IN ('view', 'trigger') ORDER BY type, name").all();
-  const before = definitions();
+  const fresh = setup();
+  const expected = fresh.sqlite.prepare("SELECT type, name, sql FROM sqlite_master WHERE type IN ('view', 'trigger') ORDER BY type, name").all();
   ctx.sqlite.exec(upgrade);
   ctx.sqlite.exec("DROP TABLE luggage_automatic_billing_policy");
   ctx.sqlite.exec(readFileSync('migrations/20261028_close_time_extension.sql', 'utf8'));
   ctx.sqlite.exec(readFileSync('migrations/20261028_confirmed_intake_extension.sql', 'utf8'));
   ctx.sqlite.exec(readFileSync('migrations/20261028_flying_pass_refund_settlement.sql', 'utf8'));
-  assert.deepEqual(definitions(), before);
+  ctx.sqlite.exec(readFileSync('migrations/20261029_087_discount_correction.sql', 'utf8'));
+  assert.deepEqual(definitions(), expected);
   assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_orders').all(), orders);
   assert.deepEqual(payments(ctx), ledger);
   assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_audit_logs').all(), logs);

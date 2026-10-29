@@ -14,6 +14,6 @@ try {
     await build({ entryPoints: [`tests/${name}.test.ts`], outfile: output, bundle: true, platform: 'node', format: 'cjs', target: 'node22' });
     outputs.push(output);
   }
-  const result = spawnSync(process.execPath, ['--test', ...outputs, 'tests/schema.test.mjs', 'tests/customerPhotoRace.local.test.mjs', 'tests/customerPhotoSubmit.local.test.mjs', 'tests/customerPhotoCsp.local.test.mjs'], { stdio: 'inherit' });
+  const result = spawnSync(process.execPath, ['--test', ...outputs, 'tests/schema.test.mjs', 'tests/approved087Correction.local.test.mjs', 'tests/customerPhotoRace.local.test.mjs', 'tests/customerPhotoSubmit.local.test.mjs', 'tests/customerPhotoCsp.local.test.mjs'], { stdio: 'inherit' });
   process.exitCode = result.status ?? 1;
 } finally { await rm(temp, { recursive: true, force: true }); }

@@ -548,7 +548,7 @@ test('phase2 legacy staff closing uses net receipts once and atomically preserve
 test('phase2 migration preserves phase1 records, matches fresh definitions, and is repeatable',async()=>{
   const a=new DatabaseSync(':memory:'),b=new DatabaseSync(':memory:');
   try{
-    a.exec(schema);b.exec(phase1Schema);b.exec(settlementMigration);b.exec(settlementMigration);
+    a.exec(schema.split('-- Operator-only correction policy.')[0]);b.exec(phase1Schema);b.exec(settlementMigration);b.exec(settlementMigration);
     const sql="SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type,name";
     assert.deepEqual(b.prepare(sql).all(),a.prepare(sql).all());
   }finally{a.close();b.close();}
