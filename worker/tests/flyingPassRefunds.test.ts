@@ -21,13 +21,23 @@ import { finishFlyingPassRefund } from '../src/services/flyingPassRefunds';
 const ID = '20261028-001', SECRET = 'synthetic-refund-tests-only';
 const actor = { userId: 'unified-test-editor', name: 'Synthetic Editor', email: 'editor@example.test', role: 'center_staff' };
 const profile = { id: '11111111-1111-4111-8111-111111111111', display_name: 'Synthetic Editor', email: actor.email, role: 'editor', is_active: true };
+const staffB = { userId: 'unified-test-editor-b', name: 'Synthetic Editor B', email: 'editor-b@example.test', role: 'center_staff' };
+const profileB = { id: '33333333-3333-4333-8333-333333333333', display_name: 'Synthetic Editor B', email: staffB.email, role: 'editor', is_active: true };
+const partTime = { userId: 'abcdef22-2222-4222-8222-2222222222ab', name: 'Synthetic Part Time', email: 'pt-synthetic@part-time.local', role: 'part_time' };
+const staffIdOf = (who: { userId: string; role: string }) => who.role === 'part_time' ? `pt:${who.userId}` : who === staffB ? profileB.id : profile.id;
 const originalFetch = globalThis.fetch;
 const cleanup: Array<() => unknown | Promise<unknown>> = [];
 afterEach(async () => { globalThis.fetch = originalFetch; for (const fn of cleanup.splice(0)) await fn(); });
 const schema = readFileSync('src/schema.sql', 'utf8');
 const migration = readFileSync('migrations/20261028_flying_pass_refunds.sql', 'utf8');
 const settlementMigration = readFileSync('migrations/20261028_flying_pass_refund_settlement.sql', 'utf8');
+const handoverMigration = readFileSync('migrations/20261029_flying_pass_refund_handover.sql', 'utf8');
 const phase1Schema = schema.slice(0, schema.indexOf('-- Flying Pass phase 2:'));
+// schema.sql carries the refund block in its post-handover form (in place); strip that block to get the pre-refund base.
+const refundBlockStart = phase1Schema.indexOf(migration.slice(0, migration.indexOf('\n')));
+const refundBlockEnd = phase1Schema.indexOf('END;\n', phase1Schema.indexOf('luggage_refund_phase1_closing_update', refundBlockStart)) + 5;
+assert.ok(refundBlockStart > 0 && refundBlockEnd > refundBlockStart);
+const preRefundSchema = phase1Schema.slice(0, refundBlockStart) + phase1Schema.slice(refundBlockEnd);
 // Reuse the existing, tested local-D1 SQL splitter, including trigger and CASE nesting.
 const splitter = readFileSync('scripts/verify-d1-pickup.local.mjs', 'utf8');
 const start = splitter.indexOf('function sqlTokens('), end = splitter.indexOf('function canonicalSqlTokens(');
@@ -35,9 +45,10 @@ assert.ok(start >= 0 && end > start);
 const splitSql: (sql: string) => string[] = new Function(splitter.slice(start, end) + '\nreturn splitSql;')();
 const day = () => new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 
-async function setup(options: { status?: string; manual?: number | null; receipts?: Array<[string, number]>; amount?: number; method?: string; originalTier?: string; days?: number; discount?: number; migrate?: boolean } = {}) {
+async function setup(options: { status?: string; manual?: number | null; receipts?: Array<[string, number]>; amount?: number; method?: string; originalTier?: string; days?: number; discount?: number; migrate?: boolean; handover?: boolean } = {}) {
   const compiled = new DatabaseSync(':memory:');
-  const base = options.migrate ? phase1Schema.replace(migration, '') : schema;
+  const base = options.migrate ? preRefundSchema : schema;
+  const migrations = [migration, settlementMigration, ...(options.handover === false ? [] : [handoverMigration])];
   let db: D1Database;
   if (process.env.REFUND_TEST_MINIFLARE_PATH) {
     compiled.close();
@@ -52,10 +63,10 @@ async function setup(options: { status?: string; manual?: number | null; receipt
     cleanup.push(async () => { await mf.dispose(); await rm(rootPath, { recursive: true, force: true }); });
     db = await mf.getD1Database('DB');
     for (const sql of splitSql(base)) await db.prepare(sql).run();
-    if (options.migrate) for (const sql of [...splitSql(migration), ...splitSql(settlementMigration)]) await db.prepare(sql).run();
+    if (options.migrate) for (const sql of migrations.flatMap(splitSql)) await db.prepare(sql).run();
   } else {
     compiled.exec(base);
-    if (options.migrate) { compiled.exec(migration); compiled.exec(settlementMigration); }
+    if (options.migrate) for (const sql of migrations) compiled.exec(sql);
     cleanup.push(() => compiled.close());
     const statement = (sql: string) => {
       let args: unknown[] = [];
@@ -86,10 +97,10 @@ async function setup(options: { status?: string; manual?: number | null; receipt
   }
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     assert.match(String(input instanceof Request ? input.url : input), /^https:\/\/supabase.test\/rest\/v1\/user_profiles/);
-    return Response.json([profile]);
+    return Response.json([profile, profileB]);
   }) as typeof fetch;
   const app = new Hono().use('/internal/*', internalAuth).route('/', createFlyingPassRefundRoutes(true));
-  const env = { DB: db, INTERNAL_API_SECRET: SECRET, APP_ENV: 'test', LUGGAGE_FLYING_PASS_REFUNDS_ENABLED: 'true', SUPABASE_URL: 'https://supabase.test', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-key' };
+  const env: Record<string, unknown> = { DB: db, INTERNAL_API_SECRET: SECRET, APP_ENV: 'test', LUGGAGE_FLYING_PASS_REFUNDS_ENABLED: 'true', LUGGAGE_PART_TIME_REFUND_ACTORS_ENABLED: 'true', SUPABASE_URL: 'https://supabase.test', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-key' };
   async function call(operation: string, payload: Record<string, unknown> = {}, targetApp = app, urlOrder = ID, signed = true) {
     const url = `https://luggage.test/internal/luggage-orders/${urlOrder}/flying-pass-refunds/${operation}`;
     const body = JSON.stringify({ actor, ...payload }), timestamp = String(Math.floor(Date.now() / 1000));
@@ -97,11 +108,11 @@ async function setup(options: { status?: string; manual?: number | null; receipt
     const response = await targetApp.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(signed ? { 'x-internal-timestamp': timestamp, 'x-internal-signature': signature } : {}) }, body }, env);
     return { status: response.status, body: await response.json() as any };
   }
-  async function reserve(tier = 'GOLD', refundId = crypto.randomUUID()) {
-    const preview = await call('preview', { targetTier: tier });
+  async function reserve(tier = 'GOLD', refundId = crypto.randomUUID(), by: Record<string, string> = actor) {
+    const preview = await call('preview', { targetTier: tier, actor: by });
     assert.equal(preview.status, 200, JSON.stringify(preview));
     const input = { refundId, targetTier: tier, reason: '카페 등급 확인 후 현금 환급', expectedFingerprint: preview.body.quote.fingerprint };
-    return { input, result: await call('register', input) };
+    return { input, result: await call('register', { ...input, actor: by }) };
   }
   const scalar = async (sql: string, ...args: unknown[]) => (await db.prepare(sql).bind(...args).first<{ n: number }>())!.n;
   const original = async () => JSON.stringify((await db.batch([db.prepare('SELECT * FROM luggage_orders ORDER BY order_id'), db.prepare('SELECT * FROM luggage_order_payments ORDER BY payment_id')])).map(r => r.results));
@@ -211,10 +222,10 @@ test('silent state-write IGNORE rolls back the newly inserted audit', async () =
   assert.equal(await s.scalar("SELECT COUNT(*) AS n FROM luggage_audit_logs WHERE action='FLYING_PASS_REFUND_CONFIRM'"), 0);
 });
 
-test('cancel requires explicit non-payment and owner; terminal cancellation cannot be confirmed', async () => {
+test('cancel requires explicit non-payment and a reason; terminal cancellation cannot be confirmed', async () => {
   const s = await setup(); const { input } = await s.reserve();
   assert.equal((await s.call(`${input.refundId}/cancel`, { reason: '미지급' })).status, 400);
-  assert.equal((await s.call(`${input.refundId}/cancel`, { confirmNotPaid: true, reason: '미지급', actor: { ...actor, userId: 'other' } })).status, 403);
+  assert.equal((await s.call(`${input.refundId}/cancel`, { confirmNotPaid: true, reason: ' ' })).status, 400);
   const payload = { confirmNotPaid: true, reason: '실제 현금 미지급 확인' };
   assert.equal((await s.call(`${input.refundId}/cancel`, payload)).body.refund.status, 'CANCELLED');
   assert.equal((await s.call(`${input.refundId}/cancel`, payload)).body.replayed, true);
@@ -266,11 +277,10 @@ test('past payment-day closing is preserved; payout-day closing blocks preview/r
   assert.equal(await s.scalar('SELECT COUNT(*) AS n FROM luggage_flying_pass_refunds'), 0);
 });
 
-test('confirm revalidates exact amount, actual payout acknowledgement, owner and JST day', async () => {
+test('confirm revalidates exact amount, actual payout acknowledgement and JST day', async () => {
   const s = await setup(); const { input } = await s.reserve();
   for (const payload of [{ cashPaid: false, expectedAmount: 400 }, { expectedAmount: 400 }]) assert.equal((await s.call(`${input.refundId}/confirm`, payload)).status, 400);
   assert.equal((await s.call(`${input.refundId}/confirm`, { cashPaid: true, expectedAmount: 399 })).body.code, 'AMOUNT_CHANGED');
-  assert.equal((await s.call(`${input.refundId}/confirm`, { cashPaid: true, expectedAmount: 400, actor: { ...actor, userId: 'other' } })).status, 403);
   await assert.rejects(finishFlyingPassRefund(s.db, ID, input.refundId, { action: 'confirm', cashPaid: true, expectedAmount: 400 }, {
     actor, staff: { id: profile.id, displayName: profile.display_name, email: profile.email, role: 'editor' },
   }, new Date(Date.now()+86400000)), /지급일/);
@@ -290,10 +300,10 @@ test('production mount: new payouts default OFF, flag ON opens them, recovery lo
 
 test('production mount keeps HMAC, the actor role allowlist, one-pending-refund and replay protection when the flag is ON', async () => {
   const s = await setup(); const productionMount = new Hono().route('/', internalApi);
-  s.env.APP_ENV = 'production'; s.env.LUGGAGE_FLYING_PASS_REFUNDS_ENABLED = 'true';
+  s.env.APP_ENV = 'production'; s.env.LUGGAGE_FLYING_PASS_REFUNDS_ENABLED = 'true'; delete s.env.LUGGAGE_PART_TIME_REFUND_ACTORS_ENABLED;
   const refundId = crypto.randomUUID();
   for (const op of ['preview', 'register', `${refundId}/lookup`, `${refundId}/confirm`, `${refundId}/cancel`]) assert.equal((await s.call(op, {}, productionMount, ID, false)).status, 401, `unsigned ${op}`);
-  const partTime = { userId: '22222222-2222-4222-8222-222222222222', name: 'Synthetic Part Time', email: '22222222-2222-4222-8222-222222222222@part-time.local', role: 'part_time' };
+  // part_time stays refused on the production mount until LUGGAGE_PART_TIME_REFUND_ACTORS_ENABLED is set.
   for (const [op, payload] of [['preview', { targetTier: 'GOLD' }], [`${refundId}/lookup`, {}], [`${refundId}/confirm`, { cashPaid: true, expectedAmount: 400 }], [`${refundId}/cancel`, { confirmNotPaid: true, reason: '테스트' }]] as Array<[string, Record<string, unknown>]>)
     assert.equal((await s.call(op, { ...payload, actor: partTime }, productionMount)).status, 403, `part_time ${op}`);
   const preview = await s.call('preview', { targetTier: 'GOLD' }, productionMount);
@@ -335,7 +345,7 @@ test('invalid input cannot choose non-cash tender, amount, arbitrary actor or by
 test('fresh schema and one-time migration create identical refund tables, indexes and guards', async () => {
   const fresh = new DatabaseSync(':memory:'), upgrade = new DatabaseSync(':memory:');
   try {
-    fresh.exec(phase1Schema); upgrade.exec(phase1Schema.replace(migration, '')); upgrade.exec(migration); upgrade.exec(migration);
+    fresh.exec(phase1Schema); upgrade.exec(preRefundSchema); upgrade.exec(migration); upgrade.exec(migration); upgrade.exec(handoverMigration); upgrade.exec(handoverMigration);
     const sql = "SELECT type,name,sql FROM sqlite_master WHERE name LIKE '%refund%' AND sql IS NOT NULL ORDER BY type,name";
     assert.deepEqual(upgrade.prepare(sql).all(), fresh.prepare(sql).all());
   } finally { fresh.close(); upgrade.close(); }
@@ -385,21 +395,124 @@ test('confirmation and cancellation race to exactly one terminal state and one t
   assert.equal(await s.scalar("SELECT COUNT(*) AS n FROM luggage_audit_logs WHERE action IN ('FLYING_PASS_REFUND_CONFIRM','FLYING_PASS_REFUND_CANCEL')"), 1);
 });
 
-test('part_time actors are refused for every refund operation, even with the part-time actor flag on', async () => {
+test('part_time refund actors: OFF by default (the unrelated global part-time flag does not open them), strict shape, no user_profiles lookup', async () => {
   const s = await setup(); const { input } = await s.reserve();
-  const pt = { userId: '22222222-2222-4222-8222-222222222222', name: 'Synthetic Part Time', email: '22222222-2222-4222-8222-222222222222@part-time.local', role: 'part_time' };
-  for (const enabled of [undefined, 'true']) {
-    Object.assign(s.env, { LUGGAGE_PART_TIME_ACTORS_ENABLED: enabled });
-    for (const [path, body] of [
-      ['preview', { targetTier: 'GOLD' }],
-      ['register', { refundId: crypto.randomUUID(), targetTier: 'GOLD', reason: '카페 확인', expectedFingerprint: '0'.repeat(64) }],
-      [`${input.refundId}/lookup`, {}],
-      [`${input.refundId}/confirm`, { cashPaid: true, expectedAmount: 400 }],
-      [`${input.refundId}/cancel`, { confirmNotPaid: true, reason: '미지급 확인' }],
-    ] as const) assert.equal((await s.call(path, { ...body, actor: pt })).status, 403, path);
+  const ops = [
+    ['preview', { targetTier: 'GOLD' }],
+    ['register', { refundId: crypto.randomUUID(), targetTier: 'GOLD', reason: '카페 확인', expectedFingerprint: '0'.repeat(64) }],
+    [`${input.refundId}/lookup`, {}],
+    [`${input.refundId}/confirm`, { cashPaid: true, expectedAmount: 400 }],
+    [`${input.refundId}/cancel`, { confirmNotPaid: true, reason: '미지급 확인' }],
+  ] as const;
+  for (const env of [{ LUGGAGE_PART_TIME_REFUND_ACTORS_ENABLED: undefined }, { LUGGAGE_PART_TIME_REFUND_ACTORS_ENABLED: 'false', LUGGAGE_PART_TIME_ACTORS_ENABLED: 'true' }]) {
+    Object.assign(s.env, env);
+    for (const [path, body] of ops) assert.equal((await s.call(path, { ...body, actor: partTime })).status, 403, path);
+  }
+  s.env.LUGGAGE_PART_TIME_REFUND_ACTORS_ENABLED = 'true';
+  for (const bad of [{ ...partTime, userId: 'not-a-uuid' }, { ...partTime, userId: partTime.userId.toUpperCase() }, { ...partTime, email: 'pt@example.test' },
+    { ...partTime, role: ' part_time' }, { ...partTime, staffId: profile.id }]) {
+    for (const [path, body] of ops) assert.equal((await s.call(path, { ...body, actor: bad })).status, 403, `${JSON.stringify(bad)} ${path}`);
   }
   assert.equal((await s.call(`${input.refundId}/lookup`)).body.refund.status, 'PAYOUT_PENDING');
   assert.equal(await s.scalar("SELECT COUNT(*) AS n FROM luggage_flying_pass_refunds"), 1);
+  assert.equal(await s.scalar("SELECT COUNT(*) AS n FROM luggage_audit_logs WHERE staff_id LIKE 'pt:%'"), 0);
+  // A part_time actor is never looked up in (or written to) user_profiles.
+  globalThis.fetch = (async () => { throw new Error('part_time must not query user_profiles'); }) as typeof fetch;
+  assert.equal((await s.call(`${input.refundId}/lookup`, { actor: partTime })).status, 200);
+});
+
+async function refundAudits(s: Awaited<ReturnType<typeof setup>>, refundId: string) {
+  return (await s.db.prepare(`SELECT action, staff_id, json_extract(details,'$.actor.userId') AS user_id, json_extract(details,'$.actor.role') AS role,
+    json_extract(details,'$.legacyStaff.id') AS legacy_id FROM luggage_audit_logs WHERE device_id = ? ORDER BY log_id`).bind(refundId).all<Record<string, string>>()).results.map(r => ({ ...r }));
+}
+const auditOf = (action: string, who: { userId: string; role: string }) => ({ action, staff_id: staffIdOf(who), user_id: who.userId, role: who.role, legacy_id: staffIdOf(who) });
+
+for (const [label, registrant, finisher] of [
+  ['center_staff registers and confirms', actor, actor], ['part_time registers and confirms', partTime, partTime],
+  ['center_staff registers → part_time confirms', actor, partTime], ['part_time registers → center_staff confirms', partTime, actor],
+  ['center_staff A registers → center_staff B confirms', actor, staffB],
+] as const) {
+  test(`shift handover: ${label}; each actor audited, originals unchanged, no second payout`, async () => {
+    const s = await setup({ migrate: true }); const before = await s.original();
+    const { input, result } = await s.reserve('GOLD', crypto.randomUUID(), registrant);
+    assert.equal(result.status, 201, JSON.stringify(result.body));
+    assert.notEqual((await s.reserve('GOLD', crypto.randomUUID(), finisher).catch(() => null))?.result.status, 201, 'one pending payout per order');
+    const confirm = { cashPaid: true, expectedAmount: 400, actor: finisher };
+    const done = await s.call(`${input.refundId}/confirm`, confirm);
+    assert.equal(done.status, 200, JSON.stringify(done.body));
+    assert.equal((await s.call(`${input.refundId}/confirm`, confirm)).body.replayed, true);
+    for (const other of [registrant, finisher, staffB]) {
+      if (other === finisher) continue;
+      const late = await s.call(`${input.refundId}/confirm`, { cashPaid: true, expectedAmount: 400, actor: other });
+      assert.deepEqual([late.status, late.body.code], [409, 'TERMINAL_CONFLICT'], 'a second staff cannot confirm again');
+      const cancel = await s.call(`${input.refundId}/cancel`, { confirmNotPaid: true, reason: '이미 지급된 건 취소 시도', actor: other });
+      assert.deepEqual([cancel.status, cancel.body.code], [409, 'TERMINAL_CONFLICT'], 'a paid refund cannot be cancelled as unpaid');
+    }
+    const row = await s.db.prepare('SELECT * FROM luggage_flying_pass_refunds WHERE refund_id = ?').bind(input.refundId).first<any>();
+    assert.deepEqual([row.status, row.registered_by_staff_id, row.actor_user_id, row.terminal_by_staff_id], ['CONFIRMED', staffIdOf(registrant), registrant.userId, staffIdOf(finisher)]);
+    assert.deepEqual(await refundAudits(s, input.refundId), [auditOf('FLYING_PASS_REFUND_REGISTER', registrant), auditOf('FLYING_PASS_REFUND_CONFIRM', finisher)]);
+    assert.equal(await s.scalar("SELECT SUM(amount) AS n FROM luggage_flying_pass_refunds WHERE status = 'CONFIRMED'"), 400);
+    assert.equal(await s.original(), before, 'original order and receipts unchanged');
+  });
+}
+
+test('shift handover: another staff (center_staff or part_time) cancels an unpaid payout; the registrant cannot confirm it afterwards', async () => {
+  for (const [registrant, finisher] of [[actor, partTime], [partTime, actor]] as const) {
+    const s = await setup(); const before = await s.original();
+    const { input } = await s.reserve('GOLD', crypto.randomUUID(), registrant);
+    const cancelled = await s.call(`${input.refundId}/cancel`, { confirmNotPaid: true, reason: '교대 후 미지급 확인', actor: finisher });
+    assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
+    const row = await s.db.prepare('SELECT * FROM luggage_flying_pass_refunds WHERE refund_id = ?').bind(input.refundId).first<any>();
+    assert.deepEqual([row.status, row.registered_by_staff_id, row.terminal_by_staff_id, row.cancel_reason, row.paid_at], ['CANCELLED', staffIdOf(registrant), staffIdOf(finisher), '교대 후 미지급 확인', null]);
+    assert.deepEqual(await refundAudits(s, input.refundId), [auditOf('FLYING_PASS_REFUND_REGISTER', registrant), auditOf('FLYING_PASS_REFUND_CANCEL', finisher)]);
+    assert.deepEqual((await s.call(`${input.refundId}/confirm`, { cashPaid: true, expectedAmount: 400, actor: registrant })).body.code, 'TERMINAL_CONFLICT');
+    assert.equal(await s.scalar("SELECT COUNT(*) AS n FROM luggage_flying_pass_refunds WHERE status = 'CONFIRMED'"), 0);
+    assert.equal(await s.original(), before);
+  }
+});
+
+test('shift handover race: registrant confirms while another staff cancels → exactly one terminal state and audit', async () => {
+  const s = await setup(); const { input } = await s.reserve();
+  const outcomes = await Promise.all([
+    s.call(`${input.refundId}/confirm`, { cashPaid: true, expectedAmount: 400 }),
+    s.call(`${input.refundId}/cancel`, { confirmNotPaid: true, reason: '미지급 확인', actor: partTime }),
+  ]);
+  assert.deepEqual(outcomes.map(r => r.status).sort(), [200, 409]);
+  assert.equal(await s.scalar("SELECT COUNT(*) AS n FROM luggage_audit_logs WHERE action IN ('FLYING_PASS_REFUND_CONFIRM','FLYING_PASS_REFUND_CANCEL')"), 1);
+});
+
+test('date-changed pending payout: nobody can confirm it on a later JST day (no backdated paid date); another staff can still cancel it as unpaid', async () => {
+  const s = await setup(); const { input } = await s.reserve();
+  const tomorrow = new Date(Date.now() + 86400000);
+  const asPartTime = { actor: { ...partTime, role: 'part_time' as const }, staff: { id: staffIdOf(partTime), displayName: partTime.name, email: partTime.email, role: 'part_time' as const } };
+  await assert.rejects(finishFlyingPassRefund(s.db, ID, input.refundId, { action: 'confirm', cashPaid: true, expectedAmount: 400 }, asPartTime, tomorrow), /지급일/);
+  const cancelled = await finishFlyingPassRefund(s.db, ID, input.refundId, { action: 'cancel', confirmNotPaid: true, reason: '익일 확인: 미지급' }, asPartTime, tomorrow);
+  assert.equal(cancelled.refund.status, 'CANCELLED');
+  assert.equal(cancelled.refund.terminal_by_staff_id, staffIdOf(partTime));
+  assert.equal(cancelled.refund.paid_at, null);
+});
+
+test('handover migration: rebuilds only the refund table and its own guards, keeps existing rows, repeatable; old same-actor flow still valid', async () => {
+  const s = await setup({ migrate: true, handover: false });
+  const confirmedId = (await s.reserve()).input.refundId;
+  assert.equal((await s.call(`${confirmedId}/confirm`, { cashPaid: true, expectedAmount: 400 })).status, 200);
+  const pending = await s.reserve('BLACK'); const pendingId = pending.input.refundId, pendingAmount = pending.result.body.refund.amount;
+  const master = async () => (await s.db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name").all<Record<string, string>>()).results;
+  const rows = async () => JSON.stringify((await s.db.batch([s.db.prepare('SELECT * FROM luggage_flying_pass_refunds ORDER BY refund_id'), s.db.prepare('SELECT * FROM luggage_audit_logs ORDER BY log_id')])).map(r => r.results));
+  const beforeMaster = await master(), beforeRows = await rows();
+  for (let i = 0; i < 2; i++) for (const sql of splitSql(handoverMigration)) await s.db.prepare(sql).run();
+  const afterMaster = await master();
+  const changed = new Set(['luggage_flying_pass_refunds', 'luggage_refund_transition_guard']);
+  assert.deepEqual(afterMaster.filter(r => !changed.has(r.name)), beforeMaster.filter(r => !changed.has(r.name)), 'every other view/trigger/index is byte-identical');
+  assert.deepEqual(afterMaster.map(r => r.name), beforeMaster.map(r => r.name));
+  assert.equal(await rows(), beforeRows, 'refund rows and audit preserved');
+  assert.equal(await s.scalar('SELECT total_amount AS n FROM luggage_sales_daily'), 1200);
+  // Pending payout registered under the old schema can now be finished by another staff.
+  assert.equal((await s.call(`${pendingId}/confirm`, { cashPaid: true, expectedAmount: pendingAmount, actor: partTime })).status, 200);
+  const fresh = new DatabaseSync(':memory:');
+  try { fresh.exec(schema); const sql = "SELECT type,name,sql FROM sqlite_master WHERE name LIKE '%refund%' AND sql IS NOT NULL ORDER BY type,name";
+    assert.deepEqual((await s.db.prepare(sql).all()).results.map(r => ({ ...r })), fresh.prepare(sql).all().map(r => ({ ...r })), 'fresh schema.sql equals the migrated database');
+  } finally { fresh.close(); }
 });
 
 test('existing PAID /price and /pricing restrictions remain in force', async () => {

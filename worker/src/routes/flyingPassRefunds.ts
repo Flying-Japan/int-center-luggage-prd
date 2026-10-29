@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import type { AppType } from '../types';
-import { normalizeUnifiedWriteActor, resolveInternalActorStaff } from '../lib/internalActorStaff';
+import { normalizeRefundWriteActor, resolveRefundActorStaff } from '../lib/internalActorStaff';
 import { FLYING_PASS_TIERS, type FlyingPassTier } from '../services/pricing';
 import { FlyingPassRefundError, REFUND_UUID, previewFlyingPassRefund, registerFlyingPassRefund, getFlyingPassRefund, finishFlyingPassRefund } from '../services/flyingPassRefunds';
 
@@ -39,9 +39,9 @@ export function createFlyingPassRefundRoutes(localTestOnly = false) {
       const keys = { preview: ['targetTier'], register: ['refundId','targetTier','reason','expectedFingerprint'], lookup: [], confirm: ['cashPaid','expectedAmount'], cancel: ['confirmNotPaid','reason'] }[operation];
       if (Object.keys(body).some(key => !['actor', ...keys].includes(key))) invalid('허용되지 않은 요청 항목입니다');
       let actor;
-      try { actor = normalizeUnifiedWriteActor(body.actor); }
+      try { actor = normalizeRefundWriteActor(body.actor); }
       catch { throw new FlyingPassRefundError('PERMISSION', '환급 작업 권한이 있는 직원 정보가 필요합니다', 403); }
-      const resolved = await resolveInternalActorStaff(c.env, actor);
+      const resolved = await resolveRefundActorStaff(c.env, actor);
       if (!resolved.ok) return c.json({ error: resolved.error, code: 'PERMISSION' }, resolved.status);
       const who = { actor, staff: resolved.staff };
       if (operation === 'preview') return c.json({ quote: await previewFlyingPassRefund(c.env.DB, orderId, targetTier(body.targetTier)) });

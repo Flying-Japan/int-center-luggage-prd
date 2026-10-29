@@ -28,7 +28,7 @@ Wrangler 설정과 운영 환경에는 플래그를 추가/설정하지 않았�
 | `/:refundId/cancel` | `confirmNotPaid: true`, `reason` 1~200자 | 미지급 취소; 동일 요청 재전송 가능 |
 
 `PAYOUT_PENDING`은 지급 여부가 미확정인 기록이다. 발견했다고 다시 현금을 지급하면 안 된다.
-지급 건을 등록한 동일 사용자·직원만 확정/취소할 수 있다. 기능 플래그를 OFF해도 로컬 테스트의 기존 기록 조회·확정·미지급 취소는 가능하다.
+~~지급 건을 등록한 동일 사용자·직원만 확정/취소할 수 있다.~~ (2026-10-29 개정, migration `20261029_flying_pass_refund_handover.sql` 필요) 교대 시 다른 직원(center_staff·part_time·manager)도 확정/취소할 수 있고 처리자는 `terminal_by_staff_id`와 연결된 audit에 따로 남는다. part_time actor는 환급 route에서만 `LUGGAGE_PART_TIME_REFUND_ACTORS_ENABLED=true`일 때 `pt:<uid>`로 받는다(user_profiles 조회·생성 없음). 기능 플래그를 OFF해도 로컬 테스트의 기존 기록 조회·확정·미지급 취소는 가능하다.
 미지급 취소는 실제 미지급이라는 직원의 명시적 확인을 기록하는 것이며 현금 출금을 되돌리는 동작이 아니다.
 
 확정 응답 유실 시 새 환급 ID를 만들지 말고 같은 ID로 조회/확인한다. 같은 ID에 다른 등록 내용이나 다른 최종 처리 내용을 보내면 409다.

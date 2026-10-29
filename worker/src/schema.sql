@@ -355,7 +355,7 @@ CREATE TABLE IF NOT EXISTS luggage_flying_pass_refunds (
   CHECK ((status = 'PAYOUT_PENDING' AND terminal_hash IS NULL AND terminal_by_staff_id IS NULL AND terminal_at IS NULL AND terminal_audit_id IS NULL AND paid_at IS NULL AND cancel_reason IS NULL)
     OR (status = 'CONFIRMED' AND terminal_hash IS NOT NULL AND length(terminal_hash) = 64 AND terminal_by_staff_id IS NOT NULL AND terminal_at IS NOT NULL AND terminal_audit_id IS NOT NULL AND paid_at = terminal_at AND julianday(paid_at) IS NOT NULL AND date(paid_at, '+9 hours') = business_date AND cancel_reason IS NULL)
     OR (status = 'CANCELLED' AND terminal_hash IS NOT NULL AND length(terminal_hash) = 64 AND terminal_by_staff_id IS NOT NULL AND terminal_at IS NOT NULL AND terminal_audit_id IS NOT NULL AND paid_at IS NULL AND cancel_reason IS NOT NULL AND length(trim(cancel_reason)) BETWEEN 1 AND 200)),
-  CHECK (status = 'PAYOUT_PENDING' OR (terminal_by_staff_id = registered_by_staff_id AND julianday(terminal_at) IS NOT NULL AND julianday(terminal_at) >= julianday(created_at)))
+  CHECK (status = 'PAYOUT_PENDING' OR (julianday(terminal_at) IS NOT NULL AND julianday(terminal_at) >= julianday(created_at)))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_flying_pass_refund_pending ON luggage_flying_pass_refunds(order_id) WHERE status = 'PAYOUT_PENDING';
 CREATE INDEX IF NOT EXISTS idx_flying_pass_refund_day ON luggage_flying_pass_refunds(business_date, status);
@@ -405,7 +405,7 @@ BEGIN
     OR NOT EXISTS (SELECT 1 FROM luggage_audit_logs a WHERE a.log_id = NEW.terminal_audit_id AND a.order_id = NEW.order_id AND a.device_id = NEW.refund_id
       AND a.staff_id = NEW.terminal_by_staff_id AND a.action = CASE NEW.status WHEN 'CONFIRMED' THEN 'FLYING_PASS_REFUND_CONFIRM' ELSE 'FLYING_PASS_REFUND_CANCEL' END
       AND json_valid(a.details) AND json_extract(a.details, '$.terminalHash') = NEW.terminal_hash
-      AND json_extract(a.details, '$.actor.userId') = NEW.actor_user_id
+      AND length(trim(COALESCE(json_extract(a.details, '$.actor.userId'), ''))) > 0 AND json_extract(a.details, '$.legacyStaff.id') = NEW.terminal_by_staff_id
       AND CASE NEW.status WHEN 'CONFIRMED' THEN json_extract(a.details, '$.cashPaid') = 1 ELSE json_extract(a.details, '$.confirmNotPaid') = 1 END)
     THEN RAISE(ABORT, 'REFUND_IMMUTABLE_OR_INVALID_TRANSITION') END;
   SELECT CASE WHEN NEW.status = 'CONFIRMED' AND (

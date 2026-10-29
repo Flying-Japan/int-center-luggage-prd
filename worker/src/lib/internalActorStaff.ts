@@ -113,7 +113,32 @@ export async function resolveInternalActorStaff(env: Env, actor: UnifiedWriteAct
   };
 }
 
-export function unifiedActorAuditSnapshot(actor: UnifiedWriteActor, staff: InternalActorStaff) {
+// Flying Pass refund routes only. A Unified Admin part_time worker (ERP Part-time Auth) acts as itself:
+// staff id "pt:<uid>", never an editor/admin user_profiles row and never relabeled as center_staff.
+// The Worker cannot look the account up, so the HMAC-signed Unified session is the proof; the flag keeps it OFF by default.
+const PART_TIME_ROLE = "part_time";
+const PART_TIME_UID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export type RefundWriteActor = Omit<UnifiedWriteActor, "role"> & { role: UnifiedWriteActor["role"] | "part_time" };
+export type RefundActorStaff = Omit<InternalActorStaff, "role"> & { role: InternalActorStaff["role"] | "part_time" };
+
+export function normalizeRefundWriteActor(value: unknown): RefundWriteActor {
+  if (!isPlainRecord(value) || value.role !== PART_TIME_ROLE) return normalizeUnifiedWriteActor(value);
+  // Same key/length/email checks as every other actor; only the role differs.
+  const actor = normalizeUnifiedWriteActor({ ...value, role: "center_staff" });
+  if (!PART_TIME_UID.test(actor.userId) || !actor.email.toLowerCase().endsWith("@part-time.local")) {
+    throw new Error("part_time actor needs a lowercase UUID userId and a part-time.local email");
+  }
+  return { ...actor, role: PART_TIME_ROLE };
+}
+
+export async function resolveRefundActorStaff(env: Env, actor: RefundWriteActor):
+  Promise<{ ok: true; staff: RefundActorStaff } | { ok: false; status: 403 | 503; error: string }> {
+  if (actor.role !== PART_TIME_ROLE) return resolveInternalActorStaff(env, actor as UnifiedWriteActor);
+  if (env.LUGGAGE_PART_TIME_REFUND_ACTORS_ENABLED !== "true") return { ok: false, status: 403, error: "Part-time refund actors are not enabled" };
+  return { ok: true, staff: { id: `pt:${actor.userId}`, displayName: actor.name, email: actor.email, role: PART_TIME_ROLE } };
+}
+
+export function unifiedActorAuditSnapshot(actor: RefundWriteActor, staff: RefundActorStaff) {
   return {
     actor: { userId: actor.userId, name: actor.name, email: actor.email, role: actor.role },
     legacyStaff: { id: staff.id, displayName: staff.displayName, role: staff.role },

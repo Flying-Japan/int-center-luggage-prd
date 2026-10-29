@@ -1,6 +1,6 @@
 import { recalculateOrderPrepaid, FLYING_PASS_TIERS, type FlyingPassTier } from './pricing';
 import type { BillingSummary } from './luggageBilling';
-import type { InternalActorStaff, UnifiedWriteActor } from '../lib/internalActorStaff';
+import type { RefundActorStaff, RefundWriteActor } from '../lib/internalActorStaff';
 import { unifiedActorAuditSnapshot } from '../lib/internalActorStaff';
 
 export class FlyingPassRefundError extends Error {
@@ -26,7 +26,7 @@ export type FlyingPassRefund = { refund_id: string; order_id: string; sequence: 
 type Context = { root: Root; receipts: Receipt[]; billing: BillingSummary; history: History[]; snapshots: string[] };
 export type RefundQuote = { orderId: string; fingerprint: string; previousRefundId: string | null; beforeTier: FlyingPassTier; afterTier: FlyingPassTier;
   originalAmount: number; beforeAmount: number; afterAmount: number; amount: number; businessDate: string; currency: 'JPY'; refundMethod: 'CASH' };
-export type RefundActor = { actor: UnifiedWriteActor; staff: InternalActorStaff };
+export type RefundActor = { actor: RefundWriteActor; staff: RefundActorStaff };
 const rootKeys = ['order_id','parent_order_id','status','created_at','prepaid_amount','final_amount','extra_amount','price_per_day','expected_storage_days',
   'flying_pass_tier','flying_pass_discount_amount','staff_prepaid_override_amount','suitcase_qty','backpack_qty','set_qty','expected_pickup_at','extension_date'];
 const billingKeys = ['root_id','total_billed_amount','recorded_amount','legacy_paid_estimate','invalid_amount','root_review_required','review_pickup_blocked','outstanding_amount','unbilled_days','extension_count','discount_credit_amount','cash_refunded_amount','net_received_amount','total_effective_billed_amount','pending_refund_count','refund_count'];
@@ -105,9 +105,6 @@ export async function getFlyingPassRefund(db: D1Database, orderId: string, refun
   const row = await db.prepare('SELECT * FROM luggage_flying_pass_refunds WHERE order_id = ? AND refund_id = ?').bind(orderId, refundId).first<FlyingPassRefund>();
   return row ?? fail('NOT_FOUND', '환급 기록을 찾을 수 없습니다', 404);
 }
-function own(row: FlyingPassRefund, who: RefundActor) {
-  if (row.registered_by_staff_id !== who.staff.id || row.actor_user_id !== who.actor.userId) fail('PAYOUT_OWNER_REQUIRED', '지급 건을 등록한 직원만 지급 확인·미지급 취소할 수 있습니다', 403);
-}
 function writeError(error: unknown): never {
   if (error instanceof FlyingPassRefundError) throw error;
   const message = [error, error instanceof Error ? error.cause : null].map(String).join(' ');
@@ -122,7 +119,6 @@ export async function registerFlyingPassRefund(db: D1Database, orderId: string, 
     const found = await db.prepare('SELECT * FROM luggage_flying_pass_refunds WHERE refund_id = ?').bind(input.refundId).first<FlyingPassRefund>();
     if (!found) return null;
     if (found.order_id !== orderId || found.request_hash !== requestHash) return fail('IDEMPOTENCY_CONFLICT', '환급 ID가 다른 요청에 사용되었습니다');
-    own(found, who);
     return { refund: found, replayed: true };
   };
   const previous = await replay();
@@ -162,8 +158,9 @@ export async function finishFlyingPassRefund(db: D1Database, orderId: string, re
   { action: 'confirm'; cashPaid: true; expectedAmount: number } | { action: 'cancel'; confirmNotPaid: true; reason: string },
   who: RefundActor, now = new Date()): Promise<{ refund: FlyingPassRefund; replayed: boolean }> {
   const terminalHash = await sha256({ ...input, userId: who.actor.userId, staffId: who.staff.id });
+  // Shift handover: any permitted staff (center_staff/part_time/manager) may finish another staff's payout.
+  // The terminal actor is recorded separately (terminal_by_staff_id + terminal audit actor); terminalHash binds the replay to that actor.
   const row = await getFlyingPassRefund(db, orderId, refundId);
-  own(row, who);
   const status = input.action === 'confirm' ? 'CONFIRMED' : 'CANCELLED';
   const replay = (found: FlyingPassRefund) => {
     if (found.status !== status || found.terminal_hash !== terminalHash) return fail('TERMINAL_CONFLICT', '이미 다른 내용으로 처리된 지급 건입니다. 기존 기록을 확인해주세요');
