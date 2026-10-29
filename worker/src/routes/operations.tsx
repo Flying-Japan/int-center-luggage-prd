@@ -76,6 +76,16 @@ function formatDenominationLabel(amount: number): string {
   return `¥${amount.toLocaleString()}`;
 }
 
+function signedClosingAmount(amount: number): string {
+  return `${amount > 0 ? "+" : ""}${amount.toLocaleString()}`;
+}
+
+function ClosingCurrentValue({ saved, current }: { saved: number; current: number | undefined }) {
+  return <span style="display:block;font-size:11px;font-weight:400;color:#64748b;white-space:nowrap">
+    {current === undefined ? "현재 집계 없음" : `현재 집계 ¥${signedClosingAmount(current)} · 저장 대비 ${signedClosingAmount(current - saved)}엔`}
+  </span>;
+}
+
 function uniqueStaffIds(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.map((value) => `${value ?? ""}`.trim()).filter(Boolean))];
 }
@@ -186,6 +196,7 @@ ops.get("/staff/cash-closing", async (c) => {
 
           <section class="card" style="padding:12px">
             <h3 class="card-title" style="margin-bottom:8px">최근 마감</h3>
+            <p class="card-desc" style="margin-bottom:8px">기본값과 통계는 마감 저장값입니다. 현재 집계와 저장 대비 변동은 참고값으로 별도 표시합니다.</p>
             <div class="table-wrap" style="overflow-x:auto">
               <table style="font-size:11px;border-collapse:collapse;width:100%;min-width:900px">
                 <thead>
@@ -203,8 +214,8 @@ ops.get("/staff/cash-closing", async (c) => {
                     <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">1</th>
                     <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569;font-weight:700">Total</th>
                     <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">PayPay</th>
-                    <th title="짐보관 신청서 기준 합계" style="padding:3px 6px;text-align:right;font-size:10px;color:#2563eb">자동매출</th>
-                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569">차액</th>
+                    <th title="마감에 저장된 자동매출. 현재 집계는 아래 참고값으로 표시합니다." style="padding:3px 6px;text-align:right;font-size:10px;color:#2563eb;white-space:nowrap">마감 저장 매출</th>
+                    <th style="padding:3px 6px;text-align:right;font-size:10px;color:#475569;white-space:nowrap">마감 저장 차액</th>
                     <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">4F</th>
                     <th style="padding:3px 4px;text-align:right;font-size:10px;color:#475569">8F</th>
                     <th style="padding:3px 4px;text-align:left;font-size:10px;color:#475569">작성자</th>
@@ -218,10 +229,9 @@ ops.get("/staff/cash-closing", async (c) => {
                     const businessDate = cl.business_date as string;
                     const dateDisplay = formatClosingDate(businessDate);
                     const currentAutoSales = autoSalesByDate.get(businessDate);
-                    const autoAmount = (cl.refund_net_total as number | null) ?? currentAutoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
-                    const diff = currentAutoSales
-                      ? ((cl.actual_amount as number) || 0) - currentAutoSales.totalAmount
-                      : ((cl.difference_amount as number) || 0);
+                    const autoAmount = Number(cl.check_auto_amount) || 0;
+                    const diff = Number(cl.difference_amount) || 0;
+                    const currentDifference = currentAutoSales ? (Number(cl.actual_amount) || 0) - currentAutoSales.totalAmount : undefined;
                     return (
                       <tr style="border-bottom:1px solid #e2e8f0">
                         <td style={`padding:2px 6px;white-space:nowrap;${dateDisplay.style}`} title={dateDisplay.title}><a href={`/staff/cash-closing/${cl.closing_id}`} style="color:inherit;font-weight:600">{dateDisplay.label}{dateDisplay.suffix}</a>{(cl as Record<string, unknown> & { has_multi: boolean }).has_multi && <span style="margin-left:4px;font-size:9px;background:#fef3c7;color:#92400e;padding:1px 4px;border-radius:3px;vertical-align:middle">+1</span>}</td>
@@ -237,8 +247,8 @@ ops.get("/staff/cash-closing", async (c) => {
                         <td style="padding:2px 4px;text-align:right">{((cl.count_1 as number) || 0).toLocaleString()}</td>
                         <td style="padding:2px 6px;text-align:right;font-weight:700">¥{(cl.total_amount as number).toLocaleString()}</td>
                         <td style="padding:2px 6px;text-align:right">¥{(cl.paypay_amount as number).toLocaleString()}</td>
-                        <td style="padding:2px 6px;text-align:right;color:#2563eb">¥{autoAmount.toLocaleString()}{(currentAutoSales?.estimatedAmount ?? 0) > 0 && <span style="display:block;font-size:10px">원장 없는 추정 ¥{currentAutoSales?.estimatedAmount?.toLocaleString()} 포함</span>}</td>
-                        <td style={`padding:2px 6px;text-align:right;font-weight:600;color:${diff === 0 ? '#166534' : '#dc2626'}`}>{diff > 0 ? "+" : ""}{diff.toLocaleString()}</td>
+                        <td style="padding:2px 6px;text-align:right;color:#2563eb">¥{autoAmount.toLocaleString()}<ClosingCurrentValue saved={autoAmount} current={currentAutoSales?.totalAmount} />{(currentAutoSales?.estimatedAmount ?? 0) > 0 && <span style="display:block;font-size:10px">현재 집계에 원장 없는 추정 ¥{currentAutoSales?.estimatedAmount?.toLocaleString()} 포함</span>}</td>
+                        <td style={`padding:2px 6px;text-align:right;font-weight:600;color:${diff === 0 ? '#166534' : '#dc2626'}`}>{signedClosingAmount(diff)}<ClosingCurrentValue saved={diff} current={currentDifference} /></td>
                         <td style="padding:2px 4px;text-align:right">{((cl.floor_4f_count as number) || 0) > 0 ? (cl.floor_4f_count as number) : "-"}</td>
                         <td style="padding:2px 4px;text-align:right">{((cl.floor_8f_count as number) || 0) > 0 ? (cl.floor_8f_count as number) : "-"}</td>
                         <td style="padding:2px 4px;white-space:nowrap">{(cl.staff_name as string) || "-"}</td>
@@ -254,15 +264,12 @@ ops.get("/staff/cash-closing", async (c) => {
                 {closingRows.length > 0 && (() => {
                   const todayJST = formatDateJST(new Date());
                   const rows = closingRows.map((cl) => {
-                    const currentAutoSales = autoSalesByDate.get(cl.business_date as string);
                     return {
                       date: cl.business_date as string,
                       total: (cl.total_amount as number) || 0,
                       paypay: (cl.paypay_amount as number) || 0,
-                      auto: (cl.refund_net_total as number | null) ?? currentAutoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0),
-                      diff: currentAutoSales
-                        ? ((cl.actual_amount as number) || 0) - currentAutoSales.totalAmount
-                        : ((cl.difference_amount as number) || 0),
+                      auto: Number(cl.check_auto_amount) || 0,
+                      diff: Number(cl.difference_amount) || 0,
                       f4: (cl.floor_4f_count as number) || 0,
                       f8: (cl.floor_8f_count as number) || 0,
                     };
@@ -443,14 +450,12 @@ ops.get("/staff/cash-closing/:id", async (c) => {
   }));
 
   const cl = closing as Record<string, unknown>;
-  const autoAmount = (cl.refund_net_total as number | null) ?? autoSales?.totalAmount ?? ((cl.check_auto_amount as number) || 0);
-  const differenceAmount = cl.refund_net_total != null ? Number(cl.actual_amount) - Number(cl.refund_net_total) : autoSales
-    ? ((cl.actual_amount as number) || 0) - autoSales.totalAmount
-    : ((cl.difference_amount as number) || 0);
+  const autoAmount = Number(cl.check_auto_amount) || 0;
+  const differenceAmount = Number(cl.difference_amount) || 0;
   const effectiveActualQrAmount = ((cl.actual_qr_amount as number) || 0) || ((cl.paypay_amount as number) || 0);
-  const qrDifferenceAmount = cl.refund_net_total != null ? effectiveActualQrAmount - Number(cl.refund_gross_qr) : autoSales
-    ? effectiveActualQrAmount - autoSales.qrAmount
-    : ((cl.qr_difference_amount as number) || 0);
+  const qrDifferenceAmount = Number(cl.qr_difference_amount) || 0;
+  const currentDifference = autoSales ? (Number(cl.actual_amount) || 0) - autoSales.totalAmount : undefined;
+  const currentQrDifference = autoSales ? effectiveActualQrAmount - autoSales.qrAmount : undefined;
   const closingStaffName = (cl.staff_id as string | null)
     ? cashClosingStaffNameMap.get(cl.staff_id as string) || (cl.owner_name as string) || "-"
     : (cl.owner_name as string) || "-";
@@ -475,18 +480,20 @@ ops.get("/staff/cash-closing/:id", async (c) => {
                 <p class="stat-value">¥{effectiveActualQrAmount.toLocaleString()}</p>
               </div>
               <div class="card stat-card">
-                <p class="stat-label">자동매출 <span title="현재 짐보관 매출 집계 기준 자동매출입니다." style="cursor:help;color:#94a3b8;font-size:10px">(?)</span></p>
+                <p class="stat-label">마감 저장 매출 <span title="마감에 저장된 자동매출입니다. 현재 집계와 별도로 표시합니다." style="cursor:help;color:#94a3b8;font-size:10px">(?)</span></p>
                 <p class="stat-value">¥{autoAmount.toLocaleString()}</p>
-                {(autoSales?.estimatedAmount ?? 0) > 0 && <p class="card-desc">원장 없는 과거 결제완료 추정 ¥{autoSales?.estimatedAmount?.toLocaleString()} 포함 · 실제 수납 확정액이 아닙니다.</p>}
+                <ClosingCurrentValue saved={autoAmount} current={autoSales?.totalAmount} />
+                {(autoSales?.estimatedAmount ?? 0) > 0 && <p class="card-desc">현재 집계에 원장 없는 과거 결제완료 추정 ¥{autoSales?.estimatedAmount?.toLocaleString()} 포함 · 실제 수납 확정액이 아닙니다.</p>}
               </div>
               <div class="card stat-card">
-                <p class="stat-label">차액</p>
-                <p class="stat-value" style={`color:${differenceAmount === 0 ? '#166534' : '#dc2626'}`}>¥{differenceAmount.toLocaleString()}</p>
+                <p class="stat-label">마감 저장 차액</p>
+                <p class="stat-value" style={`color:${differenceAmount === 0 ? '#166534' : '#dc2626'}`}>¥{signedClosingAmount(differenceAmount)}</p>
+                <ClosingCurrentValue saved={differenceAmount} current={currentDifference} />
               </div>
             </div>
 
             <p style="margin-bottom:12px;font-size:11px;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:6px 10px">
-              ※ 자동매출과 차액은 현재 짐보관 매출 집계 기준으로 표시되며, 집계값이 없으면 마감 저장값을 표시합니다.
+              ※ 기본값과 목록 통계는 마감에 저장된 값입니다(마감 수정 시 수정 저장값 반영). 현재 집계와 저장 대비 변동은 참고값이며, 저장된 정산값을 바꾸지 않습니다.
             </p>
 
             <div style="margin-bottom:16px;overflow-x:auto">
@@ -523,7 +530,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
               <p><strong>지팡이 환불</strong><span>¥{((cl.wand_refund as number) || 0).toLocaleString()}</span></p>
               <p><strong>4층 위탁</strong><span>{((cl.floor_4f_count as number) || 0)}건</span></p>
               <p><strong>8층 위탁</strong><span>{((cl.floor_8f_count as number) || 0)}건</span></p>
-              <p><strong>QR 차액</strong><span style={`color:${qrDifferenceAmount === 0 ? '#166534' : '#dc2626'}`}>¥{qrDifferenceAmount.toLocaleString()}</span></p>
+              <p><strong>마감 저장 QR 차액</strong><span style={`color:${qrDifferenceAmount === 0 ? '#166534' : '#dc2626'}`}>¥{signedClosingAmount(qrDifferenceAmount)}<ClosingCurrentValue saved={qrDifferenceAmount} current={currentQrDifference} /></span></p>
               <p><strong>작성자</strong><span>{closingStaffName}</span></p>
               <p><strong>메모</strong><span>{(cl.note as string) || "-"}</span></p>
             </div>
@@ -531,7 +538,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
             <div style="margin-top:12px;padding:10px;background:#f5f5f4;border-radius:6px;font-size:13px;color:#37352f">
               {(() => {
                 const typeLabel = CLOSING_TYPE_LABELS[cl.closing_type as string] || cl.closing_type as string;
-                return `${typeLabel} 정산현금 (¥${(cl.total_amount as number).toLocaleString()} / ${differenceAmount > 0 ? "+" : ""}${differenceAmount.toLocaleString()}엔)`;
+                return `${typeLabel} 정산현금 · 저장 차액 (¥${(cl.total_amount as number).toLocaleString()} / ${differenceAmount > 0 ? "+" : ""}${differenceAmount.toLocaleString()}엔)`;
               })()}
             </div>
 
