@@ -148,13 +148,17 @@ test('genuine later automatic extension remains collectible and blocks pickup af
   assert.throws(() => ctx.sqlite.prepare("UPDATE luggage_orders SET status = 'PICKED_UP' WHERE order_id = ?").run(CORRECTED_ORDER), /Outstanding collection/);
 });
 
-function setup(projectionNow?: string, role = 'editor', correctionPolicy = true) {
+function setup(projectionNow?: string | false, role = 'editor', correctionPolicy = true) {
   const sqlite = new DatabaseSync(':memory:');
   open.push(sqlite);
   let schema = readFileSync('src/schema.sql', 'utf8');
   if (!correctionPolicy) schema = schema.split('-- Operator-only correction policy.')[0];
-  // Freeze only the DB's projection clock; actual receipt timestamps still come from the service.
-  if (projectionNow) schema = schema.replaceAll("'now'", `'${projectionNow}'`);
+  // Keep ordinary fixtures before the 21:00 accrual boundary; boundary cases pass their own clock.
+  // Actual receipt timestamps still come from the service.
+  if (projectionNow !== false) {
+    const projectionClock = projectionNow ?? `${new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)}T06:00:00Z`;
+    schema = schema.replaceAll("'now'", `'${projectionClock}'`);
+  }
   sqlite.exec(schema);
   // Historical fixtures explicitly opt into accrual; production cutover never does.
   sqlite.exec("UPDATE luggage_automatic_billing_policy SET starts_at = '1970-01-01T00:00:00Z'");
@@ -1094,7 +1098,7 @@ test('a receipt arriving during price correction is preserved and the guarded tr
 });
 
 test('prepared policy upgrade preserves claim/receipt/audit rows and matches all fresh-schema financial guards', () => {
-  const ctx = setup(undefined, 'editor', false); seedRootReview(ctx, { status: 'PICKED_UP', evidence: 'text' });
+  const ctx = setup(false, 'editor', false); seedRootReview(ctx, { status: 'PICKED_UP', evidence: 'text' });
   const orders = ctx.sqlite.prepare('SELECT * FROM luggage_orders').all();
   const ledger = payments(ctx);
   const logs = ctx.sqlite.prepare('SELECT * FROM luggage_audit_logs').all();
@@ -1103,7 +1107,7 @@ test('prepared policy upgrade preserves claim/receipt/audit rows and matches all
   const start = 'CREATE UNIQUE INDEX IF NOT EXISTS idx_luggage_extension_date';
   assert.equal(upgrade.slice(upgrade.indexOf(start)).trim(), schema.slice(schema.indexOf(start), schema.indexOf("-- 21:00 JST automatic extension cutover")).trim());
   const definitions = () => ctx.sqlite.prepare("SELECT type, name, sql FROM sqlite_master WHERE type IN ('view', 'trigger') ORDER BY type, name").all();
-  const fresh = setup();
+  const fresh = setup(false);
   const expected = fresh.sqlite.prepare("SELECT type, name, sql FROM sqlite_master WHERE type IN ('view', 'trigger') ORDER BY type, name").all();
   ctx.sqlite.exec(upgrade);
   ctx.sqlite.exec("DROP TABLE luggage_automatic_billing_policy");
