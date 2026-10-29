@@ -421,6 +421,25 @@ test('part_time refund actors: OFF by default (the unrelated global part-time fl
   assert.equal((await s.call(`${input.refundId}/lookup`, { actor: partTime })).status, 200);
 });
 
+test('part_time opening is refund-only: with the refund part_time switch ON, other internal write routes still refuse a part_time actor and write nothing', async () => {
+  const s = await setup(); Object.assign(s.env, { APP_ENV: 'production', LUGGAGE_PART_TIME_ACTORS_ENABLED: 'true' });
+  const before = await s.original(), audits = await s.scalar('SELECT COUNT(*) AS n FROM luggage_audit_logs');
+  for (const [path, payload, method] of [
+    ['/internal/luggage-handovers/1/read', {}, 'POST'],
+    [`/internal/luggage-orders/${ID}/cancel`, { requestId: crypto.randomUUID(), reason: '우회 시도' }, 'POST'],
+    [`/internal/luggage-orders/${ID}/note`, { note: '우회' }, 'PATCH'],
+    ['/internal/luggage-cash-closings', closingInput(1600), 'POST'],
+  ] as const) {
+    const response = await internalRequest(s, path, { ...payload, actor: partTime }, method);
+    assert.ok([400, 403].includes(response.status), `${path} ${response.status}`);
+  }
+  // On an actor-only route the role itself is what refuses it; center_staff passes the same normalizer.
+  assert.match(((await (await internalRequest(s, '/internal/luggage-handovers/1/read', { actor: partTime })).json()) as any).error, /actor\.role is not allowed/);
+  assert.notEqual((await internalRequest(s, '/internal/luggage-handovers/1/read', {})).status, 400);
+  assert.equal(await s.original(), before);
+  assert.equal(await s.scalar('SELECT COUNT(*) AS n FROM luggage_audit_logs'), audits);
+});
+
 async function refundAudits(s: Awaited<ReturnType<typeof setup>>, refundId: string) {
   return (await s.db.prepare(`SELECT action, staff_id, json_extract(details,'$.actor.userId') AS user_id, json_extract(details,'$.actor.role') AS role,
     json_extract(details,'$.legacyStaff.id') AS legacy_id FROM luggage_audit_logs WHERE device_id = ? ORDER BY log_id`).bind(refundId).all<Record<string, string>>()).results.map(r => ({ ...r }));
