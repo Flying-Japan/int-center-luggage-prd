@@ -45,6 +45,7 @@ export type BagAdditionInput = BagCounts & {
 export type BagAdditionActor = {
     staffId: string;
     actor?: unknown;
+    nameStatements?: D1PreparedStatement[];
 };
 async function hash(value: unknown) { return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value))))).map(x => x.toString(16).padStart(2, '0')).join(''); }
 function counts(input: BagCounts) {
@@ -190,7 +191,7 @@ export async function registerBagAddition(db: D1Database, orderId: string, input
       AND b.recorded_amount=? AND b.total_billed_amount=? AND b.root_review_required=0 AND b.invalid_amount=0
   ) THEN '$' ELSE 'BAG_ADDITION_ATOMICITY_FAILED' END)`).bind(input.additionId, requestHash, orderId, quote.after.suitcaseQty, quote.after.backpackQty, quote.after.pricePerDay, revision, quote.receivedBefore + (payment ? quote.amount : 0), quote.billedAfter));
     try {
-        await db.batch(statements);
+        await db.batch([...statements, ...(who.nameStatements ?? [])]);
     }
     catch (error) {
         const winner = await db.prepare('SELECT order_id,request_hash,amount FROM luggage_bag_additions WHERE addition_id=?').bind(input.additionId).first<{
@@ -248,7 +249,7 @@ export async function collectBagAddition(db: D1Database, orderId: string, who: B
     if (!await db.prepare('SELECT 1 FROM luggage_bag_additions WHERE order_id=? LIMIT 1').bind(orderId).first())
         fail('NOT_FOUND', '추가 짐 청구가 없는 주문입니다', 404);
     try {
-        return { ...await confirmCollection(db, orderId, who.staffId, { request_id: input.requestId, confirm_received: 'yes', expected_amount: input.expectedAmount, cash_amount: input.cashAmount, qr_amount: input.qrAmount }), replayed: false };
+        return { ...await confirmCollection(db, orderId, who.staffId, { request_id: input.requestId, confirm_received: 'yes', expected_amount: input.expectedAmount, cash_amount: input.cashAmount, qr_amount: input.qrAmount }, { actor: who.actor, finalStatements: who.nameStatements }), replayed: false };
     }
     catch (error) {
         const found = await replay();

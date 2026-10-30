@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono';
 import type { AppType } from '../types';
 import { staffAuth, editorAuth, getStaff } from '../middleware/auth';
-import { normalizeUnifiedWriteActor, resolveInternalActorStaff } from '../lib/internalActorStaff';
+import { normalizeUnifiedWriteActor, resolveInternalActorStaff, partTimeActorNameStatements } from '../lib/internalActorStaff';
 import { BagAdditionError, previewBagAddition, registerBagAddition, collectBagAddition, type BagCounts, type BagAdditionInput } from '../services/bagAdditions';
 import { BillingConflict, getBillingSummary } from '../services/luggageBilling';
 import { StaffTopbar } from '../lib/components';
@@ -47,7 +47,7 @@ function error(c: Context<AppType>, e: unknown) {
         return c.json({ error: e.message, code: e.code }, e.status as 400 | 403 | 404 | 409 | 503);
     throw e;
 }
-async function actor(c: Context<AppType>, value: unknown) {
+async function actor(c: Context<AppType>, value: unknown, operation: "order.bagAddition" | "order.bagCollection" = "order.bagAddition") {
     let who;
     try {
         who = normalizeUnifiedWriteActor(value);
@@ -55,10 +55,10 @@ async function actor(c: Context<AppType>, value: unknown) {
     catch {
         throw new BagAdditionError('PERMISSION', '주문 수정 권한이 있는 직원 정보가 필요합니다', 403);
     }
-    const mapped = await resolveInternalActorStaff(c.env, who);
+    const mapped = await resolveInternalActorStaff(c.env, who, operation);
     if (!mapped.ok)
         throw new BagAdditionError('PERMISSION', mapped.error, mapped.status);
-    return { staffId: mapped.staff.id, actor: who };
+    return { staffId: mapped.staff.id, actor: who, nameStatements: [...partTimeActorNameStatements(c.env, mapped.staff), ...(mapped.staff.role === 'part_time' ? [c.env.DB.prepare("SELECT json_extract('{}',CASE WHEN EXISTS(SELECT 1 FROM luggage_part_time_actors WHERE actor_id=? AND display_name=?) THEN '$' ELSE 'BAG_ACTOR_NAME_ATOMICITY_FAILED' END)").bind(mapped.staff.id, mapped.staff.displayName)] : [])] };
 }
 async function history(c: Context<AppType>, orderId: string) { return (await c.env.DB.prepare('SELECT addition_id,suitcase_added,backpack_added,set_added,batch_price_per_day,coverage_start_date,coverage_end_date,storage_days,discount_rate,base_amount,discounted_amount,flying_pass_tier,flying_pass_discount_amount,policy_version,amount,business_date,created_at,reason FROM luggage_bag_additions WHERE order_id=? ORDER BY created_at,addition_id').bind(orderId).all()).results; }
 // Mounted under the existing internalAuth HMAC boundary in internalApi.
@@ -66,7 +66,7 @@ internal.get('/internal/luggage-orders/:id/bag-additions', async (c) => {
     c.header('Cache-Control', 'no-store');
     try {
         const orderId = id(c);
-        return c.json({ registrationEnabled: c.env.LUGGAGE_BAG_ADDITIONS_ENABLED === 'true', additions: await history(c, orderId), billing: await getBillingSummary(c.env.DB, orderId) });
+        return c.json({ partTimeActorsEnabled: c.env.LUGGAGE_PART_TIME_ACTORS_ENABLED === 'true', registrationEnabled: c.env.LUGGAGE_BAG_ADDITIONS_ENABLED === 'true', additions: await history(c, orderId), billing: await getBillingSummary(c.env.DB, orderId) });
     }
     catch (e) {
         return error(c, e);
@@ -105,7 +105,7 @@ internal.post('/internal/luggage-orders/:id/bag-additions/collect', async (c) =>
     c.header('Cache-Control', 'no-store');
     try {
         const v = body(await c.req.json().catch(() => null), ['actor', 'requestId', 'expectedAmount', 'confirmReceived', 'cashAmount', 'qrAmount']);
-        const who = await actor(c, v.actor), orderId = id(c);
+        const who = await actor(c, v.actor, "order.bagCollection"), orderId = id(c);
         if (v.confirmReceived !== true || typeof v.requestId !== 'string')
             bad('실제 수납 확인과 요청 식별자가 필요합니다');
         const result = await collectBagAddition(c.env.DB, orderId, who, { requestId: v.requestId, confirmReceived: true, expectedAmount: integer(v.expectedAmount), cashAmount: integer(v.cashAmount), qrAmount: integer(v.qrAmount) });

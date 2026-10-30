@@ -429,8 +429,8 @@ test('part_time refund actors: OFF by default (the unrelated global part-time fl
   assert.equal((await s.call(`${input.refundId}/lookup`, { actor: partTime })).status, 200);
 });
 
-test('part_time opening is refund-only: with the refund part_time switch ON, other internal write routes still refuse a part_time actor and write nothing', async () => {
-  const s = await setup(); Object.assign(s.env, { APP_ENV: 'production', LUGGAGE_PART_TIME_ACTORS_ENABLED: 'true' });
+test('refund-only opening: with the refund switch ON and general switch OFF, other internal writes refuse part_time and write nothing', async () => {
+  const s = await setup(); Object.assign(s.env, { APP_ENV: 'production', LUGGAGE_PART_TIME_ACTORS_ENABLED: 'false' });
   const before = await s.original(), audits = await s.scalar('SELECT COUNT(*) AS n FROM luggage_audit_logs');
   for (const [path, payload, method] of [
     ['/internal/luggage-handovers/1/read', {}, 'POST'],
@@ -441,8 +441,8 @@ test('part_time opening is refund-only: with the refund part_time switch ON, oth
     const response = await internalRequest(s, path, { ...payload, actor: partTime }, method);
     assert.ok([400, 403].includes(response.status), `${path} ${response.status}`);
   }
-  // On an actor-only route the role itself is what refuses it; center_staff passes the same normalizer.
-  assert.match(((await (await internalRequest(s, '/internal/luggage-handovers/1/read', { actor: partTime })).json()) as any).error, /actor\.role is not allowed/);
+  // The general switch refuses actor-only routes before any database work.
+  assert.match(((await (await internalRequest(s, '/internal/luggage-handovers/1/read', { actor: partTime })).json()) as any).error, /Part-time actors are not enabled/);
   assert.notEqual((await internalRequest(s, '/internal/luggage-handovers/1/read', {})).status, 400);
   assert.equal(await s.original(), before);
   assert.equal(await s.scalar('SELECT COUNT(*) AS n FROM luggage_audit_logs'), audits);

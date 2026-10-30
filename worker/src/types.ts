@@ -8,12 +8,14 @@ export type Env = {
   // Internal reviewer -> luggage auth
   INTERNAL_API_SECRET: string;
   CENTER_INVENTORY_API_SECRET?: string;
+  // "true" lets the signed Unified Admin write as an ERP Part-time actor (pt:<uid>); off by default (fail-closed)
+  LUGGAGE_PART_TIME_ACTORS_ENABLED?: string;
+  // Existing refund-only switch remains independent of general part-time operations.
+  LUGGAGE_PART_TIME_REFUND_ACTORS_ENABLED?: string;
 
   // Default OFF. Public routes stay hard-gated until phase-3 UI and operational validation are complete.
   LUGGAGE_FLYING_PASS_REFUNDS_ENABLED?: string;
   LUGGAGE_BAG_ADDITIONS_ENABLED?: string;
-  // Default OFF. "true" lets a signed Unified Admin part_time actor (ERP Part-time Auth UID) use the Flying Pass refund routes only.
-  LUGGAGE_PART_TIME_REFUND_ACTORS_ENABLED?: string;
 
   // Supabase (staff auth + staff profiles)
   SUPABASE_URL: string;

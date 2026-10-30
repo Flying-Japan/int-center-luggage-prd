@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import f0 from '../src/index.f0';
 import f1 from '../src/index';
 import { readOnlyDatabase } from '../src/lib/financeReadOnly';
-import { normalizeUnifiedWriteActor } from '../src/lib/internalActorStaff';
+import { normalizeUnifiedWriteActor, resolveInternalActorStaff } from '../src/lib/internalActorStaff';
 import { discoverRoutes, concretePath } from './helpers/m0.mjs';
 
 const phase = process.env.FINANCE_RELEASE_TEST_PHASE || 'F0';
@@ -59,6 +59,8 @@ test('F0 D1 capability rejects DML, WITH writes, returning, multiple statements,
   assert.equal(prepared, 2);
 });
 
-test('finance-only actor contract rejects the excluded role instead of activating an environment backdoor', () => {
-  assert.throws(() => normalizeUnifiedWriteActor({ userId: '11111111-1111-4111-8111-111111111111', name: 'Synthetic', email: 'synthetic@part-time.local', role: 'part_time' }), /actor.role is not allowed/);
+test('general part-time actors still require valid shape and an explicit write switch; F0 remains read-only', async () => {
+  const actor = normalizeUnifiedWriteActor({ userId: '11111111-1111-4111-8111-111111111111', name: 'Synthetic', email: 'synthetic@part-time.local', role: 'part_time' });
+  assert.deepEqual(await resolveInternalActorStaff({} as never, actor, 'handover.create'), { ok: false, status: 403, error: 'Part-time actors are not enabled' });
+  assert.throws(() => normalizeUnifiedWriteActor({ ...actor, userId: 'invalid' }), /lowercase UUID/);
 });

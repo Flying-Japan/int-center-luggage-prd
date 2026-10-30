@@ -20,7 +20,7 @@ import { calculateStorageDays, formatDateJST, toJST, validatePickupTimeWindow } 
 import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
 import { hmacSha256Hex } from "../lib/hmac";
 import { loadCompletionMessages } from "../services/completionMessages";
-import { resolveInternalActorStaff, unifiedActorAuditSnapshot } from "../lib/internalActorStaff";
+import { assertPartTimeActorShape, partTimeActorGate, partTimeActorNameStatements, resolveInternalActorStaff, unifiedActorAuditSnapshot } from "../lib/internalActorStaff";
 import { getDashboardSyncToken } from "../lib/dashboardSync";
 import {
   LOST_FOUND_SNAPSHOT_WHERE,
@@ -103,15 +103,18 @@ const internalApi = new Hono<AppType>();
 // would swallow every request on the worker. Scope the auth middleware to the
 // prefix we actually own so /customer, /login, /admin, etc. stay untouched.
 internalApi.use("/internal/*", internalAuth);
+// Existing refund routes retain their own part-time switch and authorization checks.
 internalApi.route("/", flyingPassRefundRoutes);
+// General part-time operations require the general switch after the refund routes have handled their own requests.
+internalApi.use("/internal/*", partTimeActorGate);
 internalApi.route("/",bagAdditionInternalRoutes);
 
 const EXPERIENCE_STATUSES = new Set(["SCHEDULED", "VISITED", "RECEIVED", "CANCELLED"]);
 const EXPERIENCE_VISITOR_TYPES = new Set(["BLOGGER", "INFLUENCER", "YOUTUBER", "OTHER"]);
 const EXPERIENCE_BENEFIT_TYPES = new Set(["GIFT_CARD", "CASH", "PRODUCT", "OTHER", "REVIEWER_EXPERIENCE"]);
 const EXPERIENCE_VISIT_SORTS = new Set(["newest", "oldest"]);
-const LUGGAGE_NOTE_ACTOR_ROLES = new Set(["center_staff", "manager", "super_admin"]);
-const LUGGAGE_IMAGE_ACTOR_ROLES = new Set(["center_staff", "manager", "super_admin", "viewer"]);
+const LUGGAGE_NOTE_ACTOR_ROLES = new Set(["center_staff", "part_time", "manager", "super_admin"]);
+const LUGGAGE_IMAGE_ACTOR_ROLES = new Set(["center_staff", "part_time", "manager", "super_admin", "viewer"]);
 const LUGGAGE_ORDER_ID_PATTERN = /^(?:EXT-)?\d{8}-\d{3,10}$/;
 const LUGGAGE_HANDOVER_CATEGORIES = new Set(["HANDOVER", "NOTICE", "URGENT", "EXPERIENCE", "OTHER"]);
 const LUGGAGE_HANDOVER_SORTS = new Set(["newest", "oldest", "pinned"]);
@@ -532,6 +535,7 @@ type LuggageLostFoundRow = {
 
 function handoverStaffName(staffId: string | null, names: Map<string, string>): string {
   if (staffId === "SYSTEM") return "시스템";
+  if (staffId?.startsWith("pt:")) return names.get(staffId) ?? "아르바이트";
   return staffId ? names.get(staffId) ?? staffId.slice(0, 8) : "작성자 미상";
 }
 
@@ -937,7 +941,7 @@ internalApi.post("/internal/luggage-cash-closings", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "cashClosing.create");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
   const businessDate = formatDateJST(new Date());
@@ -1001,6 +1005,7 @@ internalApi.post("/internal/luggage-cash-closings", async (c) => {
          WHERE changes() = 1`,
       ).bind(auditPayload, staff.id),
       c.env.DB.prepare(`SELECT json_extract('{}', CASE WHEN EXISTS (SELECT 1 FROM luggage_cash_closing_audits WHERE action = 'SUBMIT' AND instr(payload, ?) > 0) THEN '$' ELSE 'CLOSING_AUDIT_FAILED' END)`).bind(requestMarker),
+      ...partTimeActorNameStatements(c.env, staff),
     ]);
     const created = (results[0].results ?? []) as Array<Record<string, unknown>>;
     if (created.length === 0) return duplicate();
@@ -1026,7 +1031,7 @@ internalApi.patch("/internal/luggage-cash-closings/:closingId", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "cashClosing.update");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
 
@@ -1078,6 +1083,7 @@ internalApi.patch("/internal/luggage-cash-closings/:closingId", async (c) => {
          SELECT ?, 'EDIT', NULL, ?, ? WHERE changes() = 1`,
       ).bind(closingId, auditPayload, staff.id),
       c.env.DB.prepare(`SELECT json_extract('{}', CASE WHEN EXISTS (SELECT 1 FROM luggage_cash_closing_audits WHERE closing_id = ? AND action = 'EDIT' AND payload = ? AND staff_id = ?) THEN '$' ELSE 'CLOSING_AUDIT_FAILED' END)`).bind(closingId, auditPayload, staff.id),
+      ...partTimeActorNameStatements(c.env, staff),
     ]);
     const updated = (results[1].results ?? []) as Array<Record<string, unknown>>;
     if (updated.length !== 1) return c.json({ error: "Cash closing was changed by another request", code: "STALE" }, 409);
@@ -1405,7 +1411,7 @@ internalApi.post("/internal/luggage-lost-found", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "lostFound.create");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
 
@@ -1448,6 +1454,7 @@ internalApi.post("/internal/luggage-lost-found", async (c) => {
                 json_set(?, '$.entryId', last_insert_rowid(), '$.after.entryId', last_insert_rowid()), datetime('now')
          WHERE changes() = 1`,
       ).bind(staff.id, auditDetails),
+      ...partTimeActorNameStatements(c.env, staff),
     ]);
     const created = (results[0].results ?? []) as LuggageLostFoundWriteRow[];
     if (created.length === 0) {
@@ -1474,7 +1481,7 @@ internalApi.patch("/internal/luggage-lost-found/:entryId", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "lostFound.update");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
 
@@ -1513,6 +1520,7 @@ internalApi.patch("/internal/luggage-lost-found/:entryId", async (c) => {
          SELECT NULL, ?, 'unified-admin', 'UNIFIED_ADMIN_LOST_FOUND_UPDATE', ?, datetime('now')
          WHERE changes() = 1`,
       ).bind(staff.id, auditDetails),
+      ...partTimeActorNameStatements(c.env, staff),
     ]);
     const updated = (results[0].results ?? []) as LuggageLostFoundWriteRow[];
     if (updated.length !== 1) {
@@ -1540,7 +1548,7 @@ internalApi.delete("/internal/luggage-lost-found/:entryId", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "lostFound.delete");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
 
@@ -1573,6 +1581,7 @@ internalApi.delete("/internal/luggage-lost-found/:entryId", async (c) => {
          SELECT NULL, ?, 'unified-admin', 'UNIFIED_ADMIN_LOST_FOUND_DELETE', ?, datetime('now')
          WHERE changes() = 1`,
       ).bind(staff.id, auditDetails),
+      ...partTimeActorNameStatements(c.env, staff),
     ]);
     if ((results[0].results ?? []).length !== 1) {
       return c.json({ error: "Lost-and-found entry was changed by another request" }, 409);
@@ -1774,7 +1783,7 @@ internalApi.post("/internal/luggage-handovers", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "handover.create");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
   const mentionIds = await handoverMentionIds(c.env, normalized.content);
@@ -1815,6 +1824,7 @@ internalApi.post("/internal/luggage-handovers", async (c) => {
          WHERE changes() = 1 AND a.action = 'UNIFIED_ADMIN_HANDOVER_CREATE'
            AND a.device_id = 'unified-admin' AND instr(a.details, ?) > 0`,
       ).bind(JSON.stringify(mentionIds), requestMarker),
+      ...partTimeActorNameStatements(c.env, staff),
     ]);
     const created = (results[0].results ?? []) as HandoverRawNote[];
     if (created.length === 0) return c.json({ error: "This handover request was already processed" }, 409);
@@ -1838,7 +1848,7 @@ internalApi.patch("/internal/luggage-handovers/:noteId", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "handover.update");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
 
@@ -1877,6 +1887,7 @@ internalApi.patch("/internal/luggage-handovers/:noteId", async (c) => {
          SELECT NULL, ?, 'unified-admin', 'UNIFIED_ADMIN_HANDOVER_UPDATE', ?, datetime('now')
          WHERE changes() = 1`,
       ).bind(staff.id, auditDetails),
+      ...partTimeActorNameStatements(c.env, staff),
     ]);
     const updated = (results[0].results ?? []) as HandoverRawNote[];
     if (updated.length !== 1) return c.json({ error: "Handover note was changed by another request" }, 409);
@@ -1902,7 +1913,7 @@ internalApi.delete("/internal/luggage-handovers/:noteId", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "handover.delete");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
 
@@ -1951,6 +1962,7 @@ internalApi.delete("/internal/luggage-handovers/:noteId", async (c) => {
       c.env.DB.prepare(`DELETE FROM luggage_handover_reads ${orphanOnly}`).bind(noteId, noteId),
       c.env.DB.prepare(`DELETE FROM luggage_handover_comments ${orphanOnly}`).bind(noteId, noteId),
       c.env.DB.prepare(`DELETE FROM luggage_handover_mentions ${orphanOnly}`).bind(noteId, noteId),
+      ...partTimeActorNameStatements(c.env, staff),
     ]);
     if ((results[0].results ?? []).length !== 1) return c.json({ error: "Handover note was changed by another request" }, 409);
     if (results[1].meta.changes !== 1) return c.json({ error: "Unable to write handover audit log" }, 500);
@@ -1973,20 +1985,25 @@ internalApi.post("/internal/luggage-handovers/:noteId/read", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "handover.read");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
 
   try {
-    const inserted = await c.env.DB.prepare(
-      `INSERT INTO luggage_handover_reads (note_id, staff_id)
-       SELECT ?, ?
-       WHERE EXISTS (SELECT 1 FROM luggage_handover_notes WHERE note_id = ?)
-         AND NOT EXISTS (SELECT 1 FROM luggage_handover_reads WHERE note_id = ? AND staff_id = ?)
-       RETURNING read_at AS readAt`,
-    ).bind(noteId, staff.id, noteId, noteId, staff.id).all<{ readAt: string }>();
-    if (inserted.results.length === 1) {
-      return c.json({ noteId, staffId: staff.id, readAt: inserted.results[0].readAt, changed: true });
+    // Batch (not a single statement) so a part-time name upsert commits atomically with the read mark.
+    const [inserted] = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO luggage_handover_reads (note_id, staff_id)
+         SELECT ?, ?
+         WHERE EXISTS (SELECT 1 FROM luggage_handover_notes WHERE note_id = ?)
+           AND NOT EXISTS (SELECT 1 FROM luggage_handover_reads WHERE note_id = ? AND staff_id = ?)
+         RETURNING read_at AS readAt`,
+      ).bind(noteId, staff.id, noteId, noteId, staff.id),
+      ...partTimeActorNameStatements(c.env, staff),
+    ]);
+    const readRows = (inserted.results ?? []) as Array<{ readAt: string }>;
+    if (readRows.length === 1) {
+      return c.json({ noteId, staffId: staff.id, readAt: readRows[0].readAt, changed: true });
     }
     const existing = await c.env.DB.prepare(
       "SELECT read_at AS readAt FROM luggage_handover_reads WHERE note_id = ? AND staff_id = ? ORDER BY read_id LIMIT 1",
@@ -2011,7 +2028,7 @@ internalApi.post("/internal/luggage-handovers/:noteId/comments", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "handover.comment");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
   const mentionIds = await handoverMentionIds(c.env, normalized.content);
@@ -2053,6 +2070,7 @@ internalApi.post("/internal/luggage-handovers/:noteId/comments", async (c) => {
          WHERE changes() = 1 AND a.action = 'UNIFIED_ADMIN_HANDOVER_COMMENT_CREATE'
            AND a.device_id = 'unified-admin' AND instr(a.details, ?) > 0`,
       ).bind(noteId, JSON.stringify(mentionIds), requestMarker),
+      ...partTimeActorNameStatements(c.env, staff),
     ]);
     const created = (results[0].results ?? []) as Array<{ commentId: number; createdAt: string }>;
     if (created.length === 0) {
@@ -2253,7 +2271,7 @@ type LuggageNoteActor = {
   userId: string;
   name: string;
   email: string;
-  role: "center_staff" | "manager" | "super_admin";
+  role: "center_staff" | "part_time" | "manager" | "super_admin";
 };
 
 type LuggageNoteUpdateDto = {
@@ -2419,6 +2437,7 @@ function normalizeLuggageNotePayload(payload: unknown): { actor: LuggageNoteActo
   if (!LUGGAGE_NOTE_ACTOR_ROLES.has(role)) {
     throw new Error("actor.role is not allowed");
   }
+  assertPartTimeActorShape(role, requiredActorText(payload.actor.userId, "userId", 200), requiredActorText(payload.actor.email, "email", 254));
 
   return {
     note,
@@ -2594,6 +2613,7 @@ function normalizeLuggagePickupStatusPayload(payload: unknown): {
   }
   const role = requiredActorText(payload.actor.role, "role", 50);
   if (!LUGGAGE_NOTE_ACTOR_ROLES.has(role)) throw new Error("actor.role is not allowed");
+  assertPartTimeActorShape(role, requiredActorText(payload.actor.userId, "userId", 200)); // the pickup actor carries no email
   return {
     action: payload.action,
     expectedUpdatedAt: payload.expectedUpdatedAt,
@@ -2668,6 +2688,7 @@ function normalizeLuggageManualOrderCreatePayload(payload: unknown, serverNow: D
   }
   const role = requiredActorText(payload.actor.role, "role", 50);
   if (!LUGGAGE_NOTE_ACTOR_ROLES.has(role)) throw new LuggageManualOrderActorForbiddenError("actor.role is not allowed");
+  assertPartTimeActorShape(role, requiredActorText(payload.actor.userId, "userId", 200), requiredActorText(payload.actor.email, "email", 254));
 
   const suitcaseQty = requiredInteger(payload.suitcaseQty, "suitcaseQty", 0, 99);
   const backpackQty = requiredInteger(payload.backpackQty, "backpackQty", 0, 99);
@@ -2708,7 +2729,7 @@ function normalizeLuggageManualOrderCreatePayload(payload: unknown, serverNow: D
   };
 }
 
-type LuggageImageActor = Omit<LuggageNoteActor, "role"> & { role: "center_staff" | "manager" | "super_admin" | "viewer" };
+type LuggageImageActor = Omit<LuggageNoteActor, "role"> & { role: "center_staff" | "part_time" | "manager" | "super_admin" | "viewer" };
 
 function normalizeLuggageImagePayload(payload: unknown): { actor: LuggageImageActor } {
   const payloadKeys = new Set(["actor"]);
@@ -2721,6 +2742,7 @@ function normalizeLuggageImagePayload(payload: unknown): { actor: LuggageImageAc
   }
   const role = requiredActorText(payload.actor.role, "role", 50);
   if (!LUGGAGE_IMAGE_ACTOR_ROLES.has(role)) throw new Error("actor.role is not allowed");
+  assertPartTimeActorShape(role, requiredActorText(payload.actor.userId, "userId", 200), requiredActorText(payload.actor.email, "email", 254));
   return {
     actor: {
       userId: requiredActorText(payload.actor.userId, "userId", 200),
@@ -3222,7 +3244,7 @@ internalApi.post("/internal/luggage-orders/:orderId/cancel", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "order.cancel");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
 
@@ -3276,6 +3298,7 @@ internalApi.post("/internal/luggage-orders/:orderId/cancel", async (c) => {
                 json_set(?, '$.after.updatedAt', (SELECT updated_at FROM luggage_orders WHERE order_id = ?)), datetime('now')
          WHERE changes() = 1`,
       ).bind(orderId, staff.id, auditDetails, orderId),
+      ...partTimeActorNameStatements(c.env, staff),
     ]);
     const updated = (results[0].results ?? []) as Array<{ orderId: string; status: string; updatedAt: string }>;
     if (updated.length !== 1) {
@@ -3313,7 +3336,7 @@ internalApi.patch("/internal/luggage-orders/:orderId/phone", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "order.phone");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
 
@@ -3362,6 +3385,7 @@ internalApi.patch("/internal/luggage-orders/:orderId/phone", async (c) => {
                 json_set(?, '$.after.updatedAt', (SELECT updated_at FROM luggage_orders WHERE order_id = ?)), datetime('now')
          WHERE changes() = 1`,
       ).bind(orderId, staff.id, auditDetails, orderId),
+      ...partTimeActorNameStatements(c.env, staff),
     ]);
     const updated = (results[0].results ?? []) as Array<{ orderId: string; phone: string; updatedAt: string }>;
     if (updated.length !== 1) {
@@ -3902,7 +3926,7 @@ internalApi.patch("/internal/luggage-orders/:orderId/pricing", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Invalid request body" }, 400);
   }
-  const resolution = await resolveInternalActorStaff(c.env, normalized.actor);
+  const resolution = await resolveInternalActorStaff(c.env, normalized.actor, "order.pricing");
   if (!resolution.ok) return c.json({ error: resolution.error }, resolution.status);
   const staff = resolution.staff;
 
@@ -3992,6 +4016,7 @@ internalApi.patch("/internal/luggage-orders/:orderId/pricing", async (c) => {
                 json_set(?, '$.after.updatedAt', (SELECT updated_at FROM luggage_orders WHERE order_id = ?)), datetime('now')
          WHERE changes() = 1`,
       ).bind(orderId, staff.id, auditDetails, orderId),
+      ...partTimeActorNameStatements(c.env, staff),
     ]);
     const updated = (results[0].results ?? []) as Array<{ orderId: string; updatedAt: string }>;
     if (updated.length !== 1) {

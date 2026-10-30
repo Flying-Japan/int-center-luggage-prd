@@ -203,7 +203,7 @@ export function collectionAllocation(body: Record<string, unknown>, outstanding:
 }
 
 /** A confirmation of money already received on site, not a payment-provider charge. */
-export async function confirmCollection(db: D1Database, orderId: string, staffId: string, body: Record<string, unknown>) {
+export async function confirmCollection(db: D1Database, orderId: string, staffId: string, body: Record<string, unknown>,context?:{actor?:unknown;finalStatements?:D1PreparedStatement[]}) {
   const requestId = String(body.request_id ?? '');
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(requestId)) throw new BillingConflict('유효한 수납 요청 ID가 필요합니다');
   if (body.confirm_received !== 'yes') throw new BillingConflict('현장 수납 확인이 필요합니다');
@@ -234,7 +234,7 @@ export async function confirmCollection(db: D1Database, orderId: string, staffId
       { orderId: line.order_id, tender: 'PAY_QR', amount: due - cash }].filter(r => r.amount > 0);
   });
   if (receipts.reduce((s, r) => s + r.amount, 0) !== allocation.totalAmount) throw new BillingConflict('수납 대상이 변경되었습니다');
-  const details = JSON.stringify({ requestId, rootId: summary.root_id, staffId, businessDate, recordedAt: now,
+  const details = JSON.stringify({ requestId, rootId: summary.root_id, staffId, ...(context?.actor?{actor:context.actor}:{}),businessDate, recordedAt: now,
     before: summary, lines: lines.results, receipts });
   const statements = [db.prepare(`INSERT INTO luggage_audit_logs(order_id, staff_id, device_id, action, details, timestamp)
     SELECT ?, ?, ?, 'CONFIRM_COLLECTION', ?, ? FROM luggage_billing_balances b
@@ -283,7 +283,7 @@ export async function confirmCollection(db: D1Database, orderId: string, staffId
     AND EXISTS(SELECT 1 FROM luggage_billing_balances WHERE root_id=? AND outstanding_amount=0 AND invalid_amount=0 AND pending_refund_count=0)
     AND NOT EXISTS(SELECT 1 FROM luggage_cash_closings WHERE business_date=? AND closing_type='FINAL_CLOSE')
     THEN '$' ELSE 'BAG_COLLECTION_ATOMICITY_FAILED' END)`).bind(requestId,summary.root_id,staffId,now,requestId,allocation.totalAmount,summary.root_id,businessDate));
-  const result = await db.batch(statements);
+  const result = await db.batch([...statements,...(context?.finalStatements??[])]);
   if (!result[0].results?.length) throw new BillingConflict('주문이 변경되었습니다. 새로고침 후 확인해주세요');
   return { request_id: requestId, collected_amount: allocation.totalAmount, business_date: businessDate };
 }

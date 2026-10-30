@@ -42,5 +42,17 @@ export async function fetchStaffNamesByIds(env: Env, ids: Array<string | null | 
   for (const [id, profile] of profileMap.entries()) {
     nameMap.set(id, getStaffDisplayName(profile));
   }
+  // "pt:<uid>" ids (ERP Part-time Auth workers) are not user_profiles rows; their names live in D1.
+  const partTimeIds = [...new Set(ids.map((value) => `${value ?? ""}`.trim()).filter((v) => v.startsWith("pt:")))];
+  if (partTimeIds.length > 0) {
+    try {
+      const { results } = await env.DB.prepare(
+        `SELECT actor_id, display_name FROM luggage_part_time_actors WHERE actor_id IN (${partTimeIds.map(() => "?").join(",")})`,
+      ).bind(...partTimeIds).all<{ actor_id: string; display_name: string }>();
+      for (const row of results) nameMap.set(row.actor_id, row.display_name);
+    } catch {
+      // Like the staff lookup above, a failed name lookup only drops names.
+    }
+  }
   return nameMap;
 }
