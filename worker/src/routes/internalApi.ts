@@ -2121,6 +2121,16 @@ internalApi.get("/internal/luggage-orders", async (c) => {
   const dateTo = parseJstDateQuery(c.req.query("dateTo"));
   const limit = parsePaginationQuery(c.req.query("limit"), 100, 500);
   const offset = parsePaginationQuery(c.req.query("offset"), 0);
+  // Opt-in for the Unified order screen only. Sort before LIMIT/OFFSET; legacy callers keep newest-first.
+  // Match String.trim() used by the existing Unified normalizer, including legacy Unicode whitespace.
+  const tag = "trim(o.tag_no, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279))";
+  const orderBy = c.req.query("sort") === "tag_desc"
+    ? `CASE WHEN (${tag} <> '' AND ${tag} NOT GLOB '*[^0-9]*'
+                  OR length(${tag}) > 2 AND ${tag} GLOB '*.0'
+                     AND substr(${tag}, 1, length(${tag}) - 2) NOT GLOB '*[^0-9]*')
+                AND CAST(${tag} AS REAL) BETWEEN 1 AND 9007199254740991
+            THEN CAST(${tag} AS INTEGER) END DESC, o.created_at DESC, o.order_id DESC`
+    : "o.created_at DESC, o.order_id DESC";
   const clauses: string[] = [];
   const params: Array<string | number> = [];
   const countClauses: string[] = [];
@@ -2199,7 +2209,7 @@ internalApi.get("/internal/luggage-orders", async (c) => {
             CASE WHEN o.luggage_image_url IS NOT NULL AND trim(o.luggage_image_url) <> '' THEN 1 ELSE 0 END AS hasLuggageImage
      FROM luggage_orders o
      LEFT JOIN (${payments}) p ON p.order_id = o.order_id${where}
-     ORDER BY o.created_at DESC, o.order_id DESC
+     ORDER BY ${orderBy}
      LIMIT ? OFFSET ?`,
   ).bind(...params, limit, offset).all<LuggageOrderDto>();
   const countResult = await c.env.DB.prepare(
