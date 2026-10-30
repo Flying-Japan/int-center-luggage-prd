@@ -1,4 +1,4 @@
-import { recalculateOrderPrepaid, FLYING_PASS_TIERS, type FlyingPassTier } from './pricing';
+import { recalculateOrderPrepaid, calculatePrepaidAmount, flyingPassDiscountAmount, FLYING_PASS_TIERS, type FlyingPassTier } from './pricing';
 import type { BillingSummary } from './luggageBilling';
 import type { RefundActorStaff, RefundWriteActor } from '../lib/internalActorStaff';
 import { unifiedActorAuditSnapshot } from '../lib/internalActorStaff';
@@ -23,7 +23,7 @@ export type FlyingPassRefund = { refund_id: string; order_id: string; sequence: 
   root_snapshot: string; receipt_snapshot: string; registered_by_staff_id: string; actor_user_id: string; business_date: string; created_at: string;
   register_audit_id: number; terminal_hash: string | null; terminal_by_staff_id: string | null; terminal_at: string | null;
   terminal_audit_id: number | null; paid_at: string | null; cancel_reason: string | null };
-type Context = { root: Root; receipts: Receipt[]; billing: BillingSummary; history: History[]; snapshots: string[] };
+type Context = { root: Root; receipts: Receipt[]; billing: BillingSummary; history: History[]; snapshots: string[]; snapshotQueries: string[] };
 export type RefundQuote = { orderId: string; fingerprint: string; previousRefundId: string | null; beforeTier: FlyingPassTier; afterTier: FlyingPassTier;
   originalAmount: number; beforeAmount: number; afterAmount: number; amount: number; businessDate: string; currency: 'JPY'; refundMethod: 'CASH' };
 export type RefundActor = { actor: RefundWriteActor; staff: RefundActorStaff };
@@ -34,10 +34,10 @@ const receiptKeys = ['payment_id','tender_type','amount','business_date','record
 const historyKeys = ['refund_id','sequence','status','amount','after_tier'];
 const objectSql = (keys: string[]) => `json_object(${keys.map(k => `'${k}', ${k}`).join(',')})`;
 // These same SQL snapshots are re-checked inside each transaction, including same-second changes.
-const snapshotQueries = [
+const buildSnapshotQueries = (includeBagAdditions: boolean) => [
   `SELECT ${objectSql(rootKeys)} AS snapshot FROM luggage_orders WHERE order_id = ?`,
   `SELECT json_group_array(${objectSql(receiptKeys)}) AS snapshot FROM (SELECT * FROM luggage_order_payments WHERE order_id = ? ORDER BY payment_id)`,
-  `SELECT ${objectSql(billingKeys)} AS snapshot FROM luggage_billing_balances WHERE root_id = ?`,
+  `SELECT ${objectSql(includeBagAdditions ? [...billingKeys, 'bag_addition_amount','bag_addition_count','bag_addition_daily_rate','bag_addition_discounted_amount','bag_addition_pass_discount','bag_original_price_per_day'] : billingKeys)} AS snapshot FROM luggage_billing_balances WHERE root_id = ?`,
   `SELECT json_group_array(${objectSql(historyKeys)}) AS snapshot FROM (SELECT * FROM luggage_flying_pass_refunds WHERE order_id = ? ORDER BY sequence)`,
 ];
 async function sha256(value: unknown): Promise<string> {
@@ -45,14 +45,17 @@ async function sha256(value: unknown): Promise<string> {
   return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
 }
 async function context(db: D1Database, orderId: string): Promise<Context> {
+  // Existing refund recovery remains available while an additive schema rollout is staged.
+  const columns = await db.prepare("PRAGMA table_info(luggage_billing_balances)").all<{ name: string }>();
+  const snapshotQueries = buildSnapshotQueries(columns.results.some(column => column.name === 'bag_addition_amount'));
   const results = await db.batch<{ snapshot: string }>(snapshotQueries.map(sql => db.prepare(sql).bind(orderId)));
   const snapshots = results.map(r => r.results[0]?.snapshot);
   if (!snapshots[0]) return fail('NOT_FOUND', '주문을 찾을 수 없습니다', 404);
   if (snapshots.some(s => !s)) return fail('BILLING_UNKNOWN', '재무 정보를 확인할 수 없습니다');
-  return { root: JSON.parse(snapshots[0]), receipts: JSON.parse(snapshots[1]), billing: JSON.parse(snapshots[2]), history: JSON.parse(snapshots[3]), snapshots };
+  return { root: JSON.parse(snapshots[0]), receipts: JSON.parse(snapshots[1]), billing: JSON.parse(snapshots[2]), history: JSON.parse(snapshots[3]), snapshots, snapshotQueries };
 }
 function guard(db: D1Database, orderId: string, c: Context): D1PreparedStatement {
-  return db.prepare(`SELECT json_extract('{}', CASE WHEN ${snapshotQueries.map(sql => `(${sql}) IS ?`).join(' AND ')} THEN '$' ELSE 'REFUND_STALE' END)`)
+  return db.prepare(`SELECT json_extract('{}', CASE WHEN ${c.snapshotQueries.map(sql => `(${sql}) IS ?`).join(' AND ')} THEN '$' ELSE 'REFUND_STALE' END)`)
     .bind(...c.snapshots.flatMap(snapshot => [orderId, snapshot]));
 }
 async function openDay(db: D1Database, day: string, late = false) {
@@ -75,10 +78,10 @@ function eligibility(c: Context, pendingId?: string) {
   }
   if (b.outstanding_amount !== 0 || b.unbilled_days !== 0) fail('OUTSTANDING', '원주문·연장 미수납을 먼저 수납해주세요');
   if (c.history.some(h => h.status === 'PAYOUT_PENDING' && h.refund_id !== pendingId)) fail('REFUND_PENDING', '진행 중인 지급 건이 있습니다. 지급 여부를 조회·확인하세요. 현금을 다시 지급하지 마세요');
-  if (!yen(r.final_amount) || r.final_amount === 0 || r.prepaid_amount !== r.final_amount || !yen(r.extra_amount)
+  if (!yen(r.final_amount) || r.final_amount + (b.bag_addition_amount ?? 0) === 0 || r.prepaid_amount !== r.final_amount || !yen(r.extra_amount)
     || !yen(r.price_per_day) || r.price_per_day === 0 || !Number.isSafeInteger(r.expected_storage_days) || r.expected_storage_days < 1
     || !FLYING_PASS_TIERS.includes(r.flying_pass_tier)) fail('NORMAL_PRICE_NOT_VERIFIED', '최초 정상 요금의 계산 근거를 확인할 수 없습니다');
-  const initial = recalculateOrderPrepaid(r.price_per_day, r.expected_storage_days, r.flying_pass_tier);
+  const initial = recalculateOrderPrepaid(b.bag_original_price_per_day ?? r.price_per_day, r.expected_storage_days, r.flying_pass_tier);
   if (initial.finalPrepaid !== r.final_amount || initial.flyingPassDiscountAmount !== r.flying_pass_discount_amount) fail('NORMAL_PRICE_NOT_VERIFIED', '최초 정상 요금과 할인 근거가 일치하지 않습니다');
   for (const p of c.receipts) {
     const time = new Date(p.recorded_at.includes('T') ? p.recorded_at : `${p.recorded_at.replace(' ', 'T')}Z`);
@@ -86,17 +89,21 @@ function eligibility(c: Context, pendingId?: string) {
       fail('RECEIPT_INVALID', '원 수납 금액·수단·지급일 근거가 올바르지 않습니다');
     }
   }
-  if (c.receipts.reduce((sum, p) => sum + p.amount, 0) !== r.final_amount + r.extra_amount) fail('RECEIPT_INVALID', '원 청구액과 실제 수납액이 일치하지 않습니다');
+  if (c.receipts.reduce((sum, p) => sum + p.amount, 0) !== r.final_amount + r.extra_amount + (b.bag_addition_amount ?? 0)) fail('RECEIPT_INVALID', '원 청구액과 실제 수납액이 일치하지 않습니다');
 }
 async function quote(c: Context, target: FlyingPassTier, now: Date): Promise<RefundQuote> {
   const confirmed = c.history.filter(h => h.status === 'CONFIRMED');
   const last = confirmed.at(-1);
-  const beforeAmount = c.root.final_amount - confirmed.reduce((sum, h) => sum + h.amount, 0);
-  const afterAmount = recalculateOrderPrepaid(c.root.price_per_day, c.root.expected_storage_days, target).finalPrepaid;
+  const originalAmount = c.root.final_amount + (c.billing.bag_addition_amount ?? 0);
+  const beforeAmount = originalAmount - confirmed.reduce((sum, h) => sum + h.amount, 0);
+  // Original and each added batch retain their own duration/long-stay tier. Fixed pass discount remains once per order.
+  const base = calculatePrepaidAmount(c.billing.bag_original_price_per_day ?? c.root.price_per_day, c.root.expected_storage_days).prepaidAmount
+    + (c.billing.bag_addition_discounted_amount ?? 0);
+  const afterAmount = Math.max(0,base-flyingPassDiscountAmount(base,target));
   const amount = beforeAmount - afterAmount;
   if (!yen(afterAmount) || !yen(amount) || amount === 0) fail('NO_REFUND_DUE', '추가 환급 가능한 할인 차액이 없습니다');
   return { orderId: c.root.order_id, fingerprint: await sha256(c.snapshots), previousRefundId: last?.refund_id ?? null,
-    beforeTier: last?.after_tier ?? c.root.flying_pass_tier, afterTier: target, originalAmount: c.root.final_amount,
+    beforeTier: last?.after_tier ?? c.root.flying_pass_tier, afterTier: target, originalAmount,
     beforeAmount, afterAmount, amount, businessDate: jstDay(now), currency: 'JPY', refundMethod: 'CASH' };
 }
 export async function previewFlyingPassRefund(db: D1Database, orderId: string, target: FlyingPassTier, now = new Date()): Promise<RefundQuote> {

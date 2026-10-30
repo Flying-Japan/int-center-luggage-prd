@@ -204,7 +204,8 @@ staffOrders.get("/staff/orders/:id", async (c) => {
               <p><strong>동행인원</strong><span>{order.companion_count}</span></p>
               <p><strong>비고</strong><span>{order.note || "-"}</span></p>
               <p><strong>짐</strong><span>캐리어 {order.suitcase_qty}, 백팩 {order.backpack_qty}, 세트 {order.set_qty}</span></p>
-              <p><strong>요금</strong><span>일 {yen(order.price_per_day)}, 선결제 {yen(order.prepaid_amount)}, 추가 {yen(order.extra_amount)}, 최종 {yen(order.final_amount)}</span></p>
+              <p><strong>요금</strong><span>일 {yen(order.price_per_day)}, 선결제 {yen(order.prepaid_amount)}, 추가 보관 {yen(order.extra_amount)}, 최초 확정 청구 {yen(order.final_amount)}</span></p>
+              {!order.parent_order_id && (billing?.bag_addition_amount??0)>0 && <p><strong>추가 짐 청구 / 전체 청구</strong><span>{yen(billing!.bag_addition_amount!)} / {yen(billing!.total_billed_amount)}</span></p>}
               <p><strong>멤버할인</strong><span>{displayFlyingPassTier(order.flying_pass_tier)} / 할인 {yen(order.flying_pass_discount_amount)} / 직원수정 {order.staff_prepaid_override_amount !== null ? yen(order.staff_prepaid_override_amount) : "없음"}</span></p>
               <p><strong>일수</strong><span>예정 {order.expected_storage_days}, 실제 {order.actual_storage_days || "-"}, 초과 {order.extra_days}</span></p>
               {order.parent_order_id && (
@@ -245,6 +246,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
           {/* Actions card */}
           <section class="card">
             <h3 class="card-title">업무 처리</h3>
+            {(staff.role==='admin'||staff.role==='editor') && !order.parent_order_id && (c.env.LUGGAGE_BAG_ADDITIONS_ENABLED==='true'||(billing?.bag_addition_amount??0)>0) && <p><a class="btn btn-secondary" href={`/staff/orders/${orderId}/bag-additions`}>추가 짐·추가 수납</a></p>}
             <div class="detail-action-grid">
               {/* 결제 처리 */}
               <section class="detail-action-box">

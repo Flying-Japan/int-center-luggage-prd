@@ -5,6 +5,7 @@ import type { AppType, Env } from "./types";
 import authRoutes from "./routes/auth";
 import customerRoutes from "./routes/customer";
 import staffApi from "./routes/staffApi";
+import{bagAdditionStaffRoutes}from"./routes/bagAdditions";
 import staffOrders from "./routes/staffOrders";
 import opsRoutes from "./routes/operations";
 import adminRoutes from "./routes/admin";
@@ -65,6 +66,7 @@ app.route("/", staffApi);
 
 // Staff order detail routes (HTML)
 app.route("/", staffOrders);
+app.route("/",bagAdditionStaffRoutes);
 
 // Operations routes (cash closing, handover, lost & found)
 app.route("/", opsRoutes);
@@ -352,7 +354,7 @@ app.get("/staff/dashboard", staffAuth, async (c) => {
                       o.status === "CANCELLED" && "is-cancelled",
                       o.in_warehouse && "is-in-warehouse",
                     ].filter(Boolean).join(" ");
-                    const payableAmount = (o.final_amount ?? o.prepaid_amount) + (o.extra_amount || 0);
+                    const payableAmount = (o.final_amount ?? o.prepaid_amount) + (o.extra_amount || 0) + (o.parent_order_id ? 0 : o.billing?.bag_addition_amount ?? 0);
                     const paymentCashAmount = o.payment_cash_amount || 0;
                     const paymentQrAmount = o.payment_qr_amount || 0;
                     const paymentTitle = paymentCashAmount > 0 || paymentQrAmount > 0

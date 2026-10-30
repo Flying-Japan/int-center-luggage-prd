@@ -6,6 +6,7 @@ workers_dev = true
 preview_urls = false
 
 [vars]
+LUGGAGE_BAG_ADDITIONS_ENABLED = "false"
 APP_ENV = "production"
 BUSINESS_OPEN_HOUR = "9"
 BUSINESS_CLOSE_HOUR = "21"

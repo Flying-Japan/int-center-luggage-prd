@@ -1117,6 +1117,7 @@ test('prepared policy upgrade preserves claim/receipt/audit rows and matches all
   ctx.sqlite.exec(readFileSync('migrations/20261029_087_discount_correction.sql', 'utf8'));
   // The handover/late-confirm migration replaces the sales view and two closing triggers (refund attribution by payout day).
   ctx.sqlite.exec(readFileSync('migrations/20261029_flying_pass_refund_handover.sql', 'utf8'));
+  ctx.sqlite.exec(readFileSync('migrations/20261030_bag_additions.sql', 'utf8'));
   assert.deepEqual(definitions(), expected);
   assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_orders').all(), orders);
   assert.deepEqual(payments(ctx), ledger);

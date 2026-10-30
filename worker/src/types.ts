@@ -11,6 +11,7 @@ export type Env = {
 
   // Default OFF. Public routes stay hard-gated until phase-3 UI and operational validation are complete.
   LUGGAGE_FLYING_PASS_REFUNDS_ENABLED?: string;
+  LUGGAGE_BAG_ADDITIONS_ENABLED?: string;
   // Default OFF. "true" lets a signed Unified Admin part_time actor (ERP Part-time Auth UID) use the Flying Pass refund routes only.
   LUGGAGE_PART_TIME_REFUND_ACTORS_ENABLED?: string;
 

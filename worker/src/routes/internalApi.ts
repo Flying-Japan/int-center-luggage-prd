@@ -1,4 +1,5 @@
 import flyingPassRefundRoutes from "./flyingPassRefunds";
+import{bagAdditionInternalRoutes}from"./bagAdditions";
 import { writePickupTransition, PickupTransitionError } from '../services/orderPickupWrites';
 import { getBillingSummary, getBillingSummaries, getCancellationBlock, nextManualExtensionDate, requiresCollectionFlow } from '../services/luggageBilling';
 import { Hono, type Context } from "hono";
@@ -103,6 +104,7 @@ const internalApi = new Hono<AppType>();
 // prefix we actually own so /customer, /login, /admin, etc. stay untouched.
 internalApi.use("/internal/*", internalAuth);
 internalApi.route("/", flyingPassRefundRoutes);
+internalApi.route("/",bagAdditionInternalRoutes);
 
 const EXPERIENCE_STATUSES = new Set(["SCHEDULED", "VISITED", "RECEIVED", "CANCELLED"]);
 const EXPERIENCE_VISITOR_TYPES = new Set(["BLOGGER", "INFLUENCER", "YOUTUBER", "OTHER"]);
@@ -3416,6 +3418,7 @@ const PICKUP_DATE_CONFLICT_MESSAGES = {
   STATUS_NOT_EDITABLE: "Pickup date can only change on payment-pending or paid orders",
   IS_EXTENSION: "Pickup date cannot change on an extension order",
   HAS_EXTENSIONS: "Pickup date cannot change on an order that has extension orders",
+  BAG_PERIOD_LOCKED: "추가 짐의 확정된 보관 기간은 다시 계산하지 않습니다. 기존 수령 예정일 이후는 연장 접수를 이용해주세요.",
   PICKUP_BEFORE_CREATED: "Pickup date cannot be earlier than the order date",
   TAG_DATE_CONFLICT: "tagNo cannot be set together with a pickup date change; the tag is assigned automatically",
   NO_LONG_TAG: "장기 태그(146~150)가 모두 사용 중입니다.",
@@ -3471,6 +3474,7 @@ async function applyPickupDateChange(
     if (order.parentOrderId) return conflict("IS_EXTENSION");
     const hasExtensions = await db.prepare("SELECT 1 FROM luggage_orders WHERE parent_order_id = ? LIMIT 1").bind(orderId).first();
     if (hasExtensions) return conflict("HAS_EXTENSIONS");
+    if (((await getBillingSummary(db,orderId))?.bag_addition_count??0)>0) return conflict("BAG_PERIOD_LOCKED");
     if ("tagNo" in update && update.tagNo !== order.tagNo) return conflict("TAG_DATE_CONFLICT");
     if (jstDateKey(newPickupAt) < jstDateKey(order.createdAt)) return conflict("PICKUP_BEFORE_CREATED");
 

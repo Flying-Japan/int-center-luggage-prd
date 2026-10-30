@@ -2,6 +2,12 @@ import { buildOrderId } from './orderNumber';
 import { normalizePaymentAllocation, type PaymentAllocation } from '../lib/payments';
 
 export type BillingSummary = {
+  bag_addition_amount?: number;
+  bag_addition_count?: number;
+  bag_addition_daily_rate?: number;
+  bag_addition_discounted_amount?: number;
+  bag_addition_pass_discount?: number;
+  bag_original_price_per_day?: number;
   refund_settlement_version: 2;
   effective_flying_pass_tier: string;
   latest_confirmed_refund_id: string | null;
@@ -106,7 +112,8 @@ export async function requiresCollectionFlow(db: D1Database, orderId: string): P
     OR EXISTS (SELECT 1 FROM luggage_order_payments p WHERE p.order_id = o.order_id AND p.receipt_request_id IS NOT NULL)
     OR EXISTS (SELECT 1 FROM luggage_billing_lines l WHERE l.order_id = o.order_id AND (l.root_review_required = 1 OR l.payment_count > 0 AND l.collectible_amount > 0)))`)
     .bind(orderId).first();
-  return !!row;
+  if(row)return true;
+  return ((await getBillingSummary(db,orderId))?.bag_addition_amount??0)>0;
 }
 
 /** UTC, in the existing SQLite seconds format. JST conversion belongs in date queries. */
@@ -269,6 +276,13 @@ export async function confirmCollection(db: D1Database, orderId: string, staffId
     AND EXISTS (SELECT 1 FROM luggage_audit_logs a WHERE a.action = 'CONFIRM_COLLECTION'
       AND a.device_id = ? AND a.timestamp = ?)`)
     .bind(now, summary.root_id, requestId, now));
+  // Additional-bag collections must also detect silently ignored writes before the atomic batch commits.
+  if ((summary.bag_addition_count ?? 0) > 0) statements.push(db.prepare(`SELECT json_extract('{}', CASE WHEN
+    EXISTS(SELECT 1 FROM luggage_audit_logs WHERE action='CONFIRM_COLLECTION' AND device_id=? AND order_id=? AND staff_id=? AND timestamp=?)
+    AND (SELECT COALESCE(SUM(amount),0) FROM luggage_order_payments WHERE receipt_request_id=?)=?
+    AND EXISTS(SELECT 1 FROM luggage_billing_balances WHERE root_id=? AND outstanding_amount=0 AND invalid_amount=0 AND pending_refund_count=0)
+    AND NOT EXISTS(SELECT 1 FROM luggage_cash_closings WHERE business_date=? AND closing_type='FINAL_CLOSE')
+    THEN '$' ELSE 'BAG_COLLECTION_ATOMICITY_FAILED' END)`).bind(requestId,summary.root_id,staffId,now,requestId,allocation.totalAmount,summary.root_id,businessDate));
   const result = await db.batch(statements);
   if (!result[0].results?.length) throw new BillingConflict('주문이 변경되었습니다. 새로고침 후 확인해주세요');
   return { request_id: requestId, collected_amount: allocation.totalAmount, business_date: businessDate };

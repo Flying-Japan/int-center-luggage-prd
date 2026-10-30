@@ -33,6 +33,8 @@ const originalFetch = globalThis.fetch;
 const cleanup: Array<() => unknown | Promise<unknown>> = [];
 afterEach(async () => { globalThis.fetch = originalFetch; for (const fn of cleanup.splice(0)) await fn(); });
 const schema = readFileSync('src/schema.sql', 'utf8');
+// Historical migration contract excludes the later, independently tested bag-addition upgrade.
+const preBagSchema = schema.split('-- Additional bags after payment;')[0];
 const migration = readFileSync('migrations/20261028_flying_pass_refunds.sql', 'utf8');
 const settlementMigration = readFileSync('migrations/20261028_flying_pass_refund_settlement.sql', 'utf8');
 const handoverMigration = readFileSync('migrations/20261029_flying_pass_refund_handover.sql', 'utf8');
@@ -350,7 +352,7 @@ test('fresh schema and one-time migration create identical refund tables, indexe
   const fresh = new DatabaseSync(':memory:'), upgrade = new DatabaseSync(':memory:');
   try {
     // Real order: refunds → settlement → handover (handover also replaces the paid-day sales view and two closing triggers).
-    fresh.exec(schema); upgrade.exec(preRefundSchema); upgrade.exec(migration); upgrade.exec(migration); upgrade.exec(settlementMigration);
+    fresh.exec(preBagSchema); upgrade.exec(preRefundSchema); upgrade.exec(migration); upgrade.exec(migration); upgrade.exec(settlementMigration);
     upgrade.exec(handoverMigration); upgrade.exec(handoverMigration);
     const sql = "SELECT type,name,sql FROM sqlite_master WHERE name LIKE '%refund%' AND sql IS NOT NULL ORDER BY type,name";
     assert.deepEqual(upgrade.prepare(sql).all(), fresh.prepare(sql).all());
@@ -709,7 +711,7 @@ test('handover migration: rebuilds only the refund table and its own guards, kee
   // Pending payout registered under the old schema can now be finished by another staff.
   assert.equal((await s.call(`${pendingId}/confirm`, { cashPaid: true, expectedAmount: pendingAmount, actor: partTime })).status, 200);
   const fresh = new DatabaseSync(':memory:');
-  try { fresh.exec(schema); const sql = "SELECT type,name,sql FROM sqlite_master WHERE name LIKE '%refund%' AND sql IS NOT NULL ORDER BY type,name";
+  try { fresh.exec(preBagSchema); const sql = "SELECT type,name,sql FROM sqlite_master WHERE name LIKE '%refund%' AND sql IS NOT NULL ORDER BY type,name";
     assert.deepEqual((await s.db.prepare(sql).all()).results.map(r => ({ ...r })), fresh.prepare(sql).all().map(r => ({ ...r })), 'fresh schema.sql equals the migrated database');
   } finally { fresh.close(); }
 });

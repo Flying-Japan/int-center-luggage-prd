@@ -124,7 +124,7 @@ test('F1 local preview: exact production batch is atomic, preserves guards and r
     for (const object of oldDefinitions.filter(o => o.type !== 'table' && o.type !== 'index' && o.name !== 'luggage_preserve_collected_price')) {
       assertSameSql(object.name, actual.find(o => o.name === object.name).sql, object.sql);
     }
-    const freshCorrection = splitSql(schema.slice(schema.indexOf('-- Operator-only correction policy.')));
+    const freshCorrection = splitSql(schema.slice(schema.indexOf('-- Operator-only correction policy.')).split('-- Additional bags after payment;')[0]);
     assert.deepEqual(freshCorrection, splitSql(migration));
     assert.equal((await db.prepare(`SELECT correction_id FROM luggage_order_price_corrections`).first()).correction_id, CORRECTION);
   } finally { if (mf) await mf.dispose(); rmSync(dir, { recursive: true, force: true }); }
