@@ -323,3 +323,30 @@ AND NOT (NEW.receipt_request_id IS NOT NULL
  AND EXISTS(SELECT 1 FROM luggage_audit_logs a WHERE a.device_id=NEW.receipt_request_id AND a.action='CONFIRM_COLLECTION' AND a.staff_id=NEW.staff_id)
  AND EXISTS(SELECT 1 FROM luggage_billing_lines l WHERE l.order_id=NEW.order_id AND l.root_review_required=0 AND l.collectible_amount>=NEW.amount))
 BEGIN SELECT RAISE(ABORT, 'REFUND_PRESERVE_ORIGINAL_RECEIPT'); END;
+DROP VIEW luggage_sales_daily;
+CREATE VIEW IF NOT EXISTS luggage_sales_daily AS
+WITH receipts AS (
+  SELECT business_date, SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END) AS cash,
+    SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END) AS qr, SUM(amount) AS total_amount,
+    SUM(CASE WHEN estimated = 1 THEN amount ELSE 0 END) AS legacy_estimated_amount,
+    SUM(CASE WHEN estimated = 0 THEN amount ELSE 0 END) AS recorded_amount
+  FROM luggage_receipt_sales GROUP BY business_date
+), refunds AS (
+  SELECT date(paid_at, '+9 hours') AS business_date, SUM(amount) AS amount, COUNT(*) AS refund_count FROM luggage_flying_pass_refunds
+  WHERE status = 'CONFIRMED' GROUP BY date(paid_at, '+9 hours')
+), orders AS (
+  SELECT date(created_at, '+9 hours') AS business_date, COUNT(*) AS order_count,
+    SUM(status IN ('PAID', 'PICKED_UP')) AS paid_count, SUM(status = 'PAYMENT_PENDING') AS pending_count,
+    SUM(CASE WHEN status IN ('PAID', 'PICKED_UP') THEN 1 + companion_count ELSE 0 END) AS people,
+    SUM(CASE WHEN status IN ('PAID', 'PICKED_UP') THEN suitcase_qty-COALESCE((SELECT SUM(suitcase_added) FROM luggage_bag_additions b WHERE b.order_id=luggage_orders.order_id),0) ELSE 0 END) AS suitcase_total,
+    SUM(CASE WHEN status IN ('PAID', 'PICKED_UP') THEN backpack_qty-COALESCE((SELECT SUM(backpack_added) FROM luggage_bag_additions b WHERE b.order_id=luggage_orders.order_id),0) ELSE 0 END) AS backpack_total
+  FROM luggage_orders WHERE parent_order_id IS NULL AND status != 'CANCELLED' GROUP BY business_date
+), added_bags AS (SELECT business_date,SUM(suitcase_added) AS suitcase_total,SUM(backpack_added) AS backpack_total FROM luggage_bag_additions GROUP BY business_date), dates AS (SELECT business_date FROM added_bags UNION SELECT business_date FROM receipts UNION SELECT business_date FROM orders UNION SELECT business_date FROM refunds)
+SELECT d.business_date, COALESCE(r.cash, 0) - COALESCE(f.amount, 0) AS cash, COALESCE(r.qr, 0) AS qr,
+  COALESCE(r.total_amount, 0) - COALESCE(f.amount, 0) AS total_amount,
+  COALESCE(r.cash, 0) AS gross_cash, COALESCE(r.qr, 0) AS gross_qr, COALESCE(f.amount, 0) AS cash_refund_amount, COALESCE(f.refund_count, 0) AS refund_count, COALESCE(o.order_count, 0) AS order_count,
+  COALESCE(r.legacy_estimated_amount, 0) AS legacy_estimated_amount, COALESCE(r.recorded_amount, 0) AS recorded_amount,
+  COALESCE(o.paid_count, 0) AS paid_count, COALESCE(o.pending_count, 0) AS pending_count,
+  COALESCE(o.people, 0) AS people, COALESCE(o.suitcase_total, 0)+COALESCE(a.suitcase_total,0) AS suitcase_total,
+  COALESCE(o.backpack_total, 0)+COALESCE(a.backpack_total,0) AS backpack_total
+FROM dates d LEFT JOIN added_bags a ON a.business_date=d.business_date LEFT JOIN receipts r ON r.business_date = d.business_date LEFT JOIN orders o ON o.business_date = d.business_date LEFT JOIN refunds f ON f.business_date = d.business_date;

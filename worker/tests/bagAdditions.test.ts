@@ -325,10 +325,10 @@ test('independent batches and their real collection remain on each receipt JST d
     const now = new Date('2031-05-03T03:00:00Z'), c = setup({ createdAt: '2031-05-01T00:00:00Z', pickupAt: '2031-05-05T12:00:00Z', now });
     const q = await previewBagAddition(c.db, ROOT, { suitcaseAdded: 1, backpackAdded: 0 }, now);
     await registerBagAddition(c.db, ROOT, { additionId: crypto.randomUUID(), expectedFingerprint: q.fingerprint, suitcaseAdded: 1, backpackAdded: 0, reason: 'Synthetic separately paid batch', payment: { confirmReceived: true, cashAmount: 1000, qrAmount: 1400 } }, who, now);
-    const old = c.sqlite.prepare('SELECT total_amount,cash,qr FROM luggage_sales_daily WHERE business_date=?').get('2031-05-01')!;
-    const added = c.sqlite.prepare('SELECT total_amount,cash,qr FROM luggage_sales_daily WHERE business_date=?').get('2031-05-03')!;
-    assert.deepEqual({ ...old }, { total_amount: 4000, cash: 4000, qr: 0 });
-    assert.deepEqual({ ...added }, { total_amount: 2400, cash: 1000, qr: 1400 });
+    const old = c.sqlite.prepare('SELECT total_amount,cash,qr,suitcase_total FROM luggage_sales_daily WHERE business_date=?').get('2031-05-01')!;
+    const added = c.sqlite.prepare('SELECT total_amount,cash,qr,suitcase_total FROM luggage_sales_daily WHERE business_date=?').get('2031-05-03')!;
+    assert.deepEqual({ ...old }, { total_amount: 4000, cash: 4000, qr: 0,suitcase_total:1 });
+    assert.deepEqual({ ...added }, { total_amount: 2400, cash: 1000, qr: 1400,suitcase_total:1 });
     assert.equal((await getBillingSummary(c.db, ROOT))!.recorded_amount, 6400);
     assert.equal(rows(c, 'luggage_cash_closings').length, 0);
     c.sqlite.close();
