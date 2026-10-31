@@ -1,5 +1,6 @@
 import { getBillingSummary, pickupBillingError } from './luggageBilling';
 import { calculateStorageDays, calculateExtraDays } from './storage';
+import { LUGGAGE_TAG_MAX } from './tagRanges';
 
 export class PickupTransitionError extends Error {
   constructor(public readonly code: string, message: string, public readonly status: 404 | 409 | 500 = 409) {
@@ -10,6 +11,7 @@ export class PickupTransitionError extends Error {
 type PickupAction = 'mark_picked_up' | 'undo_picked_up';
 type PickupRow = {
   order_id: string; parent_order_id: string | null; status: string; updated_at: string;
+  tag_no?: string | null; // Older immutable pickup before-images did not include the tag.
   created_at: string; expected_pickup_at: string | null; actual_pickup_at: string | null;
   actual_storage_days: number; extra_days: number; extra_amount: number;
   prepaid_amount: number; final_amount: number | null; price_per_day: number;
@@ -20,10 +22,21 @@ export type PickupResult = {
 };
 const columns = ['order_id', 'parent_order_id', 'status', 'updated_at', 'created_at', 'expected_pickup_at',
   'actual_pickup_at', 'actual_storage_days', 'extra_days', 'extra_amount', 'prepaid_amount', 'final_amount', 'price_per_day'];
+const snapshotColumns = [...columns, 'tag_no'];
 // Check both membership and values: a new child cannot slip between the read and the batch.
 const familyMatches = `(SELECT COUNT(*) FROM luggage_orders WHERE order_id = ? OR parent_order_id = ?) = json_array_length(?)
   AND NOT EXISTS (SELECT 1 FROM json_each(?) snapshot LEFT JOIN luggage_orders o
-    ON o.order_id = json_extract(snapshot.value, '$.order_id') WHERE ${columns.map(key => `o.${key} IS NOT json_extract(snapshot.value, '$.${key}')`).join(' OR ')})`;
+    ON o.order_id = json_extract(snapshot.value, '$.order_id') WHERE ${snapshotColumns.map(key => `o.${key} IS NOT json_extract(snapshot.value, '$.${key}')`).join(' OR ')})`;
+// Reclaim every tag becoming active, including linked orders, against ALL other active families.
+// The allocation paths use the same numeric comparison and PAYMENT_PENDING/PAID occupancy rule.
+const familyTagsAvailable = `NOT EXISTS (
+  SELECT 1 FROM json_each(?) desired
+  JOIN luggage_orders restoring ON restoring.order_id = json_extract(desired.value, '$.order_id')
+  JOIN luggage_orders occupied ON CAST(occupied.tag_no AS INTEGER) = CAST(restoring.tag_no AS INTEGER)
+  WHERE json_extract(desired.value, '$.status') IN ('PAYMENT_PENDING', 'PAID')
+    AND CAST(restoring.tag_no AS INTEGER) BETWEEN 1 AND ${LUGGAGE_TAG_MAX}
+    AND occupied.status IN ('PAYMENT_PENDING', 'PAID')
+    AND occupied.order_id != ? AND occupied.parent_order_id IS NOT ?)`;
 
 function dto(row: PickupRow): PickupResult {
   if (row.status !== 'PAID' && row.status !== 'PICKED_UP') throw new PickupTransitionError('INVALID_STATUS', 'Pickup status transition is not allowed');
@@ -35,7 +48,7 @@ function dto(row: PickupRow): PickupResult {
 export async function writePickupTransition(db: D1Database, orderId: string, action: PickupAction, audit: {
   action: string; staffId: string | null; deviceId?: string; actor?: unknown;
 }, expectedUpdatedAt?: string): Promise<PickupResult> {
-  const family = await db.prepare(`SELECT ${columns.join(', ')} FROM luggage_orders
+  const family = await db.prepare(`SELECT ${snapshotColumns.join(', ')} FROM luggage_orders
     WHERE order_id = ? OR parent_order_id = ? ORDER BY order_id`).bind(orderId, orderId).all<PickupRow>();
   const before = family.results;
   const root = before.find(row => row.order_id === orderId);
@@ -119,6 +132,10 @@ export async function writePickupTransition(db: D1Database, orderId: string, act
       // Invalid JSON paths deliberately abort the D1 transaction with a named invariant.
       db.prepare(`SELECT json_extract('{}', CASE WHEN ${familyMatches} THEN '$' ELSE 'PICKUP_STALE' END)`)
         .bind(orderId, orderId, beforeJson, beforeJson),
+      // No preflight-only check: a new intake may claim the tag after the family was read.
+      // Failure aborts the entire D1 batch before any pickup state or audit is written.
+      ...(!pickup ? [db.prepare(`SELECT json_extract('{}', CASE WHEN ${familyTagsAvailable}
+        THEN '$' ELSE 'PICKUP_TAG_IN_USE' END)`).bind(afterJson, orderId, orderId)] : []),
       db.prepare(`SELECT json_extract('{}', CASE WHEN EXISTS (SELECT 1 FROM luggage_billing_balances
         WHERE root_id = ? AND outstanding_amount = 0 AND invalid_amount = 0 AND review_pickup_blocked = 0 AND pending_refund_count = 0
           AND (? = 1 OR root_review_required = 0)) THEN '$' ELSE 'PICKUP_BILLING_CONFLICT' END)`)
@@ -146,6 +163,9 @@ export async function writePickupTransition(db: D1Database, orderId: string, act
     if (error instanceof PickupTransitionError) throw error;
     const message = [error, error instanceof Error ? error.cause : null].map(String).join(' ');
     if (message.includes('PICKUP_STALE')) throw new PickupTransitionError('STALE', 'Luggage order was changed by another request');
+    if (message.includes('PICKUP_TAG_IN_USE')) {
+      throw new PickupTransitionError('TAG_IN_USE', '이 짐번호는 이미 다른 주문에서 사용 중이라 수령취소할 수 없습니다. 현재 보관 내역을 확인해주세요.');
+    }
     if (message.includes('PICKUP_BILLING_CONFLICT') || message.includes('Outstanding collection prevents pickup')) {
       throw new PickupTransitionError('BILLING_CONFLICT', '미수납액 또는 정산 상태가 변경되어 수령/취소할 수 없습니다. 새로고침 후 확인해주세요');
     }

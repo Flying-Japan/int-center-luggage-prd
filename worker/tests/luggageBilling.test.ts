@@ -15,6 +15,145 @@ import { generateExtensionOrders } from '../src/services/extension';
 import { runMidnightRollover } from '../src/services/midnightRollover';
 import { resolveAutoSalesSummaryForDate } from '../src/services/cashClosingSales';
 
+// Pickup undo has to claim a released physical tag again, atomically with its audit.
+function tagHolder(ctx: Fixture, id: string, tag: string, status = 'PAID', parent: string | null = null) {
+  ctx.sqlite.prepare(`INSERT INTO luggage_orders(order_id,parent_order_id,tag_no,status,created_at,
+    expected_pickup_at,price_per_day,prepaid_amount,final_amount)
+    VALUES (?,?,?,?,datetime('now'),datetime('now','+2 days'),0,0,0)`).run(id, parent, tag, status);
+}
+async function pickedTag(ctx: Fixture, tag: string) {
+  seedRoot(ctx, { daysAgo: 0 });
+  ctx.sqlite.prepare('UPDATE luggage_orders SET tag_no = ? WHERE order_id = ?').run(tag, ROOT);
+  assert.equal((await pickupHttp(ctx, 'internal')).status, 200);
+}
+
+for (const tag of ['1', '140', '141', '145', '146', '150']) for (const status of ['PAYMENT_PENDING', 'PAID']) {
+  test(`undo refuses reused tag ${tag} held by ${status}; records unchanged`, async () => {
+    const ctx = setup(); await pickedTag(ctx, tag);
+    tagHolder(ctx, '20261031-990', tag, status);
+    const before = pickupState(ctx);
+    const result = await pickupHttp(ctx, 'internal', true);
+    assert.equal(result.status, 409);
+    assert.match((await result.json() as { error: string }).error, /짐번호.*다른 주문.*수령취소/);
+    assert.deepEqual(pickupState(ctx), before);
+  });
+}
+for (const kind of ['json', 'html', 'internal'] as const) {
+  test(`${kind} shows reused-tag refusal and preserves orders, money and audit`, async () => {
+    const ctx = setup(); await pickedTag(ctx, '141');
+    tagHolder(ctx, '20261031-990', '0141');
+    const before = pickupState(ctx);
+    const response = await pickupHttp(ctx, kind, true);
+    assertPickupHttp(response, kind, false);
+    const message = kind === 'html'
+      ? new URL(response.headers.get('location')!, 'https://local.invalid').searchParams.get('error')!
+      : (await response.json() as { error: string }).error;
+    assert.match(message, /짐번호.*다른 주문.*수령취소/);
+    assert.deepEqual(pickupState(ctx), before);
+  });
+}
+test('undo also checks another family’s active child', async () => {
+  const ctx = setup(); await pickedTag(ctx, '145');
+  tagHolder(ctx, '20261031-990', '7');
+  tagHolder(ctx, '20261031-991', '145', 'PAYMENT_PENDING', '20261031-990');
+  const before = pickupState(ctx);
+  assert.equal((await pickupHttp(ctx, 'internal', true)).status, 409);
+  assert.deepEqual(pickupState(ctx), before);
+});
+for (const status of ['PICKED_UP', 'CANCELLED']) {
+  test(`inactive ${status} permits normal undo; repeated undo changes nothing`, async () => {
+    const ctx = setup(); await pickedTag(ctx, '141');
+    tagHolder(ctx, '20261031-990', '141', status);
+    const money = pickupMoney(ctx);
+    assert.equal((await pickupHttp(ctx, 'internal', true)).status, 200);
+    assert.equal(ctx.sqlite.prepare('SELECT tag_no FROM luggage_orders WHERE order_id = ?').get(ROOT)!.tag_no, '141');
+    assert.deepEqual(pickupMoney(ctx), money);
+    const restored = pickupState(ctx);
+    assert.equal((await pickupHttp(ctx, 'internal', true)).status, 409);
+    assert.deepEqual(pickupState(ctx), restored);
+  });
+}
+test('a tag claimed after the undo read is refused inside the batch', async () => {
+  const ctx = setup(); await pickedTag(ctx, '141');
+  const batch = ctx.db.batch.bind(ctx.db);
+  ctx.db.batch = async statements => {
+    tagHolder(ctx, '20261031-990', '141', 'PAYMENT_PENDING');
+    return batch(statements);
+  };
+  const money = pickupMoney(ctx), count = ctx.sqlite.prepare('SELECT COUNT(*) n FROM luggage_audit_logs').get()!.n;
+  assert.equal((await pickupHttp(ctx, 'internal', true)).status, 409);
+  assert.equal(ctx.sqlite.prepare('SELECT status FROM luggage_orders WHERE order_id = ?').get(ROOT)!.status, 'PICKED_UP');
+  assert.equal(ctx.sqlite.prepare('SELECT COUNT(*) n FROM luggage_audit_logs').get()!.n, count);
+  assert.deepEqual(pickupMoney(ctx).ledger, money.ledger);
+});
+test('tag mutation between snapshot and undo batch is stale and creates no audit', async () => {
+  const ctx = setup(); await pickedTag(ctx, '141');
+  const batch = ctx.db.batch.bind(ctx.db);
+  ctx.db.batch = async statements => {
+    ctx.sqlite.prepare('UPDATE luggage_orders SET tag_no = ? WHERE order_id = ?').run('142', ROOT);
+    return batch(statements);
+  };
+  const count = ctx.sqlite.prepare('SELECT COUNT(*) n FROM luggage_audit_logs').get()!.n;
+  const response = await pickupHttp(ctx, 'internal', true);
+  assert.equal(response.status, 409);
+  assert.match((await response.json() as { error: string }).error, /changed by another request/);
+  assert.equal(ctx.sqlite.prepare('SELECT status FROM luggage_orders WHERE order_id = ?').get(ROOT)!.status, 'PICKED_UP');
+  assert.equal(ctx.sqlite.prepare('SELECT COUNT(*) n FROM luggage_audit_logs').get()!.n, count);
+});
+test('family undo accepts historical pickup before-images without tag_no', async () => {
+  const ctx = setup(); await seedCollectedPickupFamily(ctx);
+  ctx.sqlite.prepare('UPDATE luggage_orders SET tag_no = ? WHERE order_id = ? OR parent_order_id = ?').run('141', ROOT, ROOT);
+  assert.equal((await pickupHttp(ctx, 'internal')).status, 200);
+  const log = ctx.sqlite.prepare('SELECT details FROM luggage_audit_logs ORDER BY log_id DESC LIMIT 1').get()!;
+  const details = JSON.parse(String(log.details));
+  for (const list of [details.pickupTransition.before, details.pickupTransition.after]) {
+    for (const row of list) delete row.tag_no;
+  }
+  ctx.sqlite.prepare("INSERT INTO luggage_audit_logs(order_id,action,details) VALUES (?,'LEGACY_PICKUP',?)").run(ROOT, JSON.stringify(details));
+  const money = pickupMoney(ctx);
+  assert.equal((await pickupHttp(ctx, 'internal', true)).status, 200);
+  const family = ctx.sqlite.prepare('SELECT tag_no,status FROM luggage_orders WHERE order_id = ? OR parent_order_id = ?').all(ROOT, ROOT);
+  assert.ok(family.every(row => row.tag_no === '141' && row.status === 'PAID'));
+  assert.deepEqual(pickupMoney(ctx), money);
+});
+async function concurrentManual(ctx: Fixture, overnight = true) {
+  const date = new Date(Date.now() + (overnight ? 33 : 9) * 3600_000).toISOString().slice(0, 10);
+  const url = 'https://internal.invalid/internal/luggage-orders/manual';
+  const raw = JSON.stringify({ name: 'Local Concurrent Guest', phone: '000-local-only', suitcaseQty: 1,
+    backpackQty: 0, companionCount: 0, expectedPickupAt: `${date}T20:00:00+09:00`,
+    flyingPassTier: 'NONE', freeReason: '', freeReasonText: '', note: 'local-only',
+    actor: { userId: 'local', name: 'Local Tester', email: 'local@example.test', role: 'center_staff' } });
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const { signature } = await signInternalRequest({ method: 'POST', body: raw, secret: SECRET, timestamp, url });
+  return ctx.app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json',
+    'x-internal-timestamp': timestamp, 'x-internal-signature': signature }, body: raw }, ctx.env);
+}
+test('concurrent intake and undo have exactly one winner for the last long tag', async () => {
+  const ctx = setup(); await pickedTag(ctx, '141');
+  for (let n = 142; n <= 150; n++) tagHolder(ctx, `LOCAL-HOLDER-${n}`, String(n));
+  const [intake, undo] = await Promise.all([concurrentManual(ctx), pickupHttp(ctx, 'internal', true)]);
+  assert.ok((intake.status === 201 && undo.status === 409) || (intake.status === 409 && undo.status === 200), `intake ${intake.status}, undo ${undo.status}`);
+  const active = ctx.sqlite.prepare("SELECT order_id FROM luggage_orders WHERE CAST(tag_no AS INTEGER) = 141 AND status IN ('PAID','PAYMENT_PENDING')").all();
+  assert.equal(active.length, 1);
+});
+test('concurrent general intake and undo cannot both claim recycled 140', async t => {
+  const today = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+  t.mock.timers.enable({ apis: ['Date'], now: new Date(`${today}T01:00:00Z`) });
+  const ctx = setup(); await pickedTag(ctx, '140');
+  for (let n = 1; n < 140; n++) tagHolder(ctx, `LOCAL-HOLDER-${n}`, String(n));
+  ctx.sqlite.prepare("INSERT INTO luggage_daily_tag_counters(business_date,last_seq) VALUES(strftime('%Y%m%d','now','+9 hours'),140)").run();
+  const [intake, undo] = await Promise.all([concurrentManual(ctx, false), pickupHttp(ctx, 'internal', true)]);
+  assert.ok((intake.status === 201 && undo.status === 409) || (intake.status === 409 && undo.status === 200), `intake ${intake.status}, undo ${undo.status}`);
+  assert.equal(ctx.sqlite.prepare("SELECT COUNT(*) n FROM luggage_orders WHERE CAST(tag_no AS INTEGER)=140 AND status IN ('PAID','PAYMENT_PENDING')").get()!.n, 1);
+});
+test('concurrent duplicate undo requests restore once and record one audit', async () => {
+  const ctx = setup(); await pickedTag(ctx, '145');
+  const count = ctx.sqlite.prepare('SELECT COUNT(*) n FROM luggage_audit_logs').get()!.n;
+  const results = await Promise.all([pickupHttp(ctx, 'internal', true), pickupHttp(ctx, 'internal', true)]);
+  assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
+  assert.equal(ctx.sqlite.prepare('SELECT COUNT(*) n FROM luggage_audit_logs').get()!.n, Number(count) + 1);
+});
+
 const open: DatabaseSync[] = [];
 const originalFetch = globalThis.fetch;
 afterEach(() => { for (const db of open.splice(0)) db.close(); globalThis.fetch = originalFetch; });
