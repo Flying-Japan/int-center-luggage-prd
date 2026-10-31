@@ -7,7 +7,12 @@ import internalApi from '../src/routes/internalApi';
 import { buildOvernightTag, buildSameDayTag } from '../src/services/orderNumber';
 import { runMidnightRollover } from '../src/services/midnightRollover';
 import { signInternalRequest } from '../src/lib/hmac';
+import { tagColorClass } from '../src/lib/tagColors';
 const SECRET='tag-range-local-test';
+test('ordinary140 stays green vertical; expanded long141–150 reuse the red horizontal class', () => {
+  assert.equal(tagColorClass('140'), 'tag-pattern-green-vertical');
+  for (let tag = 141; tag <= 150; tag++) assert.equal(tagColorClass(String(tag)), 'tag-pattern-red-horizontal');
+});
 function setup() {
   const sqlite=new DatabaseSync(':memory:');sqlite.exec(readFileSync('src/schema.sql','utf8'));
   const statement=(sql:string)=>{let args:unknown[]=[];return {

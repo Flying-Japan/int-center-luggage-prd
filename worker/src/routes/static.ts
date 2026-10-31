@@ -1019,7 +1019,7 @@ tbody tr:hover { background: #eef5ff; }
 .tag-color-brown { color: #fff; background: #b45309; border: 2px solid #92400e; }
 .tag-color-skyblue { color: #fff; background: #38bdf8; border: 2px solid #0ea5e9; }
 
-/* 101-145: vertical white stripes; 146-150: horizontal white stripes. */
+/* 101-140: vertical white stripes; long tags 141-150: existing red horizontal white stripes. */
 .tag-pattern-orange-vertical { --tag-bg: #f97316; --tag-border: #ea580c; --tag-text: #111827; --tag-outline: #fff; }
 .tag-pattern-blue-vertical { --tag-bg: #3b82f6; --tag-border: #2563eb; --tag-text: #fff; --tag-outline: #111827; }
 .tag-pattern-yellow-vertical { --tag-bg: #fbbf24; --tag-border: #f59e0b; --tag-text: #111827; --tag-outline: #fff; }
