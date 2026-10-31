@@ -11,7 +11,7 @@ import { splitSql, assertSameSql } from '../scripts/lib/sql-contract.mjs';
 const require = createRequire(import.meta.url), deps = createRequire(require.resolve('wrangler/package.json'));
 const { Miniflare, Log, LogLevel } = deps('miniflare'), { build } = deps('esbuild');
 
-test('F1 local preview: exact production batch is atomic, preserves guards and receipts, and unlocks only a paid-up 087', async () => {
+test('F1 local preview: exact 087 correction respects its approval window and preserves guards, receipts and atomicity', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'approved087-preview-'));
   let mf;
   try {
@@ -66,6 +66,23 @@ test('F1 local preview: exact production batch is atomic, preserves guards and r
     await assert.rejects(run(batch), /PRECONDITION|CHECK/);
     assert.deepEqual(await definitions(), oldDefinitions);
     await db.prepare(`UPDATE luggage_orders SET account_wallet_points_used=0 WHERE order_id='${ORDER}'`).run();
+    // This immutable, one-order production policy intentionally expires at the original pickup time.
+    // Never alter its clock predicate or fixture dates to keep a historical correction executable.
+    const approvalWindow = await db.prepare(`SELECT julianday('now') < julianday(expected_pickup_at) AS open
+      FROM luggage_orders WHERE order_id='${ORDER}'`).first();
+    if (!approvalWindow.open) {
+      const orders = await rows('SELECT * FROM luggage_orders ORDER BY order_id');
+      const closings = await rows('SELECT * FROM luggage_cash_closings ORDER BY closing_id');
+      await assert.rejects(run(batch), /APPROVED_PRICE_CORRECTION_PRECONDITION_FAILED/);
+      await assert.rejects(run([...batch, { sql: 'SELECT * FROM deliberately_missing_table' }]), /APPROVED_PRICE_CORRECTION_PRECONDITION_FAILED/);
+      assert.deepEqual(await definitions(), oldDefinitions);
+      assert.deepEqual(await rows('SELECT * FROM luggage_orders ORDER BY order_id'), orders);
+      assert.deepEqual(await rows('SELECT * FROM luggage_order_payments ORDER BY payment_id'), receipts);
+      assert.deepEqual(await rows('SELECT * FROM luggage_audit_logs ORDER BY log_id'), audits);
+      assert.deepEqual(await rows('SELECT * FROM luggage_cash_closings ORDER BY closing_id'), closings);
+      t.diagnostic('087 approval deadline passed: expired correction is refused; all DDL, orders, receipts, audits and closings remain unchanged.');
+      return;
+    }
     // Fail after all policy DDL and the financial write; D1 rolls back DDL, event, audit and price.
     await assert.rejects(run([...batch, { sql: 'SELECT * FROM deliberately_missing_table' }]), /no such table/);
     assert.deepEqual(await definitions(), oldDefinitions);
