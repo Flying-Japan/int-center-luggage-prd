@@ -1711,7 +1711,7 @@ customer.post("/customer/submit", async (c) => {
     || pickupJST.getUTCMonth() !== nowJST.getUTCMonth()
     || pickupJST.getUTCFullYear() !== nowJST.getUTCFullYear();
   const orderId = await buildOrderId(c.env.DB, undefined, isOvernight);
-  // Tag assignment: overnight → dedicated 146-150, same-day → Phase 1/2 (1-145)
+  // Tag assignment: overnight → dedicated 141-150, same-day → Phase 1/2 (1-140)
   const tagNo = isOvernight
     ? await buildOvernightTag(c.env.DB)
     : await buildSameDayTag(c.env.DB);

@@ -612,20 +612,20 @@ test('cash/QR split uses actual receipt JST date for cash closing and sales; old
   assert.equal(ctx.sqlite.prepare('SELECT SUM(total_amount) AS n FROM luggage_sales_daily').get()!.n, 3200);
 });
 
-test('exhausted 146–150 tags do not hide debt or prevent billing; rollover retry preserves all charges', async () => {
+test('exhausted 141–150 tags do not hide debt or prevent billing; rollover retry preserves all charges', async () => {
   const ctx = setup(); seedRoot(ctx);
-  for (let tag = 146; tag <= 150; tag++) ctx.sqlite.prepare("INSERT INTO luggage_orders(order_id, status, tag_no) VALUES (?, 'PAID', ?)").run(`tag-${tag}`, String(tag));
+  for (let tag = 141; tag <= 150; tag++) ctx.sqlite.prepare("INSERT INTO luggage_orders(order_id, status, tag_no) VALUES (?, 'PAID', ?)").run(`tag-${tag}`, String(tag));
   const first = await runMidnightRollover(ctx.db);
   assert.ok(first.errors >= 1);
   assert.equal(ctx.sqlite.prepare('SELECT tag_no FROM luggage_orders WHERE order_id = ?').get(ROOT)!.tag_no, '12');
   await materializeOutstandingDays(ctx.db, ROOT);
   assert.equal((await getBillingSummary(ctx.db, ROOT))!.outstanding_amount, 1600);
-  ctx.sqlite.prepare("UPDATE luggage_orders SET status = 'PICKED_UP' WHERE order_id = 'tag-146'").run();
+  ctx.sqlite.prepare("UPDATE luggage_orders SET status = 'PICKED_UP' WHERE order_id = 'tag-141'").run();
   await runMidnightRollover(ctx.db);
   await runMidnightRollover(ctx.db);
   await materializeOutstandingDays(ctx.db, ROOT);
   assert.equal(ctx.sqlite.prepare('SELECT COUNT(*) AS n FROM luggage_orders WHERE parent_order_id = ?').get(ROOT)!.n, 1);
-  assert.equal(ctx.sqlite.prepare('SELECT tag_no FROM luggage_orders WHERE order_id = ?').get(ROOT)!.tag_no, '146');
+  assert.equal(ctx.sqlite.prepare('SELECT tag_no FROM luggage_orders WHERE order_id = ?').get(ROOT)!.tag_no, '141');
 });
 
 test('discounted original, free daily rate and manually corrected extension charge never double count', async () => {

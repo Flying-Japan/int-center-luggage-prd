@@ -158,7 +158,7 @@ test("미결제: 다음 날 변경 시 장기 번호·일수·요금 변경", as
   const saved = order(ctx);
   assert.equal(saved.expected_pickup_at, NEXT_DAY_PICKUP);
   assert.equal(saved.expected_storage_days, 2);
-  assert.equal(saved.tag_no, "146");
+  assert.equal(saved.tag_no, "141");
   assert.equal(saved.prepaid_amount, 1600);
   assert.equal(saved.final_amount, 1600);
   assert.equal(result.data.pricing?.amountsUpdated, true);
@@ -179,7 +179,7 @@ test("결제 완료: 번호와 일수만 변경하고 수납 원장 보존", asy
   assert.equal(result.status, 200, JSON.stringify(result.data));
 
   const saved = order(ctx);
-  assert.equal(saved.tag_no, "146");
+  assert.equal(saved.tag_no, "141");
   assert.equal(saved.expected_storage_days, 2);
   assert.equal(saved.prepaid_amount, 800);
   assert.equal(saved.final_amount, 800);
@@ -195,11 +195,29 @@ test("결제 완료: 번호와 일수만 변경하고 수납 원장 보존", asy
   assert.equal(result.data.pricing?.amountsUpdated, false);
 });
 
-test("장기 번호 5개 소진: 주문과 감사 기록 불변", async () => {
+test("기존 141·145번의 장기 픽업일 변경은 번호와 수납 원장을 보존", async (t) => {
+  for (const tag of ["141", "145"]) {
+    await t.test(tag, async () => {
+      const ctx = setup();
+      t.after(() => ctx.sqlite.close());
+      seed(ctx, ORDER_ID, "PAID", tag);
+      ctx.sqlite.prepare("UPDATE luggage_orders SET expected_pickup_at = ?, expected_storage_days = 2 WHERE order_id = ?").run(NEXT_DAY_PICKUP, ORDER_ID);
+      ctx.sqlite.prepare("INSERT INTO luggage_order_payments (order_id, business_date, tender_type, amount) VALUES (?, '20261021', 'PAY_QR', 800)").run(ORDER_ID);
+      const result = await change(ctx, "2026-10-23T03:00:00.000Z");
+      assert.equal(result.status, 200, JSON.stringify(result.data));
+      assert.equal(order(ctx).tag_no, tag);
+      assert.equal(order(ctx).prepaid_amount, 800);
+      assert.equal(order(ctx).final_amount, 800);
+      assert.deepEqual(ctx.sqlite.prepare("SELECT tender_type, amount FROM luggage_order_payments WHERE order_id = ?").all(ORDER_ID).map(row => ({ ...row })), [{ tender_type: "PAY_QR", amount: 800 }]);
+    });
+  }
+});
+
+test("장기 번호 10개 소진: 주문과 감사 기록 불변", async () => {
   const ctx = setup();
   seed(ctx);
 
-  for (let tag = 146; tag <= 150; tag++) {
+  for (let tag = 141; tag <= 150; tag++) {
     seed(ctx, `20261021-${tag}`, "PAID", String(tag));
   }
 
@@ -281,7 +299,7 @@ test("null 차단은 다른 운영 필드 수정에 영향 없음", async () => 
   assert.equal(saved.expected_pickup_at, ORIGINAL_PICKUP);
 });
 
-test("이미 다음 날 픽업인데 1~145번인 주문: 같은 날짜 재요청으로 146번 재배정", async () => {
+test("이미 다음 날 픽업인데 1~140번인 주문: 같은 날짜 재요청으로 141번 재배정", async () => {
   const ctx = setup();
   seed(ctx);
   ctx.sqlite.prepare("UPDATE luggage_orders SET expected_pickup_at = ? WHERE order_id = ?").run(NEXT_DAY_PICKUP, ORDER_ID);
@@ -291,7 +309,7 @@ test("이미 다음 날 픽업인데 1~145번인 주문: 같은 날짜 재요청
   assert.equal(result.status, 200, JSON.stringify(result.data));
 
   const saved = order(ctx);
-  assert.equal(saved.tag_no, "146");
+  assert.equal(saved.tag_no, "141");
   assert.equal(saved.expected_storage_days, 2);
   assert.equal(result.data.tagReassigned, true);
 });
@@ -311,7 +329,7 @@ test("장기 번호 1개 남음: 동시 변경 2건 중 1건만 성공, 번호 �
   const ctx = setup();
   seed(ctx, ORDER_ID, "PAYMENT_PENDING", "55");
   seed(ctx, "20261021-002", "PAYMENT_PENDING", "56");
-  for (let tag = 146; tag <= 149; tag++) {
+  for (let tag = 141; tag <= 149; tag++) {
     seed(ctx, `20261021-${tag}`, "PAID", String(tag));
   }
 
@@ -394,7 +412,7 @@ test("무료 접수: 일 요금 0이면 금액 0 유지", async () => {
   const result = await change(ctx);
   assert.equal(result.status, 200, JSON.stringify(result.data));
   const saved = order(ctx);
-  assert.equal(saved.tag_no, "146");
+  assert.equal(saved.tag_no, "141");
   assert.equal(saved.prepaid_amount, 0);
   assert.equal(saved.final_amount, 0);
   assert.equal(result.data.pricing?.expectedAmount, 0);

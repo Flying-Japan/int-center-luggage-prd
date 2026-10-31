@@ -4,19 +4,20 @@
  * Order ID: YYYYMMDD-NNN — always unique, always increments, never reused.
  * Tag number: physical luggage tag.
  *
- * Same-day tags (1-145):
- *   Phase 1: Sequential 1→2→3...→145 (first pass).
- *   Phase 2: After reaching 145, recycle the lowest available tag
+ * Same-day tags (1-140):
+ *   Phase 1: Sequential 1→2→3...→140 (first pass).
+ *   Phase 2: After reaching 140, recycle the lowest available tag
  *            (i.e. not held by an active PAYMENT_PENDING or PAID order).
- *   Returns null when all 145 tags are in use.
+ *   Returns null when all 140 tags are in use.
  *
- * Overnight tags (146-150):
+ * Overnight tags (141-150):
  *   Reuse the lowest number not held by any active order, regardless of date.
  *
  * Extensions: Reuse parent's tag (same physical bag) — handled by caller.
  */
 
 import { todayBusinessDate } from "./storage";
+import { SAME_DAY_TAG_MAX, OVERNIGHT_TAG_VALUES_SQL } from "./tagRanges";
 
 /**
  * Generate next order_id for today using D1 luggage_daily_counters.
@@ -55,17 +56,17 @@ export async function buildOrderId(db: D1Database, nowUtc?: Date, _overnight?: b
 }
 
 /**
- * Assign a same-day tag number (1-145).
+ * Assign a same-day tag number (1-140).
  *
- * Phase 1: Increment the sequential counter through 145, skipping candidates
+ * Phase 1: Increment the sequential counter through 140, skipping candidates
  *          held by any active order (PAYMENT_PENDING or PAID), regardless of date.
- * Phase 2: All 145 first-pass tags used — recycle the lowest tag not held
+ * Phase 2: All 140 first-pass tags used — recycle the lowest tag not held
  *          by any active order.
  *
- * Uses luggage_tag_pool (static 1-145 rows) as the reference set instead
+ * Uses luggage_tag_pool (static 1-145 rows; only 1-140 are eligible) as the reference set instead
  * of generate_series (not available in D1/SQLite).
  *
- * Returns null when all 145 tags are in use (caller should show error).
+ * Returns null when all 140 tags are in use (caller should show error).
  */
 export async function buildSameDayTag(db: D1Database, businessDate?: string): Promise<string | null> {
   const bizDate = businessDate ?? todayBusinessDate();
@@ -79,7 +80,7 @@ export async function buildSameDayTag(db: D1Database, businessDate?: string): Pr
 
   // Phase 1: Increment atomically so concurrent requests receive distinct
   // sequential candidates. Skip any candidate held by an active order.
-  while (currentSeq < 145) {
+  while (currentSeq < SAME_DAY_TAG_MAX) {
     const row = await db.prepare(
       `INSERT INTO luggage_daily_tag_counters (business_date, last_seq)
        VALUES (?, 1)
@@ -91,7 +92,7 @@ export async function buildSameDayTag(db: D1Database, businessDate?: string): Pr
     currentSeq = candidate;
 
     // Another concurrent request may have advanced the counter past the range.
-    if (candidate > 145) break;
+    if (candidate > SAME_DAY_TAG_MAX) break;
 
     const inUse = await db.prepare(
       `SELECT 1 FROM luggage_orders
@@ -107,7 +108,7 @@ export async function buildSameDayTag(db: D1Database, businessDate?: string): Pr
   // A tag is "in use" if any active order holds it, regardless of business date.
   const freeTag = await db.prepare(
     `SELECT t.tag_no FROM luggage_tag_pool t
-     WHERE t.tag_no BETWEEN 1 AND 145
+     WHERE t.tag_no BETWEEN 1 AND ${SAME_DAY_TAG_MAX}
        AND NOT EXISTS (
        SELECT 1 FROM luggage_orders o
        WHERE CAST(o.tag_no AS INTEGER) = t.tag_no
@@ -117,19 +118,19 @@ export async function buildSameDayTag(db: D1Database, businessDate?: string): Pr
      LIMIT 1`
   ).first<{ tag_no: number }>();
 
-  if (!freeTag) return null; // All 145 tags in use
+  if (!freeTag) return null; // All 140 tags in use
   return String(freeTag.tag_no);
 }
 
 /**
- * Assign an overnight tag number from the dedicated 146-150 range.
+ * Assign an overnight tag number from the dedicated 141-150 range.
  * Availability is checked against every active order because long-term bags
  * can remain in storage across business dates.
  */
 export async function buildOvernightTag(db: D1Database, _businessDate?: string): Promise<string | null> {
   const freeTag = await db.prepare(
     `WITH overnight_tags(tag_no) AS (
-       VALUES (146), (147), (148), (149), (150)
+       VALUES ${OVERNIGHT_TAG_VALUES_SQL}
      )
      SELECT tag_no FROM overnight_tags t
      WHERE NOT EXISTS (

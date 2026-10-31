@@ -12,6 +12,7 @@ import {
 } from "../lib/payments";
 import { FLYING_PASS_TIERS, calculateExtraAmount, calculatePrepaidAmount, calculatePricePerDay, flyingPassDiscountAmount, normalizeFlyingPassTier, recalculateOrderPrepaid } from "../services/pricing";
 import { buildOrderId, buildOvernightTag, buildSameDayTag } from "../services/orderNumber";
+import { SAME_DAY_TAG_MAX, OVERNIGHT_TAG_MIN, LUGGAGE_TAG_MAX } from "../services/tagRanges";
 import { downloadImage } from "../lib/r2";
 import { fetchStaffNamesByIds } from "../lib/staffProfiles";
 import { createSupabaseAdmin } from "../lib/supabase";
@@ -2873,8 +2874,8 @@ internalApi.post("/internal/luggage-orders/manual", async (c) => {
   if (tagNo === null) {
     return c.json({
       error: isOvernight
-        ? "장기 태그(146~150)가 모두 사용 중입니다."
-        : "당일 태그(1~145)가 모두 사용 중입니다.",
+        ? "장기 태그(141~150)가 모두 사용 중입니다."
+        : "당일 태그(1~140)가 모두 사용 중입니다.",
     }, 409);
   }
 
@@ -3455,8 +3456,8 @@ const PICKUP_DATE_CONFLICT_MESSAGES = {
   BAG_PERIOD_LOCKED: "추가 짐의 확정된 보관 기간은 다시 계산하지 않습니다. 기존 수령 예정일 이후는 연장 접수를 이용해주세요.",
   PICKUP_BEFORE_CREATED: "Pickup date cannot be earlier than the order date",
   TAG_DATE_CONFLICT: "tagNo cannot be set together with a pickup date change; the tag is assigned automatically",
-  NO_LONG_TAG: "장기 태그(146~150)가 모두 사용 중입니다.",
-  NO_SAME_DAY_TAG: "당일 태그(1~145)가 모두 사용 중입니다.",
+  NO_LONG_TAG: "장기 태그(141~150)가 모두 사용 중입니다.",
+  NO_SAME_DAY_TAG: "당일 태그(1~140)가 모두 사용 중입니다.",
   TAG_CLAIMED: "번호표가 다른 요청에 먼저 배정되었습니다. 다시 시도해 주세요.",
   STALE: "Luggage order was changed by another request",
 } as const;
@@ -3469,17 +3470,17 @@ function jstDateKey(value: string | Date): string {
 
 function isLongStorageTag(tagNo: string | null): boolean {
   const n = tagNo !== null && /^\d+$/.test(tagNo) ? Number(tagNo) : NaN;
-  return n >= 146 && n <= 150;
+  return n >= OVERNIGHT_TAG_MIN && n <= LUGGAGE_TAG_MAX;
 }
 
 function isSameDayStorageTag(tagNo: string | null): boolean {
   const n = tagNo !== null && /^\d+$/.test(tagNo) ? Number(tagNo) : NaN;
-  return n >= 1 && n <= 145;
+  return n >= 1 && n <= SAME_DAY_TAG_MAX;
 }
 
 /**
- * Pickup date change for the unified admin: recompute storage days, move between the same-day (1-145) and
- * long-term (146-150) tag ranges, and reprice unpaid orders. Paid orders keep prepaid/final/extra amounts and
+ * Pickup date change for the unified admin: recompute storage days, move between the same-day (1-140) and
+ * long-term (141-150) tag ranges, and reprice unpaid orders. Paid orders keep prepaid/final/extra amounts and
  * the tender ledger; the shortfall is only reported. Everything lands in one conditional D1 batch.
  */
 async function applyPickupDateChange(
@@ -3684,7 +3685,7 @@ internalApi.patch("/internal/luggage-orders/:orderId/operations-fields", async (
     return c.json({ error: "Pickup date cannot be cleared", code: "PICKUP_DATE_REQUIRED" }, 400);
   }
   const requestedPickupAt = normalized.update.expectedPickupAt;
-  // Also repair an active order whose same-day tag (1-145) no longer matches a next-day-or-later pickup.
+  // Also repair an active order whose same-day tag (1-140) no longer matches a next-day-or-later pickup.
   const longPickupOnSameDayTag = typeof requestedPickupAt === "string"
     && (current.status === "PAYMENT_PENDING" || current.status === "PAID")
     && isSameDayStorageTag(current.tagNo)

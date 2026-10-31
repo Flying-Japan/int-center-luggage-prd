@@ -1267,7 +1267,7 @@ const worker = {
           console.log(`Scheduled tasks triggered: ${event.cron}`);
 
           // Midnight JST rollover (0 15 * * * = 00:00 JST)
-          // Transition uncollected same-day orders to available overnight tags (146-150)
+          // Transition uncollected same-day orders to available overnight tags (141-150)
           if (event.cron === "0 15 * * *") {
             const rolloverResult = await runMidnightRollover(env.DB);
             console.log(`Midnight rollover complete: ${JSON.stringify(rolloverResult)}`);

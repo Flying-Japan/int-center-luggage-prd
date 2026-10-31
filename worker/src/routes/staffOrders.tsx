@@ -605,7 +605,7 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
     return c.redirect("/staff/dashboard?error=이름, 전화번호, 짐 수량이 필요합니다");
   }
 
-  // Check if pickup is next day or later → dedicated overnight tags (146-150)
+  // Check if pickup is next day or later → dedicated overnight tags (141-150)
   let isOvernight = false;
   if (expectedPickupAt) {
     const nowJST = new Date(receivedAt.getTime() + 9 * 60 * 60 * 1000);
@@ -622,14 +622,14 @@ staffOrders.post("/staff/orders/manual", editorAuth, async (c) => {
     String(receivedJST.getUTCDate()).padStart(2, "0"),
   ].join("");
   const orderId = await buildOrderId(c.env.DB, receivedAt, isOvernight);
-  // Tag assignment: overnight → dedicated 146-150, same-day → Phase 1/2 (1-145)
+  // Tag assignment: overnight → dedicated 141-150, same-day → Phase 1/2 (1-140)
   const tagNo = isOvernight
     ? await buildOvernightTag(c.env.DB, businessDate)
     : await buildSameDayTag(c.env.DB, businessDate);
   if (tagNo === null) {
     const error = isOvernight
-      ? "장기 태그(146~150)가 모두 사용 중입니다"
-      : "당일 태그(1~145)가 모두 사용 중입니다";
+      ? "장기 태그(141~150)가 모두 사용 중입니다"
+      : "당일 태그(1~140)가 모두 사용 중입니다";
     return c.redirect(`/staff/dashboard?error=${encodeURIComponent(error)}`);
   }
   const { setQty, pricePerDay } = calculatePricePerDay(suitcaseQty, backpackQty);

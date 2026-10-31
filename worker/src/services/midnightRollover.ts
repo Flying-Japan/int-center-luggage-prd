@@ -3,9 +3,10 @@
  *
  * Same-day orders still in PAID status at midnight are uncollected bags
  * that must transition to overnight storage. Each gets an available tag from
- * the dedicated 146-150 range, freeing the old same-day tag for recycling.
+ * the dedicated 141-150 range, freeing the old same-day tag for recycling.
  */
 
+import { SAME_DAY_TAG_MAX, OVERNIGHT_TAG_VALUES_SQL } from "./tagRanges";
 import { captureOperationalError } from "../lib/observability";
 
 interface RolloverResult {
@@ -14,8 +15,8 @@ interface RolloverResult {
 }
 
 /**
- * Find all untransitioned PAID orders (tag 1-145) from the just-ended or any
- * earlier business date and assign available overnight tags (146-150).
+ * Find all untransitioned PAID orders (tag 1-140) from the just-ended or any
+ * earlier business date and assign available overnight tags (141-150).
  *
  * Backlog orders remain eligible on each later midnight run until transitioned.
  */
@@ -34,7 +35,7 @@ export async function runMidnightRollover(db: D1Database): Promise<RolloverResul
   const orders = await db.prepare(
     `SELECT order_id, tag_no FROM luggage_orders
      WHERE status = 'PAID'
-       AND CAST(tag_no AS INTEGER) BETWEEN 1 AND 145
+       AND CAST(tag_no AS INTEGER) BETWEEN 1 AND ${SAME_DAY_TAG_MAX}
        AND parent_order_id IS NULL
        AND SUBSTR(order_id, 1, 8) <= ?
      ORDER BY SUBSTR(order_id, 1, 8) ASC, created_at ASC, order_id ASC`
@@ -47,7 +48,7 @@ export async function runMidnightRollover(db: D1Database): Promise<RolloverResul
   const count = orders.results.length;
   const availableTags = await db.prepare(
     `WITH overnight_tags(tag_no) AS (
-       VALUES (146), (147), (148), (149), (150)
+       VALUES ${OVERNIGHT_TAG_VALUES_SQL}
      )
      SELECT tag_no FROM overnight_tags t
      WHERE NOT EXISTS (
@@ -78,7 +79,7 @@ export async function runMidnightRollover(db: D1Database): Promise<RolloverResul
              WHERE order_id = ?
                AND parent_order_id IS NULL
                AND status = 'PAID'
-               AND CAST(tag_no AS INTEGER) BETWEEN 1 AND 145
+               AND CAST(tag_no AS INTEGER) BETWEEN 1 AND ${SAME_DAY_TAG_MAX}
                AND NOT EXISTS (
                  SELECT 1 FROM luggage_orders active
                  WHERE CAST(active.tag_no AS INTEGER) = ?
@@ -114,7 +115,7 @@ export async function runMidnightRollover(db: D1Database): Promise<RolloverResul
            WHERE order_id = ?
              AND parent_order_id IS NULL
              AND status = 'PAID'
-             AND CAST(tag_no AS INTEGER) BETWEEN 1 AND 145
+             AND CAST(tag_no AS INTEGER) BETWEEN 1 AND ${SAME_DAY_TAG_MAX}
            LIMIT 1`
         ).bind(order.order_id).first();
 
