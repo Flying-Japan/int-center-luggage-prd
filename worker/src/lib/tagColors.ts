@@ -14,8 +14,7 @@ export const TAG_COLOR_RANGES: [number, number, string][] = [
   [111, 120, "tag-pattern-blue-vertical"],
   [121, 130, "tag-pattern-yellow-vertical"],
   [131, 140, "tag-pattern-green-vertical"],
-  [141, 145, "tag-pattern-purple-vertical"],
-  [146, 150, "tag-pattern-red-horizontal"],
+  [141, 150, "tag-pattern-red-horizontal"],
 ];
 
 /** Map tag_no to one dedicated solid-color or stripe-pattern class. */
