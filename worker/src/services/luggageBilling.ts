@@ -2,6 +2,14 @@ import { buildOrderId } from './orderNumber';
 import { normalizePaymentAllocation, type PaymentAllocation } from '../lib/payments';
 
 export type BillingSummary = {
+  staff_correction_count?:number;
+  family_claim_adjustment?:number;
+  family_correction_count?:number;
+  general_returned_amount?: number;
+  general_return_count?: number;
+  general_cash_returned?: number;
+  general_qr_returned?: number;
+  unallocated_returned_amount?: number;
   bag_addition_amount?: number;
   bag_addition_count?: number;
   bag_addition_daily_rate?: number;
@@ -89,6 +97,7 @@ export async function getBillingSummaries(db: D1Database, orderIds: string[]): P
 /** Physical pickup and monetary reconciliation are separate decisions. Nothing here waives a stored claim. */
 export function pickupBillingError(summary: BillingSummary | null): string | null {
   if (!summary) return '주문 금액을 확인해주세요';
+  if (!summary.root_review_required && summary.overpaid_amount>0) return '이미 받은 금액 중 아직 반환 기록이 없는 차액을 확인해주세요';
   if (summary.pending_refund_count > 0) return '진행 중 현금 환급의 지급 여부를 먼저 확인해주세요. 현금을 다시 지급하지 마세요';
   if (summary.extension_outstanding_amount > 0) return '추가 보관료 미수납 · 추가 결제 필요: 원주문에서 수납 후 수령 처리해주세요';
   if (summary.invalid_amount) return '금액 확인 필요: 기존 원주문 정산 또는 비정상 금액을 확인해주세요';
@@ -113,7 +122,8 @@ export async function requiresCollectionFlow(db: D1Database, orderId: string): P
     OR EXISTS (SELECT 1 FROM luggage_billing_lines l WHERE l.order_id = o.order_id AND (l.root_review_required = 1 OR l.payment_count > 0 AND l.collectible_amount > 0)))`)
     .bind(orderId).first();
   if(row)return true;
-  return ((await getBillingSummary(db,orderId))?.bag_addition_amount??0)>0;
+  const current=await getBillingSummary(db,orderId);
+  return (current?.bag_addition_amount??0)>0||(current?.staff_correction_count??0)>0;
 }
 
 /** UTC, in the existing SQLite seconds format. JST conversion belongs in date queries. */
@@ -203,7 +213,7 @@ export function collectionAllocation(body: Record<string, unknown>, outstanding:
 }
 
 /** A confirmation of money already received on site, not a payment-provider charge. */
-export async function confirmCollection(db: D1Database, orderId: string, staffId: string, body: Record<string, unknown>,context?:{actor?:unknown;finalStatements?:D1PreparedStatement[]}) {
+export async function confirmCollection(db: D1Database, orderId: string, staffId: string, body: Record<string, unknown>,context?:{actor?:unknown;finalStatements?:D1PreparedStatement[];verifyAtomic?:boolean}) {
   const requestId = String(body.request_id ?? '');
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(requestId)) throw new BillingConflict('유효한 수납 요청 ID가 필요합니다');
   if (body.confirm_received !== 'yes') throw new BillingConflict('현장 수납 확인이 필요합니다');
@@ -220,9 +230,11 @@ export async function confirmCollection(db: D1Database, orderId: string, staffId
   summary = await getBillingSummary(db, orderId);
   if (!summary || summary.invalid_amount || summary.unbilled_days) throw new BillingConflict('연장 일자를 확인해주세요');
   const allocation = collectionAllocation(body, summary.outstanding_amount);
-  const lines = await db.prepare(`SELECT order_id, status, billed_amount, recorded_amount, legacy_paid_estimate, collectible_amount, root_review_required
+  let lines = await db.prepare(`SELECT order_id, status, billed_amount, recorded_amount, legacy_paid_estimate, collectible_amount, root_review_required
     FROM luggage_billing_lines WHERE root_id = ? AND collectible_amount > 0
     ORDER BY parent_order_id IS NOT NULL, coverage_end, order_id`).bind(summary.root_id).all<CollectionLine>();
+  const familyScope=(summary.family_correction_count??0)>0?await db.prepare('SELECT snapshot_json FROM luggage_staff_correction_scopes WHERE root_id=?').bind(summary.root_id).first<{snapshot_json:string}>():null;
+  if(familyScope){const line=await db.prepare('SELECT order_id,status,billed_amount,recorded_amount,legacy_paid_estimate,collectible_amount,root_review_required FROM luggage_billing_lines WHERE order_id=?').bind(summary.root_id).first<CollectionLine>();if(!line)throw new BillingConflict('원주문을 확인해 주세요');lines={...lines,results:[{...line,collectible_amount:summary.outstanding_amount}]};}
   const now = new Date().toISOString();
   const businessDate = new Date(new Date(now).getTime() + 9 * 3600000).toISOString().slice(0, 10);
   let cashLeft = allocation.cashAmount;
@@ -241,6 +253,7 @@ export async function confirmCollection(db: D1Database, orderId: string, staffId
     WHERE b.root_id = ? AND b.total_billed_amount = ? AND b.recorded_amount = ? AND b.legacy_paid_estimate = ?
       AND b.outstanding_amount = ? AND b.root_review_amount = ? AND b.review_pickup_blocked = ?
       AND b.unbilled_days = 0 AND b.invalid_amount = 0
+      ${familyScope?'AND ?=(SELECT snapshot_json FROM luggage_staff_correction_scopes WHERE root_id=b.root_id)':''}
       AND EXISTS (SELECT 1 FROM luggage_orders r WHERE r.order_id = b.root_id AND r.status IN ('PAID', 'PAYMENT_PENDING'))
       AND NOT EXISTS (SELECT 1 FROM json_each(?) snapshot
         LEFT JOIN luggage_billing_lines l ON l.order_id = json_extract(snapshot.value, '$.order_id')
@@ -252,18 +265,23 @@ export async function confirmCollection(db: D1Database, orderId: string, staffId
           OR l.root_review_required IS NOT json_extract(snapshot.value, '$.root_review_required'))
       RETURNING log_id`).bind(summary.root_id, staffId, requestId, details, now,
       summary.root_id, summary.total_billed_amount, summary.recorded_amount, summary.legacy_paid_estimate,
-      summary.outstanding_amount, summary.root_review_amount, summary.review_pickup_blocked, JSON.stringify(lines.results))];
+      summary.outstanding_amount, summary.root_review_amount, summary.review_pickup_blocked, ...(familyScope?[familyScope.snapshot_json]:[]),JSON.stringify(familyScope?[]:lines.results))];
   // Chaining changes() means a failed initial compare writes neither receipts nor statuses.
   for (const receipt of receipts) statements.push(db.prepare(`INSERT INTO luggage_order_payments
     (order_id, business_date, tender_type, amount, staff_id, recorded_at, receipt_request_id)
     SELECT ?, ?, ?, ?, ?, ?, ? WHERE changes() = 1`).bind(receipt.orderId, businessDate, receipt.tender, receipt.amount, staffId, now, requestId));
+  // Fixed identifier: a corrected tender never changes its original receipt row.
+  const paymentReadTable=(summary.staff_correction_count??0)>0?'luggage_effective_payments':'luggage_order_payments';
   for (const line of lines.results) statements.push(db.prepare(`UPDATE luggage_orders SET status = 'PAID',
-    payment_method = CASE WHEN EXISTS (SELECT 1 FROM luggage_order_payments p WHERE p.order_id = luggage_orders.order_id AND p.tender_type = 'CASH')
-      AND EXISTS (SELECT 1 FROM luggage_order_payments p WHERE p.order_id = luggage_orders.order_id AND p.tender_type = 'PAY_QR') THEN 'MIXED'
-      WHEN EXISTS (SELECT 1 FROM luggage_order_payments p WHERE p.order_id = luggage_orders.order_id AND p.tender_type = 'PAY_QR') THEN 'PAY_QR' ELSE 'CASH' END,
-    updated_at = ? WHERE order_id = ? AND EXISTS (SELECT 1 FROM luggage_order_payments p
+    payment_method = CASE WHEN EXISTS (SELECT 1 FROM ${paymentReadTable} p WHERE p.order_id = luggage_orders.order_id AND p.tender_type = 'CASH')
+      AND EXISTS (SELECT 1 FROM ${paymentReadTable} p WHERE p.order_id = luggage_orders.order_id AND p.tender_type = 'PAY_QR') THEN 'MIXED'
+      WHEN EXISTS (SELECT 1 FROM ${paymentReadTable} p WHERE p.order_id = luggage_orders.order_id AND p.tender_type = 'PAY_QR') THEN 'PAY_QR' ELSE 'CASH' END,
+    updated_at = ? WHERE order_id = ? AND EXISTS (SELECT 1 FROM ${paymentReadTable} p
       WHERE p.order_id = luggage_orders.order_id AND p.receipt_request_id = ?)`)
     .bind(now, line.order_id, requestId));
+  if(familyScope)statements.push(db.prepare(`UPDATE luggage_orders SET status='PAID',updated_at=? WHERE parent_order_id=? AND status='PAYMENT_PENDING'
+    AND EXISTS(SELECT 1 FROM luggage_billing_balances WHERE root_id=? AND outstanding_amount=0 AND invalid_amount=0)
+    AND EXISTS(SELECT 1 FROM luggage_audit_logs WHERE action='CONFIRM_COLLECTION' AND device_id=? AND timestamp=?)`).bind(now,summary.root_id,summary.root_id,requestId,now));
   // Existing zero-priced lines need no money; acknowledge them with this same audited confirmation.
   statements.push(db.prepare(`UPDATE luggage_orders SET status = 'PAID', updated_at = ?
     WHERE (order_id = ? OR parent_order_id = ?) AND status = 'PAYMENT_PENDING'
@@ -277,7 +295,7 @@ export async function confirmCollection(db: D1Database, orderId: string, staffId
       AND a.device_id = ? AND a.timestamp = ?)`)
     .bind(now, summary.root_id, requestId, now));
   // Additional-bag collections must also detect silently ignored writes before the atomic batch commits.
-  if ((summary.bag_addition_count ?? 0) > 0) statements.push(db.prepare(`SELECT json_extract('{}', CASE WHEN
+  if ((summary.bag_addition_count ?? 0) > 0 || (summary.general_return_count??0)>0 || context?.verifyAtomic) statements.push(db.prepare(`SELECT json_extract('{}', CASE WHEN
     EXISTS(SELECT 1 FROM luggage_audit_logs WHERE action='CONFIRM_COLLECTION' AND device_id=? AND order_id=? AND staff_id=? AND timestamp=?)
     AND (SELECT COALESCE(SUM(amount),0) FROM luggage_order_payments WHERE receipt_request_id=?)=?
     AND EXISTS(SELECT 1 FROM luggage_billing_balances WHERE root_id=? AND outstanding_amount=0 AND invalid_amount=0 AND pending_refund_count=0)

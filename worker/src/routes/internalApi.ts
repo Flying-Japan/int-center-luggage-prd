@@ -1,3 +1,4 @@
+import {staffCorrectionInternalRoutes} from './staffCorrections';
 import flyingPassRefundRoutes from "./flyingPassRefunds";
 import{bagAdditionInternalRoutes}from"./bagAdditions";
 import { writePickupTransition, PickupTransitionError } from '../services/orderPickupWrites';
@@ -16,7 +17,7 @@ import { SAME_DAY_TAG_MAX, OVERNIGHT_TAG_MIN, LUGGAGE_TAG_MAX } from "../service
 import { downloadImage } from "../lib/r2";
 import { fetchStaffNamesByIds } from "../lib/staffProfiles";
 import { createSupabaseAdmin } from "../lib/supabase";
-import { CASH_CLOSING_STARTING_FLOAT, resolveAutoSalesSummariesByDate, resolveAutoSalesSummaryForDate, type AutoSalesSummary } from "../services/cashClosingSales";
+import { CASH_CLOSING_STARTING_FLOAT, resolveClosingReturnBasis, resolveAutoSalesSummariesByDate, resolveAutoSalesSummaryForDate, type AutoSalesSummary } from "../services/cashClosingSales";
 import { calculateStorageDays, formatDateJST, toJST, validatePickupTimeWindow } from "../services/storage";
 import { getSalesHolidayFlags, JST_DOW_JP } from "../services/salesHolidays";
 import { hmacSha256Hex } from "../lib/hmac";
@@ -109,6 +110,7 @@ internalApi.route("/", flyingPassRefundRoutes);
 // General part-time operations require the general switch after the refund routes have handled their own requests.
 internalApi.use("/internal/*", partTimeActorGate);
 internalApi.route("/",bagAdditionInternalRoutes);
+internalApi.route("/",staffCorrectionInternalRoutes);
 
 const EXPERIENCE_STATUSES = new Set(["SCHEDULED", "VISITED", "RECEIVED", "CANCELLED"]);
 const EXPERIENCE_VISITOR_TYPES = new Set(["BLOGGER", "INFLUENCER", "YOUTUBER", "OTHER"]);
@@ -126,6 +128,7 @@ const LUGGAGE_ACTIVITY_LOG_SOURCES = new Set(["staff", "unified-admin", "system"
 const LUGGAGE_CUSTOMER_SORTS = new Set(["recent", "oldest", "visits_desc", "spent_desc"]);
 const LUGGAGE_CUSTOMER_LIMITS = new Set([20, 50, 100]);
 const LUGGAGE_AUDIT_ACTION_LABELS: Record<string, string> = {
+  STAFF_ORDER_CORRECTION: "금액·수량 정정",
   INLINE_UPDATE: "수정", TOGGLE_PAYMENT: "결제변경", PICKUP: "수령완료",
   UNDO_PICKUP: "수령취소", CANCEL: "취소", TOGGLE_WAREHOUSE: "창고",
   UPDATE_PRICE: "요금변경", MARK_PAID: "결제완료", MARK_PICKED_UP: "수령완료",
@@ -399,9 +402,9 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
       c.env.DB.prepare("SELECT sale_date, people, cash, qr, luggage_total FROM luggage_daily_sales WHERE sale_date BETWEEN ? AND ?")
         .bind(range.startDate, range.endDate).all<{ sale_date: string; people: number; cash: number; qr: number; luggage_total: number }>(),
       c.env.DB.prepare(
-        `SELECT business_date AS sale_date, people, suitcase_total, backpack_total, cash, qr, gross_cash, gross_qr, cash_refund_amount, refund_count
+        `SELECT *,business_date AS sale_date
          FROM luggage_sales_daily WHERE business_date BETWEEN ? AND ?`
-      ).bind(range.startDate, range.endDate).all<{ sale_date: string; people: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; gross_cash: number; gross_qr: number; cash_refund_amount: number; refund_count: number }>(),
+      ).bind(range.startDate, range.endDate).all<{ sale_date: string; people: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; gross_cash: number; gross_qr: number; cash_refund_amount: number; refund_count: number;qr_refund_amount:number;unallocated_refund_amount:number;general_returned_amount:number;staff_correction_count:number;total_amount:number }>(),
       c.env.DB.prepare("SELECT c.business_date AS sale_date, c.total_amount, c.paypay_amount, c.actual_qr_amount, COALESCE(rs.cash_refund_amount,0) AS refund_amount, rs.net_cash AS refund_net_cash, rs.gross_qr AS refund_gross_qr, rs.net_total AS refund_net_total FROM luggage_cash_closings c LEFT JOIN luggage_cash_closing_refund_snapshots rs ON rs.closing_id = c.closing_id WHERE closing_type = 'FINAL_CLOSE' AND c.business_date BETWEEN ? AND ?")
         .bind(range.startDate, range.endDate).all<{ sale_date: string; total_amount: number; paypay_amount: number; actual_qr_amount: number; refund_amount: number; refund_net_cash: number; refund_gross_qr: number; refund_net_total: number }>(),
     ]);
@@ -421,16 +424,17 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
       const actual = actualByDate.get(date);
       const sheet = sheetByDate.get(date);
       const closing = closingByDate.get(date);
-      const settled = Boolean(closing) && date !== today;
+      const settled = Boolean(closing) && date !== today && !(actual?.staff_correction_count??0);
       const cash = settled ? closing!.cash : actual ? Number(actual.cash) || 0 : Number(sheet?.cash) || 0;
       const qr = settled ? closing!.qr : actual ? Number(actual.qr) || 0 : Number(sheet?.qr) || 0;
-      const luggage = settled ? closing!.luggage : cash + qr;
+      const luggage = settled ? closing!.luggage : actual ? actual.total_amount : cash + qr;
       const flags = getSalesHolidayFlags(date);
       return {
         date, weekdayJst: JST_DOW_JP[new Date(`${date}T12:00:00Z`).getUTCDay()], isWeekend: flags.isWeekend,
         japaneseHoliday: flags.jp, koreanHoliday: flags.kr, people: Math.max(Number(actual?.people) || 0, Number(sheet?.people) || 0),
         suitcases: Number(actual?.suitcase_total) || 0, backpacks: Number(actual?.backpack_total) || 0, cash, qr, luggage,
-        grossCash: cash + Number(actual?.cash_refund_amount || 0), grossQr: qr,
+        grossCash: cash + Number(actual?.cash_refund_amount || 0), grossQr: qr + Number(actual?.qr_refund_amount||0),
+        qrRefundAmount:Number(actual?.qr_refund_amount||0),unallocatedRefundAmount:Number(actual?.unallocated_refund_amount||0),generalReturnedAmount:Number(actual?.general_returned_amount||0),
         cashRefundAmount: Number(actual?.cash_refund_amount || 0), refundCount: Number(actual?.refund_count || 0),
         ...(settled && closing?.closingDifferenceAmount != null ? { closingDifferenceAmount: closing.closingDifferenceAmount } : {}),
         realtime: date === today,
@@ -451,7 +455,7 @@ internalApi.get("/internal/luggage-sales-analytics", async (c) => {
     const minRows = historical.length ? historical : activeRows;
     const totalCash = total("cash"); const totalQr = total("qr");
     const grossCash = rows.reduce((sum,row) => sum + row.grossCash, 0), grossQr = rows.reduce((sum,row) => sum + row.grossQr, 0);
-    return c.json({ status: "ok", range, today: { date: today, orders: Number(todayOrders?.order_count) || 0, paid: Number(todayOrders?.paid_count) || 0, pending: Number(todayOrders?.pending_count) || 0, cash: Number(todayOrders?.cash) || 0, qr: Number(todayOrders?.qr) || 0, luggage: Number(todayOrders?.luggage) || 0, suitcases: Number(todayOrders?.suitcases) || 0, backpacks: Number(todayOrders?.backpacks) || 0, versusHistoricalAverage: { amount: (Number(todayOrders?.luggage) || 0) - historicalAverage, percent: historicalAverage ? Math.round(((Number(todayOrders?.luggage) || 0) - historicalAverage) / historicalAverage * 100) : 0 } }, summary: { luggage: total("luggage"), cash: totalCash, qr: totalQr, grossCash, grossQr, cashRefundAmount: rows.reduce((sum,row) => sum + row.cashRefundAmount,0), refundCount: rows.reduce((sum,row) => sum + row.refundCount,0), cashPercent: grossCash + grossQr ? Math.round(grossCash / (grossCash + grossQr) * 100) : 0, qrPercent: grossCash + grossQr ? Math.round(grossQr / (grossCash + grossQr) * 100) : 0, people: total("people"), suitcases: total("suitcases"), backpacks: total("backpacks"), dailyAverage: historicalAverage, activeMin: minRows.length ? Math.min(...minRows.map((row) => row.luggage)) : null, activeMax: activeRows.length ? Math.max(...activeRows.map((row) => row.luggage)) : null }, dailyRows: rows });
+    return c.json({ status: "ok", range, today: { date: today, orders: Number(todayOrders?.order_count) || 0, paid: Number(todayOrders?.paid_count) || 0, pending: Number(todayOrders?.pending_count) || 0, cash: Number(todayOrders?.cash) || 0, qr: Number(todayOrders?.qr) || 0, luggage: Number(todayOrders?.luggage) || 0, suitcases: Number(todayOrders?.suitcases) || 0, backpacks: Number(todayOrders?.backpacks) || 0, versusHistoricalAverage: { amount: (Number(todayOrders?.luggage) || 0) - historicalAverage, percent: historicalAverage ? Math.round(((Number(todayOrders?.luggage) || 0) - historicalAverage) / historicalAverage * 100) : 0 } }, summary: { luggage: total("luggage"), cash: totalCash, qr: totalQr, grossCash, grossQr, cashRefundAmount: rows.reduce((sum,row) => sum + row.cashRefundAmount,0),qrRefundAmount:rows.reduce((sum,row)=>sum+row.qrRefundAmount,0),unallocatedRefundAmount:rows.reduce((sum,row)=>sum+row.unallocatedRefundAmount,0),generalReturnedAmount:rows.reduce((sum,row)=>sum+row.generalReturnedAmount,0), refundCount: rows.reduce((sum,row) => sum + row.refundCount,0), cashPercent: grossCash + grossQr ? Math.round(grossCash / (grossCash + grossQr) * 100) : 0, qrPercent: grossCash + grossQr ? Math.round(grossQr / (grossCash + grossQr) * 100) : 0, people: total("people"), suitcases: total("suitcases"), backpacks: total("backpacks"), dailyAverage: historicalAverage, activeMin: minRows.length ? Math.min(...minRows.map((row) => row.luggage)) : null, activeMax: activeRows.length ? Math.max(...activeRows.map((row) => row.luggage)) : null }, dailyRows: rows });
   } catch {
     return c.json({ status: "error", error: "failed to read luggage sales analytics" }, 500);
   }
@@ -568,6 +572,8 @@ async function fetchActiveHandoverAuthorNames(env: AppType["Bindings"]): Promise
 type LuggageCashClosingType = "MORNING_HANDOVER" | "FINAL_CLOSE" | "UNKNOWN";
 
 type LuggageCashClosingDto = {
+  qrGrossAmount?:number|null;qrReturnedAmount?:number;storedActualAmount?:number|null;
+  postClosingCorrections?:Array<{orderId:string;recordedAt:string;staffId:string;actorName:string;reason:string;beforeAmount:number;afterAmount:number;returnedAmount:number}>;
   closingId: number;
   businessDate: string | null;
   closingType: LuggageCashClosingType;
@@ -589,6 +595,8 @@ type LuggageCashClosingDto = {
   createdAt: string | null;
   updatedAt: string | null;
   submittedAt: string | null;
+  unallocatedReturnedAmount?:number;
+  generalReturnSnapshot?:Record<string,unknown>;
   refundSnapshot?: { grossCashAmount: number; grossQrAmount: number; cashRefundAmount: number; refundCount: number; refundIds: string[]; netCashAmount: number; netTotalAmount: number };
   morningHandover: {
     closingId: number;
@@ -630,20 +638,21 @@ function serializeCashClosing(
   const businessDate = nullableString(row.businessDate);
   const paypayAmount = nullableFiniteNumber(row.paypayAmount);
   const rawActualQrAmount = nullableFiniteNumber(row.rawActualQrAmount);
-  const actualQrAmount = rawActualQrAmount === null || rawActualQrAmount === 0 ? paypayAmount : rawActualQrAmount;
-  const actualAmount = nullableFiniteNumber(row.actualAmount);
+  const actualQrAmount = row.qrGrossAmount!=null?Number(row.qrGrossAmount)-Number(row.resolvedQrReturned??row.qrReturnAmount??0):rawActualQrAmount === null || rawActualQrAmount === 0 ? paypayAmount : rawActualQrAmount;
+  const storedActualAmount=nullableFiniteNumber(row.actualAmount);
+  const actualAmount = row.resolvedQrReturned!=null&&actualQrAmount!==null?Number(row.cashTotal)-CASH_CLOSING_STARTING_FLOAT+actualQrAmount:storedActualAmount;
   const currentAutoSales = businessDate ? autoSalesByDate.get(businessDate) : undefined;
-  const autoSalesAmount = row.refundNetTotal != null ? nullableFiniteNumber(row.refundNetTotal) : currentAutoSales?.totalAmount ?? nullableFiniteNumber(row.storedAutoSalesAmount);
-  const cashTotal = nullableFiniteNumber(row.cashTotal);
-  const differenceAmount = row.refundNetTotal != null
-    ? (actualAmount === null ? null : actualAmount - Number(row.refundNetTotal)) : currentAutoSales
-    ? (actualAmount === null ? null : actualAmount - currentAutoSales.totalAmount)
-    : nullableFiniteNumber(row.differenceAmount);
-  const qrDifferenceAmount = row.refundNetTotal != null
-    ? (actualQrAmount === null ? null : actualQrAmount - Number(row.refundGrossQr)) : currentAutoSales
-    ? (actualQrAmount === null ? null : actualQrAmount - currentAutoSales.qrAmount)
-    : nullableFiniteNumber(row.qrDifferenceAmount);
+  const postClosingCorrections=(row.postClosingCorrections??[]) as NonNullable<LuggageCashClosingDto["postClosingCorrections"]>;
+  const autoSalesAmount=currentAutoSales?.totalAmount??nullableFiniteNumber(row.refundNetTotal)??nullableFiniteNumber(row.storedAutoSalesAmount);
+  const cashTotal=nullableFiniteNumber(row.cashTotal);
+  const differenceAmount=actualAmount===null||autoSalesAmount===null?null:actualAmount-autoSalesAmount;
+  const unallocatedReturnedAmount=Math.max(currentAutoSales?.unallocatedRefundAmount??0,Number(row.snapshotUnallocated??0));
+  const expectedQr=currentAutoSales?.qrAmount??nullableFiniteNumber(row.refundGrossQr);
+  const qrDifferenceAmount=unallocatedReturnedAmount>0?null:actualQrAmount===null?null:expectedQr===null?nullableFiniteNumber(row.qrDifferenceAmount):actualQrAmount-expectedQr;
   return {
+    postClosingCorrections,qrGrossAmount:nullableFiniteNumber(row.qrGrossAmount),qrReturnedAmount:nullableFiniteNumber(row.resolvedQrReturned)??nullableFiniteNumber(row.qrReturnAmount)??0,storedActualAmount,
+    unallocatedReturnedAmount,
+    ...(row.generalReturnSnapshot ? {generalReturnSnapshot:JSON.parse(String(row.generalReturnSnapshot)) as Record<string,unknown>} : {}),
     closingId: nullableFiniteNumber(row.closingId) ?? 0,
     businessDate,
     closingType: normalizeCashClosingType(row.closingType),
@@ -659,7 +668,7 @@ function serializeCashClosing(
     floor4fCount: nullableFiniteNumber(row.floor4fCount),
     floor8fCount: nullableFiniteNumber(row.floor8fCount),
     autoSalesAmount,
-    differenceAmount,
+    differenceAmount:unallocatedReturnedAmount>0?null:differenceAmount,
     note: nullableString(row.note),
     authorName: authorId ? authorNames.get(authorId) ?? nullableString(row.ownerName) : nullableString(row.ownerName),
     createdAt: nullableString(row.createdAt),
@@ -691,7 +700,7 @@ const CASH_CLOSING_SELECT = `
          c.count_1 AS count1,
          c.total_amount AS cashTotal,
          c.paypay_amount AS paypayAmount,
-         c.actual_qr_amount AS rawActualQrAmount,
+         c.actual_qr_amount AS rawActualQrAmount,c.qr_gross_amount AS qrGrossAmount,c.qr_return_amount AS qrReturnAmount,
          c.actual_amount AS actualAmount,
          c.qr_difference_amount AS qrDifferenceAmount,
          c.rental_cash AS rentalCashAmount,
@@ -726,7 +735,23 @@ async function serializeCashClosings(env: AppType["Bindings"], rows: LuggageCash
     fetchStaffNamesByIds(env, staffIds),
     resolveAutoSalesSummariesByDate(env.DB, businessDates),
   ]);
-  return rows.map((row) => serializeCashClosing(row, authorNames, autoSalesByDate));
+  const snapshots=new Map<number,string>();
+  if(rows.length&&await env.DB.prepare("SELECT 1 FROM sqlite_master WHERE name='luggage_general_closing_snapshots' AND type='table'").first()){
+    const selected=await env.DB.prepare(`SELECT closing_id,snapshot_json FROM luggage_general_closing_snapshots WHERE closing_id IN (${rows.map(()=>'?').join(',')})`).bind(...rows.map(row=>Number(row.closingId))).all<{closing_id:number;snapshot_json:string}>();
+    for(const s of selected.results)snapshots.set(s.closing_id,s.snapshot_json);
+  }
+  const resolvedReturnBasis=new Map<number,{resolvedQrReturned:number;snapshotUnallocated:number}>();
+  for(const row of rows){const snapshot=snapshots.get(Number(row.closingId));if(!snapshot||row.qrGrossAmount==null)continue;const amounts=await resolveClosingReturnBasis(env.DB,snapshot);if(amounts)resolvedReturnBasis.set(Number(row.closingId),amounts);
+  }
+  const corrections=new Map<number,NonNullable<LuggageCashClosingDto['postClosingCorrections']>>();
+  if(rows.length&&await env.DB.prepare("SELECT 1 FROM sqlite_master WHERE name='luggage_staff_corrections' AND type='table'").first()){
+    const found=await env.DB.prepare(`SELECT cl.closing_id,c.* FROM luggage_cash_closings cl JOIN luggage_staff_corrections c ON julianday(c.recorded_at)>julianday(cl.created_at)
+      AND (c.return_business_date=cl.business_date OR EXISTS(SELECT 1 FROM luggage_order_payments p JOIN luggage_orders o ON o.order_id=p.order_id WHERE COALESCE(o.parent_order_id,o.order_id)=c.order_id AND p.business_date=cl.business_date)
+      OR EXISTS(SELECT 1 FROM json_each(c.return_allocations_json) a JOIN luggage_correction_returns ret ON ret.correction_id=json_extract(a.value,'$.correctionId') WHERE ret.business_date=cl.business_date))
+      WHERE cl.closing_id IN (${rows.map(()=>'?').join(',')}) ORDER BY c.recorded_at,c.sequence`).bind(...rows.map(row=>Number(row.closingId))).all<Record<string,unknown>>();
+    for(const c of found.results){const id=Number(c.closing_id),items=corrections.get(id)??[],actor=JSON.parse(String(c.actor_json));items.push({orderId:String(c.order_id),recordedAt:String(c.recorded_at),staffId:String(c.staff_id),actorName:String(actor.name??c.staff_id),reason:String(c.reason),beforeAmount:Number(c.before_billed_amount),afterAmount:Number(c.after_billed_amount),returnedAmount:Number(c.returned_amount)});corrections.set(id,items);}
+  }
+  return rows.map((row) => serializeCashClosing({...row,...(resolvedReturnBasis.get(Number(row.closingId))??{}),postClosingCorrections:corrections.get(Number(row.closingId))??[],...(snapshots.has(Number(row.closingId))?{generalReturnSnapshot:snapshots.get(Number(row.closingId))}:{})}, authorNames, autoSalesByDate));
 }
 
 // GET /internal/luggage-staff-accounts — Read-only projection of existing Supabase staff profiles.
@@ -884,7 +909,7 @@ function isUniqueCashClosingViolation(error: unknown): boolean {
 function cashClosingAutoSalesDto(autoSales: AutoSalesSummary | null) {
   return autoSales
     ? { cashAmount: autoSales.cashAmount, qrAmount: autoSales.qrAmount, totalAmount: autoSales.totalAmount, orderCount: autoSales.orderCount, source: autoSales.source,
-      ...((autoSales.refundCount ?? 0) > 0 ? { grossCashAmount: autoSales.grossCashAmount, grossQrAmount: autoSales.grossQrAmount, cashRefundAmount: autoSales.cashRefundAmount, refundCount: autoSales.refundCount } : {}),
+      ...((autoSales.refundCount ?? 0) > 0 ? { grossCashAmount: autoSales.grossCashAmount, grossQrAmount: autoSales.grossQrAmount, cashRefundAmount: autoSales.cashRefundAmount, refundCount: autoSales.refundCount,qrRefundAmount:autoSales.qrRefundAmount,unallocatedRefundAmount:autoSales.unallocatedRefundAmount,generalReturnedAmount:autoSales.generalReturnedAmount } : {}),
       ...((autoSales.estimatedAmount ?? 0) > 0 ? { estimatedAmount: autoSales.estimatedAmount, recordedAmount: autoSales.recordedAmount } : {}),
     }
     : null;
@@ -922,7 +947,7 @@ internalApi.get("/internal/luggage-cash-closings/:closingId/edit-snapshot", asyn
   const row = await readCashClosingRow(c.env, closingId);
   if (!row) return c.json({ error: "Cash closing not found" }, 404);
   const snapshot = cashClosingSnapshotOf(row);
-  const previousActualQrAmount = (snapshot.actualQrAmount || 0) || (snapshot.paypayAmount || 0);
+  const previousActualQrAmount = snapshot.qrGrossAmount!=null?snapshot.actualQrAmount:(snapshot.actualQrAmount || 0) || (snapshot.paypayAmount || 0);
   return c.json({
     snapshot,
     editable: snapshot.workflowStatus === "SUBMITTED",
@@ -981,20 +1006,20 @@ internalApi.post("/internal/luggage-cash-closings", async (c) => {
         `INSERT INTO luggage_cash_closings (
            business_date, closing_type, workflow_status,
            ${CASH_CLOSING_DENOMS.map((d) => `count_${d}`).join(", ")},
-           total_amount, paypay_amount, actual_qr_amount,
+           total_amount, paypay_amount, actual_qr_amount,qr_gross_amount,qr_return_amount,
            actual_amount, check_auto_amount, expected_amount,
            difference_amount, qr_difference_amount,
            rental_cash, wand_refund, floor_4f_count, floor_8f_count,
            staff_id, note
          )
-         SELECT ?, ?, 'SUBMITTED', ${CASH_CLOSING_DENOMS.map(() => "?").join(", ")}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         SELECT ?, ?, 'SUBMITTED', ${CASH_CLOSING_DENOMS.map(() => "?").join(", ")}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
          WHERE NOT EXISTS (
            SELECT 1 FROM luggage_cash_closing_audits WHERE action = 'SUBMIT' AND instr(payload, ?) > 0
          )
          RETURNING ${CASH_CLOSING_RAW_COLUMNS}`,
       ).bind(
         businessDate, normalized.closingType, ...normalized.counts,
-        computed.totalAmount, computed.paypayAmount, computed.actualQrForTotal,
+        computed.totalAmount, computed.paypayAmount, computed.actualQrForTotal,computed.qrGrossAmount,computed.qrReturnAmount,
         computed.actualAmount, computed.checkAutoAmount, computed.expectedAmount,
         computed.differenceAmount, computed.qrDifferenceAmount,
         normalized.rentalCash, normalized.wandRefund, normalized.floor4fCount, normalized.floor8fCount,
@@ -1066,7 +1091,7 @@ internalApi.patch("/internal/luggage-cash-closings/:closingId", async (c) => {
       c.env.DB.prepare(
         `UPDATE luggage_cash_closings SET
            ${CASH_CLOSING_DENOMS.map((d) => `count_${d} = ?`).join(", ")},
-           total_amount = ?, paypay_amount = ?, actual_qr_amount = ?,
+           total_amount = ?, paypay_amount = ?, actual_qr_amount = ?,qr_gross_amount=?,qr_return_amount=?,
            actual_amount = ?, difference_amount = ?, qr_difference_amount = ?,
            rental_cash = ?, wand_refund = ?, floor_4f_count = ?, floor_8f_count = ?,
            note = ?, updated_at = datetime('now')
@@ -1074,7 +1099,7 @@ internalApi.patch("/internal/luggage-cash-closings/:closingId", async (c) => {
          RETURNING ${CASH_CLOSING_RAW_COLUMNS}`,
       ).bind(
         ...normalized.counts,
-        computed.totalAmount, computed.paypayAmount, computed.actualQrForTotal,
+        computed.totalAmount, computed.paypayAmount, computed.actualQrForTotal,computed.qrGrossAmount,computed.qrReturnAmount,
         computed.actualAmount, computed.differenceAmount, computed.qrDifferenceAmount,
         normalized.rentalCash, normalized.wandRefund, normalized.floor4fCount, normalized.floor8fCount,
         normalized.note, closingId, ...cashClosingSnapshotBinds(before),
@@ -2172,7 +2197,7 @@ internalApi.get("/internal/luggage-orders", async (c) => {
     SELECT order_id,
            COALESCE(SUM(CASE WHEN tender_type = 'CASH' THEN amount ELSE 0 END), 0) AS paymentCashAmount,
            COALESCE(SUM(CASE WHEN tender_type = 'PAY_QR' THEN amount ELSE 0 END), 0) AS paymentQrAmount
-    FROM luggage_order_payments
+    FROM ${await effectivePaymentTable(c.env.DB)}
     GROUP BY order_id
   `;
   const result = await c.env.DB.prepare(
@@ -4501,3 +4526,8 @@ internalApi.patch("/internal/experience/:externalId", async (c) => {
 });
 
 export default internalApi;
+
+// A fixed identifier selected from schema metadata permits rolling deployment and historical fixtures.
+async function effectivePaymentTable(db:D1Database):Promise<'luggage_effective_payments'|'luggage_order_payments'>{
+ return await db.prepare("SELECT 1 FROM sqlite_master WHERE type='view' AND name='luggage_effective_payments'").first()?'luggage_effective_payments':'luggage_order_payments';
+}

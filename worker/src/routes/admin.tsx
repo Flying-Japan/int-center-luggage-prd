@@ -80,9 +80,8 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
       `SELECT business_date as sale_date, revenue_krw FROM luggage_naver_rental_daily_sales${rentalWhereClause} ORDER BY business_date DESC`
     ).bind(...params).all<{ sale_date: string; revenue_krw: number }>(),
     c.env.DB.prepare(
-      `SELECT business_date AS sale_date, people AS order_count, suitcase_total, backpack_total, cash_refund_amount,
-        cash, qr, total_amount AS luggage_total FROM luggage_sales_daily WHERE business_date BETWEEN ? AND ?`
-    ).bind(...actualParams).all<{ sale_date: string; order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number; cash_refund_amount?: number }>(),
+      `SELECT *, business_date AS sale_date, people AS order_count, total_amount AS luggage_total FROM luggage_sales_daily WHERE business_date BETWEEN ? AND ?`
+    ).bind(...actualParams).all<{ sale_date: string; order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number; cash_refund_amount?: number;unallocated_refund_amount?:number;staff_correction_count?:number }>(),
     c.env.DB.prepare(
       `SELECT c.business_date as sale_date, c.total_amount, c.paypay_amount, c.actual_qr_amount, COALESCE(rs.cash_refund_amount,0) as refund_amount, rs.net_cash as refund_net_cash, rs.gross_qr as refund_gross_qr, rs.net_total as refund_net_total
        FROM luggage_cash_closings c LEFT JOIN luggage_cash_closing_refund_snapshots rs ON rs.closing_id = c.closing_id
@@ -98,12 +97,12 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
   }
 
   // Build lookup map for actual luggage data by date
-  const actualByDate = new Map<string, { order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number; cash_refund_amount?: number }>();
+  const actualByDate = new Map<string, { order_count: number; suitcase_total: number; backpack_total: number; cash: number; qr: number; luggage_total: number; cash_refund_amount?: number;unallocated_refund_amount?:number;staff_correction_count?:number }>();
   for (const row of actualLuggageRows.results) {
     actualByDate.set(row.sale_date, row);
   }
 
-  const finalClosingByDate = new Map<string, { cash: number; qr: number; luggage_total: number; cash_refund_amount?: number }>();
+  const finalClosingByDate = new Map<string, { cash: number; qr: number; luggage_total: number; cash_refund_amount?: number;unallocated_refund_amount?:number;staff_correction_count?:number }>();
   for (const row of finalClosingRows.results) {
     const cash = row.refund_amount > 0 ? row.refund_net_cash : Math.max(0, (row.total_amount || 0) - STARTING_FLOAT);
     const qr = row.refund_amount > 0 ? row.refund_gross_qr : row.actual_qr_amount || row.paypay_amount || 0;
@@ -116,7 +115,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     sheetByDate.set(r.sale_date, r);
   }
 
-  interface MergedRow { date: string; dateJP: string; orders: number; suitcases: number; backpacks: number; cash: number; qr: number; luggage: number; cashRefundAmount: number; rentalKrw: number; isSettled?: boolean; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
+  interface MergedRow { date: string; dateJP: string; orders: number; suitcases: number; backpacks: number; cash: number; qr: number; luggage: number; cashRefundAmount: number; unallocatedRefundAmount:number; rentalKrw: number; isSettled?: boolean; isWeekend: boolean; jpHoliday: string | null; krHoliday: string | null; }
   // Build rows from all data sources
   const allDates = new Set([
     ...actualLuggageRows.results.map(r => r.sale_date),
@@ -132,10 +131,10 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     const finalClosing = finalClosingByDate.get(date);
     // Final cash closing is the source of truth for settled past dates.
     // Orders remain useful for counts/items, but their customer-selected payment method can be wrong.
-    const useFinalClosing = !!finalClosing && date !== todayJST;
+    const useFinalClosing = !(actual?.staff_correction_count??0) && !!finalClosing && date !== todayJST;
     const cash = useFinalClosing ? finalClosing.cash : actual ? actual.cash : (sheet?.cash || 0);
     const qr = useFinalClosing ? finalClosing.qr : actual ? actual.qr : (sheet?.qr || 0);
-    const luggage = useFinalClosing ? finalClosing.luggage_total : cash + qr;
+    const luggage = useFinalClosing ? finalClosing.luggage_total : actual ? actual.luggage_total : cash + qr;
     // Before ~3/30 migration, companion_count/backpack_qty were 0 in DB.
     // Use sheet people count when it's higher (includes companions).
     const dbPeople = actual?.order_count || 0;
@@ -152,7 +151,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
       cash,
       qr,
       luggage,
-      cashRefundAmount: actual?.cash_refund_amount || 0,
+      cashRefundAmount: actual?.cash_refund_amount || 0,unallocatedRefundAmount:actual?.unallocated_refund_amount||0,
       rentalKrw,
       isSettled: useFinalClosing,
       isWeekend: flags.isWeekend,
@@ -183,8 +182,8 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
 
   // Real-time luggage breakdown for today (for mergedRows override)
   const todayLuggageRT = await c.env.DB.prepare(
-    `SELECT people, cash, qr, cash_refund_amount, total_amount AS luggage_total FROM luggage_sales_daily WHERE business_date = ?`
-  ).bind(todayJST).first<{ people: number; cash: number; qr: number; luggage_total: number; cash_refund_amount?: number }>();
+    `SELECT *, total_amount AS luggage_total FROM luggage_sales_daily WHERE business_date = ?`
+  ).bind(todayJST).first<{ people: number; cash: number; qr: number; luggage_total: number; cash_refund_amount?: number;unallocated_refund_amount?:number;staff_correction_count?:number }>();
   const tlrt = {
     people: Number(todayLuggageRT?.people ?? 0),
     cash: Number(todayLuggageRT?.cash ?? 0),
@@ -206,7 +205,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
     cash: tlrt.cash,
     qr: tlrt.qr,
     luggage: tlrt.luggage_total,
-    cashRefundAmount: Number(todayLuggageRT?.cash_refund_amount || 0),
+    cashRefundAmount: Number(todayLuggageRT?.cash_refund_amount || 0),unallocatedRefundAmount:Number(todayLuggageRT?.unallocated_refund_amount||0),
     rentalKrw: todayRentalKrw,
     isWeekend: todayFlags.isWeekend,
     jpHoliday: todayFlags.jp,
@@ -271,6 +270,7 @@ admin.get("/staff/admin/sales", staffAuth, async (c) => {
         {successMsg && <p class="success-note" id="page-alert" role="alert">{successMsg}</p>}
         {errorMsg && <p class="error" id="page-alert" role="alert">{errorMsg}</p>}
         <section class="hero"><div><p class="hero-kicker">Admin</p><h2 class="hero-title">매출 분석</h2></div><a href="/staff/admin/sales/heatmap" class="btn btn-sm" style="font-size:12px;margin-top:8px;align-self:flex-start">시간대별 히트맵 →</a></section>
+        {mergedRows.some(r=>r.unallocatedRefundAmount>0)&&<p role="alert">반환수단 미상 ¥{mergedRows.reduce((sum,r)=>sum+r.unallocatedRefundAmount,0).toLocaleString()}은 순매출에 반영했으며 현금·QR에 임의 배분하지 않았습니다. 수단별 정산은 정정 이력에서 확인해주세요.</p>}
 
         <section style="margin-bottom:16px;padding:16px;background:#fff;border:1px solid #e2e8f0;border-radius:12px">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">

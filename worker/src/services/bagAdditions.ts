@@ -100,7 +100,7 @@ export async function previewBagAddition(db: D1Database, orderId: string, input:
         fail('RELATED_HISTORY_REVIEW_REQUIRED', '기존 연장 주문 또는 진행 중인 환급을 먼저 확인해주세요');
     if (closing)
         fail('DAY_CLOSED', '최종 마감된 영업일에는 추가 짐을 등록할 수 없습니다');
-    if (!billing || billing.invalid_amount || billing.root_review_required || billing.outstanding_amount || billing.unbilled_days || billing.legacy_paid_estimate || billing.pending_refund_count || billing.recorded_amount !== billing.total_billed_amount)
+    if (!billing || billing.invalid_amount || billing.root_review_required || billing.outstanding_amount || billing.unbilled_days || billing.legacy_paid_estimate || billing.pending_refund_count || billing.net_received_amount !== billing.total_effective_billed_amount)
         fail('BILLING_CONFLICT', '기존 청구·수납을 먼저 확인해주세요');
     const added = history.results.reduce((a, b) => ({ suitcase: a.suitcase + b.suitcase_added, backpack: a.backpack + b.backpack_added, set: a.set + b.set_added, daily: a.daily + b.batch_price_per_day }), { suitcase: 0, backpack: 0, set: 0, daily: 0 });
     if (root.suitcase_qty - added.suitcase < 0 || root.backpack_qty - added.backpack < 0 || root.suitcase_qty + root.backpack_qty - added.suitcase - added.backpack < 1)
@@ -178,10 +178,11 @@ export async function registerBagAddition(db: D1Database, orderId: string, input
         for (const r of receipts)
             statements.push(db.prepare(`INSERT INTO luggage_order_payments(order_id,business_date,tender_type,amount,staff_id,recorded_at,receipt_request_id)
       VALUES(?,?,?,?,?,?,?)`).bind(orderId, quote.businessDate, r.tender, r.amount, who.staffId, createdAt, input.additionId));
+        const paymentReadTable=(quote[SNAPSHOT].billing.staff_correction_count??0)>0?'luggage_effective_payments':'luggage_order_payments';
         statements.push(db.prepare(`UPDATE luggage_orders SET payment_method=CASE
-      WHEN EXISTS(SELECT 1 FROM luggage_order_payments WHERE order_id=? AND tender_type='CASH')
-        AND EXISTS(SELECT 1 FROM luggage_order_payments WHERE order_id=? AND tender_type='PAY_QR') THEN 'MIXED'
-      WHEN EXISTS(SELECT 1 FROM luggage_order_payments WHERE order_id=? AND tender_type='PAY_QR') THEN 'PAY_QR' ELSE 'CASH' END WHERE order_id=?`).bind(orderId, orderId, orderId, orderId));
+      WHEN EXISTS(SELECT 1 FROM ${paymentReadTable} WHERE order_id=? AND tender_type='CASH')
+        AND EXISTS(SELECT 1 FROM ${paymentReadTable} WHERE order_id=? AND tender_type='PAY_QR') THEN 'MIXED'
+      WHEN EXISTS(SELECT 1 FROM ${paymentReadTable} WHERE order_id=? AND tender_type='PAY_QR') THEN 'PAY_QR' ELSE 'CASH' END WHERE order_id=?`).bind(orderId, orderId, orderId, orderId));
     }
     statements.push(db.prepare(`SELECT json_extract('{}', CASE WHEN EXISTS (
     SELECT 1 FROM luggage_bag_additions a JOIN luggage_orders o ON o.order_id=a.order_id
@@ -214,7 +215,7 @@ export async function collectBagAddition(db: D1Database, orderId: string, who: B
     cashAmount: number;
     qrAmount: number;
     confirmReceived: true;
-}) {
+}, allowStaffCorrection = false) {
     if (!UUID.test(input.requestId) || input.confirmReceived !== true || !who.staffId?.trim()
         || [input.expectedAmount, input.cashAmount, input.qrAmount].some(n => !Number.isSafeInteger(n) || n < 0 || n > 500000)
         || input.expectedAmount <= 0 || input.cashAmount + input.qrAmount !== input.expectedAmount)
@@ -246,10 +247,10 @@ export async function collectBagAddition(db: D1Database, orderId: string, who: B
     const prior = await replay();
     if (prior)
         return prior;
-    if (!await db.prepare('SELECT 1 FROM luggage_bag_additions WHERE order_id=? LIMIT 1').bind(orderId).first())
+    if (!await db.prepare('SELECT 1 FROM luggage_bag_additions WHERE order_id=? LIMIT 1').bind(orderId).first() && !(allowStaffCorrection && await db.prepare('SELECT 1 FROM luggage_staff_corrections WHERE order_id=? LIMIT 1').bind(orderId).first()))
         fail('NOT_FOUND', '추가 짐 청구가 없는 주문입니다', 404);
     try {
-        return { ...await confirmCollection(db, orderId, who.staffId, { request_id: input.requestId, confirm_received: 'yes', expected_amount: input.expectedAmount, cash_amount: input.cashAmount, qr_amount: input.qrAmount }, { actor: who.actor, finalStatements: who.nameStatements }), replayed: false };
+        return { ...await confirmCollection(db, orderId, who.staffId, { request_id: input.requestId, confirm_received: 'yes', expected_amount: input.expectedAmount, cash_amount: input.cashAmount, qr_amount: input.qrAmount }, { actor: who.actor, finalStatements: who.nameStatements, verifyAtomic:allowStaffCorrection }), replayed: false };
     }
     catch (error) {
         const found = await replay();

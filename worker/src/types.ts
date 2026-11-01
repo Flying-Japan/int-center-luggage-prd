@@ -16,6 +16,7 @@ export type Env = {
   // Default OFF. Public routes stay hard-gated until phase-3 UI and operational validation are complete.
   LUGGAGE_FLYING_PASS_REFUNDS_ENABLED?: string;
   LUGGAGE_BAG_ADDITIONS_ENABLED?: string;
+  LUGGAGE_STAFF_CORRECTIONS_ENABLED?: string;
 
   // Supabase (staff auth + staff profiles)
   SUPABASE_URL: string;

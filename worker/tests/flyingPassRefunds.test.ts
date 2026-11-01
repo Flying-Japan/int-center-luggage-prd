@@ -93,6 +93,8 @@ async function setup(options: { status?: string; manual?: number | null; receipt
   // Existing operational closing columns are outside the historical base schema, as in cashClosing.test.ts.
   await db.prepare('ALTER TABLE luggage_cash_closings ADD COLUMN rental_cash INTEGER DEFAULT 0').run();
   await db.prepare('ALTER TABLE luggage_cash_closings ADD COLUMN wand_refund INTEGER DEFAULT 0').run();
+  const closingCols=(await db.prepare('PRAGMA table_info(luggage_cash_closings)').all<{name:string}>()).results;
+  if(!closingCols.some(c=>c.name==='qr_gross_amount')){await db.prepare('ALTER TABLE luggage_cash_closings ADD COLUMN qr_gross_amount INTEGER').run();await db.prepare('ALTER TABLE luggage_cash_closings ADD COLUMN qr_return_amount INTEGER NOT NULL DEFAULT 0').run();}
   const amount = options.amount ?? 1600;
   await db.prepare(`INSERT INTO luggage_orders(order_id, created_at, expected_pickup_at, expected_storage_days, price_per_day, suitcase_qty,
     prepaid_amount, final_amount, status, payment_method, staff_prepaid_override_amount, flying_pass_tier, flying_pass_discount_amount)

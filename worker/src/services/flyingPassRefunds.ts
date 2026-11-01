@@ -101,7 +101,7 @@ async function quote(c: Context, target: FlyingPassTier, now: Date): Promise<Ref
     + (c.billing.bag_addition_discounted_amount ?? 0);
   const afterAmount = Math.max(0,base-flyingPassDiscountAmount(base,target));
   const amount = beforeAmount - afterAmount;
-  if (!yen(afterAmount) || !yen(amount) || amount === 0) fail('NO_REFUND_DUE', '추가 환급 가능한 할인 차액이 없습니다');
+  if (!yen(afterAmount) || !yen(amount) || amount === 0 || amount>c.billing.total_effective_billed_amount || amount>c.billing.net_received_amount) fail('NO_REFUND_DUE', '추가 환급 가능한 할인 차액이 없습니다');
   return { orderId: c.root.order_id, fingerprint: await sha256(c.snapshots), previousRefundId: last?.refund_id ?? null,
     beforeTier: last?.after_tier ?? c.root.flying_pass_tier, afterTier: target, originalAmount,
     beforeAmount, afterAmount, amount, businessDate: jstDay(now), currency: 'JPY', refundMethod: 'CASH' };

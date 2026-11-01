@@ -246,6 +246,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
           {/* Actions card */}
           <section class="card">
             <h3 class="card-title">업무 처리</h3>
+            {(staff.role==='admin'||staff.role==='editor') && !order.parent_order_id && c.env.LUGGAGE_STAFF_CORRECTIONS_ENABLED==='true' && <p><a class="btn btn-secondary" href={`/staff/orders/${orderId}/corrections`}>금액·수량 정정 내역</a></p>}
             {(staff.role==='admin'||staff.role==='editor') && !order.parent_order_id && (c.env.LUGGAGE_BAG_ADDITIONS_ENABLED==='true'||(billing?.bag_addition_amount??0)>0) && <p><a class="btn btn-secondary" href={`/staff/orders/${orderId}/bag-additions`}>추가 짐·추가 수납</a></p>}
             <div class="detail-action-grid">
               {/* 결제 처리 */}
@@ -253,6 +254,7 @@ staffOrders.get("/staff/orders/:id", async (c) => {
                 <h4 class="detail-action-title">결제 처리</h4>
                 {billing && <div class="card-desc">
                   <p>원주문 + 연장 청구 기록(정산 검토 포함) ¥{billing.total_billed_amount.toLocaleString()} / 실제 수납 ¥{billing.recorded_amount.toLocaleString()}</p>
+                  {(billing.general_return_count??0)>0&&<p>이미 반환 ¥{(billing.general_returned_amount??0).toLocaleString()} / 순수납 ¥{billing.net_received_amount.toLocaleString()} / 반환수단 미상 ¥{(billing.unallocated_returned_amount??0).toLocaleString()}</p>}
                   {billing.legacy_paid_estimate > 0 && <p>기존 결제완료 추정 ¥{billing.legacy_paid_estimate.toLocaleString()} (수납 원장 없는 과거 주문)</p>}
                   <p><strong>확정 미수납 ¥{billing.outstanding_amount.toLocaleString()}</strong></p>
                   {!!billing.root_review_required && <div role="note">

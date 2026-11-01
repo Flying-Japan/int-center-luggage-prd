@@ -24,6 +24,8 @@ export type CashClosingUpdatePayload = CashClosingInputFields & { expected: Cash
 
 // Stored values of a closing as the edit screen reads them. Also the stale token for edits.
 export type CashClosingSnapshot = {
+  qrGrossAmount?:number|null;
+  qrReturnAmount?:number;
   closingId: number;
   businessDate: string | null;
   closingType: string;
@@ -46,6 +48,8 @@ export type CashClosingSnapshot = {
 };
 
 export type CashClosingComputed = {
+  qrGrossAmount:number;
+  qrReturnAmount:number;
   totalAmount: number;
   paypayAmount: number;
   actualQrForTotal: number;
@@ -116,7 +120,7 @@ export function normalizeCashClosingUpdatePayload(payload: unknown): CashClosing
   if (!isPlainRecord(payload)) throw new Error("Body must be an object");
   assertOnlyKeys(payload, [...INPUT_KEYS, "expected", "actor"], "Body");
   if (!isPlainRecord(payload.expected)) throw new Error("expected is required");
-  assertOnlyKeys(payload.expected, SNAPSHOT_KEYS, "expected");
+  assertOnlyKeys(payload.expected, [...SNAPSHOT_KEYS,"qrGrossAmount","qrReturnAmount"], "expected");
   for (const key of SNAPSHOT_KEYS) if (!(key in payload.expected)) throw new Error(`expected.${key} is required`);
   return { ...inputFields(payload), expected: payload.expected as CashClosingSnapshot, actor: normalizeUnifiedWriteActor(payload.actor) };
 }
@@ -132,11 +136,13 @@ export function computeCashClosingCreate(fields: CashClosingInputFields, autoSal
   const totalAmount = cashTotal(fields.counts);
   const checkAutoAmount = autoSales?.totalAmount ?? 0;
   const expectedAmount = checkAutoAmount;
-  const actualQrForTotal = fields.actualQrAmount || fields.paypayAmount;
+  const qrGrossAmount=fields.actualQrAmount || fields.paypayAmount;
+  const qrReturnAmount=autoSales?.qrRefundAmount??0;
+  const actualQrForTotal = qrGrossAmount-qrReturnAmount;
   const actualAmount = (totalAmount - CASH_CLOSING_STARTING_FLOAT) + actualQrForTotal;
   return {
     totalAmount,
-    paypayAmount: fields.paypayAmount,
+    paypayAmount: fields.paypayAmount,qrGrossAmount,qrReturnAmount,
     actualQrForTotal,
     actualAmount,
     checkAutoAmount,
@@ -152,13 +158,15 @@ export function computeCashClosingEdit(fields: CashClosingInputFields, stored: C
   const totalAmount = cashTotal(fields.counts);
   const checkAutoAmount = stored.checkAutoAmount || 0;
   const expectedAmount = stored.expectedAmount || 0;
-  const actualQrForTotal = fields.actualQrAmount || fields.paypayAmount;
+  const qrGrossAmount=fields.actualQrAmount || fields.paypayAmount;
+  const qrReturnAmount=stored.qrReturnAmount??0;
+  const actualQrForTotal=qrGrossAmount-qrReturnAmount;
   const actualAmount = (totalAmount - CASH_CLOSING_STARTING_FLOAT) + actualQrForTotal;
-  const previousActualQrAmount = (stored.actualQrAmount || 0) || (stored.paypayAmount || 0);
+  const previousActualQrAmount = stored.qrGrossAmount!=null ? stored.actualQrAmount : ((stored.actualQrAmount || 0) || (stored.paypayAmount || 0));
   const expectedQrAmount = previousActualQrAmount - (stored.qrDifferenceAmount || 0);
   return {
     totalAmount,
-    paypayAmount: fields.paypayAmount,
+    paypayAmount: fields.paypayAmount,qrGrossAmount,qrReturnAmount,
     actualQrForTotal,
     actualAmount,
     checkAutoAmount,
@@ -171,7 +179,7 @@ export function computeCashClosingEdit(fields: CashClosingInputFields, stored: C
 
 export const CASH_CLOSING_RAW_COLUMNS = `closing_id AS closingId, business_date AS businessDate, closing_type AS closingType,
   workflow_status AS workflowStatus, ${CASH_CLOSING_DENOMS.map((d) => `count_${d} AS count${d}`).join(", ")},
-  total_amount AS totalAmount, paypay_amount AS paypayAmount, actual_qr_amount AS actualQrAmount,
+  qr_gross_amount AS qrGrossAmount,qr_return_amount AS qrReturnAmount,total_amount AS totalAmount, paypay_amount AS paypayAmount, actual_qr_amount AS actualQrAmount,
   qr_difference_amount AS qrDifferenceAmount, check_auto_amount AS checkAutoAmount, expected_amount AS expectedAmount,
   actual_amount AS actualAmount, difference_amount AS differenceAmount, rental_cash AS rentalCash, wand_refund AS wandRefund,
   floor_4f_count AS floor4fCount, floor_8f_count AS floor8fCount, note, updated_at AS updatedAt`;
@@ -180,6 +188,7 @@ export function cashClosingSnapshotOf(row: Record<string, unknown>): CashClosing
   const num = (key: string) => Number(row[key]);
   const nullableNum = (key: string) => (row[key] === null || row[key] === undefined ? null : Number(row[key]));
   return {
+    ...(row.qrGrossAmount!=null?{qrGrossAmount:Number(row.qrGrossAmount),qrReturnAmount:Number(row.qrReturnAmount??0)}:{}),
     closingId: num("closingId"),
     businessDate: (row.businessDate as string | null) ?? null,
     closingType: String(row.closingType),
@@ -203,21 +212,21 @@ export function cashClosingSnapshotOf(row: Record<string, unknown>): CashClosing
 }
 
 export function sameCashClosingSnapshot(current: CashClosingSnapshot, expected: CashClosingSnapshot): boolean {
-  return SNAPSHOT_KEYS.every((key) => JSON.stringify(current[key]) === JSON.stringify(expected[key]));
+  return current.qrGrossAmount===expected.qrGrossAmount && (current.qrReturnAmount??0)===(expected.qrReturnAmount??0) && SNAPSHOT_KEYS.every((key) => JSON.stringify(current[key]) === JSON.stringify(expected[key]));
 }
 
 // Re-checks updated_at AND every stored value inside the UPDATE, so an edit made within the same
 // second (same updated_at) by the staff screen is still detected.
 export const CASH_CLOSING_SNAPSHOT_WHERE = `business_date IS ? AND closing_type IS ? AND workflow_status IS ?
   AND ${CASH_CLOSING_DENOMS.map((d) => `count_${d} IS ?`).join(" AND ")}
-  AND total_amount IS ? AND paypay_amount IS ? AND actual_qr_amount IS ? AND qr_difference_amount IS ?
+  AND qr_gross_amount IS ? AND qr_return_amount IS ? AND total_amount IS ? AND paypay_amount IS ? AND actual_qr_amount IS ? AND qr_difference_amount IS ?
   AND check_auto_amount IS ? AND expected_amount IS ? AND actual_amount IS ? AND difference_amount IS ?
   AND rental_cash IS ? AND wand_refund IS ? AND floor_4f_count IS ? AND floor_8f_count IS ? AND note IS ? AND updated_at IS ?`;
 
 export function cashClosingSnapshotBinds(s: CashClosingSnapshot): Array<string | number | null> {
   return [
     s.businessDate, s.closingType, s.workflowStatus, ...s.counts,
-    s.totalAmount, s.paypayAmount, s.actualQrAmount, s.qrDifferenceAmount,
+    s.qrGrossAmount??null,s.qrReturnAmount??0,s.totalAmount, s.paypayAmount, s.actualQrAmount, s.qrDifferenceAmount,
     s.checkAutoAmount, s.expectedAmount, s.actualAmount, s.differenceAmount,
     s.rentalCash, s.wandRefund, s.floor4fCount, s.floor8fCount, s.note, s.updatedAt,
   ];

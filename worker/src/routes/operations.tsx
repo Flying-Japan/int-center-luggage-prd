@@ -9,7 +9,7 @@ import { formatDateJST } from "../services/storage";
 import { StaffTopbar, NewOrderAlert } from "../lib/components";
 import { fetchStaffNamesByIds, fetchStaffProfilesByIds } from "../lib/staffProfiles";
 import { createSupabaseAdmin } from "../lib/supabase";
-import { CASH_CLOSING_STARTING_FLOAT as STARTING_FLOAT, resolveAutoSalesSummariesByDate, resolveAutoSalesSummaryForDate } from "../services/cashClosingSales";
+import { CASH_CLOSING_STARTING_FLOAT as STARTING_FLOAT, resolveClosingReturnBasis, resolveAutoSalesSummariesByDate, resolveAutoSalesSummaryForDate } from "../services/cashClosingSales";
 
 import { ExperienceRentalForm, ExperienceRentalSummary } from "../lib/experienceRentalForm";
 import { parseExperienceRentals, insertExperienceRentals, type ExperienceRental } from "../services/experienceRentals";
@@ -154,13 +154,13 @@ ops.get("/staff/cash-closing", async (c) => {
 
               <div class="grid2">
                 <label class="field">
-                  <span class="field-label">PayPay 금액</span>
+                  <span class="field-label">PayPay 당일 수납총액</span>
                   <input class="control" type="number" name="paypay_amount" value="0" />
                 </label>
                 <label class="field">
-                  <span class="field-label">QR결제 실수령액 (PayPay 포함)</span>
+                  <span class="field-label">QR 당일 수납총액 (PayPay 포함)</span>
                   <input class="control" type="number" name="actual_qr_amount" value="0" />
-                  <small style="color:#666;font-size:11px;margin-top:2px">PayPay + 카카오페이 + 기타 QR결제 실수령 합계</small>
+                  <small style="color:#666;font-size:11px;margin-top:2px">반환 전 PayPay + 카카오페이 + 기타 QR 당일 수납 합계. 기록된 QR 반환을 차감해 순액을 계산합니다.</small>
                 </label>
               </div>
 
@@ -358,7 +358,9 @@ ops.post("/staff/cash-closing", editorAuth, async (c) => {
   const autoSales = await resolveAutoSalesSummaryForDate(c.env.DB, businessDate);
   const checkAutoAmount = autoSales?.totalAmount ?? 0;
   const expectedAmount = checkAutoAmount;
-  const actualQrForTotal = actualQrAmount || paypayAmount;
+  const qrGrossAmount=actualQrAmount||paypayAmount;
+  const qrReturnAmount=autoSales?.qrRefundAmount??0;
+  const actualQrForTotal=qrGrossAmount-qrReturnAmount;
   const actualAmount = (totalAmount - STARTING_FLOAT) + actualQrForTotal;
   const differenceAmount = actualAmount - expectedAmount;
   const qrDifferenceAmount = actualQrForTotal - (autoSales?.qrAmount ?? 0);
@@ -371,17 +373,17 @@ ops.post("/staff/cash-closing", editorAuth, async (c) => {
        business_date, closing_type, workflow_status,
        count_10000, count_5000, count_2000, count_1000, count_500,
        count_100, count_50, count_10, count_5, count_1,
-       total_amount, paypay_amount, actual_qr_amount,
+       total_amount, paypay_amount, actual_qr_amount,qr_gross_amount,qr_return_amount,
        actual_amount, check_auto_amount, expected_amount,
        difference_amount, qr_difference_amount,
        rental_cash, wand_refund,
        floor_4f_count, floor_8f_count,
        staff_id, note
-     ) VALUES (?, ?, 'SUBMITTED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     ) VALUES (?, ?, 'SUBMITTED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       businessDate, closingType,
-      ...denomValues, totalAmount, paypayAmount, actualQrForTotal,
+      ...denomValues, totalAmount, paypayAmount, actualQrForTotal,qrGrossAmount,qrReturnAmount,
       actualAmount, checkAutoAmount, expectedAmount,
       differenceAmount, qrDifferenceAmount,
       rentalCash, wandRefund,
@@ -452,10 +454,16 @@ ops.get("/staff/cash-closing/:id", async (c) => {
   const cl = closing as Record<string, unknown>;
   const autoAmount = Number(cl.check_auto_amount) || 0;
   const differenceAmount = Number(cl.difference_amount) || 0;
-  const effectiveActualQrAmount = ((cl.actual_qr_amount as number) || 0) || ((cl.paypay_amount as number) || 0);
-  const qrDifferenceAmount = Number(cl.qr_difference_amount) || 0;
-  const currentDifference = autoSales ? (Number(cl.actual_amount) || 0) - autoSales.totalAmount : undefined;
-  const currentQrDifference = autoSales ? effectiveActualQrAmount - autoSales.qrAmount : undefined;
+  const generalSnapshot=cl.qr_gross_amount!=null&&await c.env.DB.prepare("SELECT 1 FROM sqlite_master WHERE name='luggage_general_closing_snapshots' AND type='table'").first()?await c.env.DB.prepare('SELECT snapshot_json FROM luggage_general_closing_snapshots WHERE closing_id=?').bind(Number(cl.closing_id)).first<{snapshot_json:string}>():null;
+  const returnBasis=generalSnapshot?await resolveClosingReturnBasis(c.env.DB,generalSnapshot.snapshot_json):null;
+  const currentQrReturned=returnBasis?.resolvedQrReturned??Number(cl.qr_return_amount??0);
+  const effectiveActualQrAmount=cl.qr_gross_amount!=null?Number(cl.qr_gross_amount)-currentQrReturned:((cl.actual_qr_amount as number)||0)||((cl.paypay_amount as number)||0);
+  const currentActualAmount=returnBasis?Number(cl.total_amount)-STARTING_FLOAT+effectiveActualQrAmount:Number(cl.actual_amount)||0;
+  const unallocatedReturned=Math.max(autoSales?.unallocatedRefundAmount??0,returnBasis?.snapshotUnallocated??0);
+  const qrDifferenceAmount=Number(cl.qr_difference_amount)||0;
+  const currentDifference=autoSales&&!unallocatedReturned?currentActualAmount-autoSales.totalAmount:undefined;
+  const currentQrDifference=autoSales&&!unallocatedReturned?effectiveActualQrAmount-autoSales.qrAmount:undefined;
+  const postCorrections=await c.env.DB.prepare("SELECT 1 FROM sqlite_master WHERE name='luggage_staff_corrections' AND type='table'").first()?await c.env.DB.prepare(`SELECT * FROM luggage_staff_corrections c WHERE julianday(c.recorded_at)>julianday(?) AND (c.return_business_date=? OR EXISTS(SELECT 1 FROM luggage_order_payments p JOIN luggage_orders o ON o.order_id=p.order_id WHERE COALESCE(o.parent_order_id,o.order_id)=c.order_id AND p.business_date=?) OR EXISTS(SELECT 1 FROM json_each(c.return_allocations_json) a JOIN luggage_correction_returns r ON r.correction_id=json_extract(a.value,'$.correctionId') WHERE r.business_date=?)) ORDER BY c.recorded_at,c.sequence`).bind(String(cl.created_at),String(cl.business_date),String(cl.business_date),String(cl.business_date)).all<Record<string,unknown>>():{results:[]};
   const closingStaffName = (cl.staff_id as string | null)
     ? cashClosingStaffNameMap.get(cl.staff_id as string) || (cl.owner_name as string) || "-"
     : (cl.owner_name as string) || "-";
@@ -483,6 +491,7 @@ ops.get("/staff/cash-closing/:id", async (c) => {
                 <p class="stat-label">마감 저장 매출 <span title="마감에 저장된 자동매출입니다. 현재 집계와 별도로 표시합니다." style="cursor:help;color:#94a3b8;font-size:10px">(?)</span></p>
                 <p class="stat-value">¥{autoAmount.toLocaleString()}</p>
                 <ClosingCurrentValue saved={autoAmount} current={autoSales?.totalAmount} />
+                {cl.qr_gross_amount!=null&&<p>QR 당일 수납총액 ¥{Number(cl.qr_gross_amount).toLocaleString()} − QR 반환 ¥{currentQrReturned.toLocaleString()} = 순액 ¥{effectiveActualQrAmount.toLocaleString()}</p>}{unallocatedReturned>0&&<p role="alert">반환수단 미상 ¥{unallocatedReturned.toLocaleString()} — 순합계에는 반환을 차감했으나 현금·QR별 차액과 순실사 차액은 확정할 수 없습니다. 정정 이력에서 반환수단을 확인해주세요.</p>}
                 {(autoSales?.estimatedAmount ?? 0) > 0 && <p class="card-desc">현재 집계에 원장 없는 과거 결제완료 추정 ¥{autoSales?.estimatedAmount?.toLocaleString()} 포함 · 실제 수납 확정액이 아닙니다.</p>}
               </div>
               <div class="card stat-card">
@@ -523,9 +532,10 @@ ops.get("/staff/cash-closing/:id", async (c) => {
               </table>
             </div>
 
+            {postCorrections.results.length>0&&<section><h2>마감 후 주문 정정</h2><p>원래 마감 저장값과 실제 계수는 보존됩니다.</p>{postCorrections.results.map(x=><p>{String(x.order_id)} · {String(x.recorded_at)} · {String(JSON.parse(String(x.actor_json)).name??x.staff_id)} · {String(x.reason)} · 청구 ¥{Number(x.before_billed_amount).toLocaleString()} → ¥{Number(x.after_billed_amount).toLocaleString()} · 이미 반환 ¥{Number(x.returned_amount).toLocaleString()}</p>)}</section>}
             <div class="summary-grid" style="font-size:13px">
               <p><strong>PayPay</strong><span>¥{(cl.paypay_amount as number).toLocaleString()}</span></p>
-              <p><strong>총 실제액</strong><span>¥{(cl.actual_amount as number).toLocaleString()}</span></p>
+              <p><strong>마감 저장 실제액</strong><span>¥{(cl.actual_amount as number).toLocaleString()}<ClosingCurrentValue saved={Number(cl.actual_amount)} current={currentActualAmount}/></span></p>
               <p><strong>렌탈 현금</strong><span>¥{((cl.rental_cash as number) || 0).toLocaleString()}</span></p>
               <p><strong>지팡이 환불</strong><span>¥{((cl.wand_refund as number) || 0).toLocaleString()}</span></p>
               <p><strong>4층 위탁</strong><span>{((cl.floor_4f_count as number) || 0)}건</span></p>
@@ -647,13 +657,13 @@ ops.get("/staff/cash-closing/:id/edit", editorAuth, async (c) => {
 
               <div class="grid2">
                 <label class="field">
-                  <span class="field-label">PayPay 금액</span>
+                  <span class="field-label">PayPay 당일 수납총액</span>
                   <input class="control" type="number" name="paypay_amount" value={String(cl.paypay_amount ?? 0)} />
                 </label>
                 <label class="field">
-                  <span class="field-label">QR결제 실수령액 (PayPay 포함)</span>
-                  <input class="control" type="number" name="actual_qr_amount" value={String(cl.actual_qr_amount ?? 0)} />
-                  <small style="color:#666;font-size:11px;margin-top:2px">PayPay + 카카오페이 + 기타 QR결제 실수령 합계</small>
+                  <span class="field-label">QR 당일 수납총액 (PayPay 포함)</span>
+                  <input class="control" type="number" name="actual_qr_amount" value={String(cl.qr_gross_amount??cl.actual_qr_amount ?? 0)} />
+                  <small style="color:#666;font-size:11px;margin-top:2px">반환 전 PayPay + 카카오페이 + 기타 QR 당일 수납 합계. 기록된 QR 반환을 차감해 순액을 계산합니다.</small>
                 </label>
               </div>
 
@@ -726,10 +736,12 @@ ops.post("/staff/cash-closing/:id/edit", editorAuth, async (c) => {
   const cl = existing as Record<string, unknown>;
   const checkAutoAmount = (cl.check_auto_amount as number) || 0;
   const expectedAmount = (cl.expected_amount as number) || 0;
-  const actualQrForTotal = actualQrAmount || paypayAmount;
+  const qrGrossAmount=actualQrAmount||paypayAmount;
+  const qrReturnAmount=Number(cl.qr_return_amount??0);
+  const actualQrForTotal=qrGrossAmount-qrReturnAmount;
   const actualAmount = (totalAmount - STARTING_FLOAT) + actualQrForTotal;
   const differenceAmount = actualAmount - expectedAmount;
-  const previousActualQrAmount = ((cl.actual_qr_amount as number) || 0) || ((cl.paypay_amount as number) || 0);
+  const previousActualQrAmount = cl.qr_gross_amount!=null?Number(cl.actual_qr_amount):((cl.actual_qr_amount as number)||0)||((cl.paypay_amount as number)||0);
   const expectedQrAmount = previousActualQrAmount - ((cl.qr_difference_amount as number) || 0);
   const qrDiff = actualQrForTotal - expectedQrAmount;
 
@@ -739,7 +751,7 @@ ops.post("/staff/cash-closing/:id/edit", editorAuth, async (c) => {
     `UPDATE luggage_cash_closings SET
        count_10000 = ?, count_5000 = ?, count_2000 = ?, count_1000 = ?, count_500 = ?,
        count_100 = ?, count_50 = ?, count_10 = ?, count_5 = ?, count_1 = ?,
-       total_amount = ?, paypay_amount = ?, actual_qr_amount = ?,
+       total_amount = ?, paypay_amount = ?, actual_qr_amount = ?,qr_gross_amount=?,qr_return_amount=?,
        actual_amount = ?, check_auto_amount = ?, expected_amount = ?, difference_amount = ?, qr_difference_amount = ?,
        rental_cash = ?, wand_refund = ?,
        floor_4f_count = ?, floor_8f_count = ?,
@@ -747,7 +759,7 @@ ops.post("/staff/cash-closing/:id/edit", editorAuth, async (c) => {
      WHERE closing_id = ?`
   )
     .bind(
-      ...denomValues, totalAmount, paypayAmount, actualQrForTotal,
+      ...denomValues, totalAmount, paypayAmount, actualQrForTotal,qrGrossAmount,qrReturnAmount,
       actualAmount, checkAutoAmount, expectedAmount, differenceAmount, qrDiff,
       rentalCash, wandRefund,
       floor4fCount, floor8fCount,

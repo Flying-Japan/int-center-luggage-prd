@@ -1,3 +1,4 @@
+import {staffCorrectionStaffRoutes} from './routes/staffCorrections';
 import { getBillingSummaries, pickupBillingError } from './services/luggageBilling';
 import { Hono } from "hono";
 import * as Sentry from "@sentry/cloudflare";
@@ -67,6 +68,7 @@ app.route("/", staffApi);
 // Staff order detail routes (HTML)
 app.route("/", staffOrders);
 app.route("/",bagAdditionStaffRoutes);
+app.route("/",staffCorrectionStaffRoutes);
 
 // Operations routes (cash closing, handover, lost & found)
 app.route("/", opsRoutes);
