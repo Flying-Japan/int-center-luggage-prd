@@ -1,0 +1,34 @@
+{
+  "sourceCommit": "eb2d5f1918e471a204f71745a0188f18ea5342be",
+  "bundleSha256": "2f48fc81899a4eb354ca022907498abaac9a979abbf939708a46297749a70803",
+  "files": [
+    {
+      "path": "review.css",
+      "sha256": "9b39e37bfcfa1c335b8e0b5c4eb135b49dca775bb35ebab88330b47af350517c"
+    },
+    {
+      "path": "customer-shell.css",
+      "sha256": "dd6e18ae306fadeea2f15ea5be240f0013c0b5fe4299814cc3a17d31c5948306"
+    },
+    {
+      "path": "luggage-origin.css",
+      "sha256": "b128a6bcf232fbd706b1e00096cc91de836e353bdb5dc210e1eb2af84073fef9"
+    },
+    {
+      "path": "review-typography.css",
+      "sha256": "cff4a9f2deb556fd060a8219036abb801d7c7465c92d268e327289b8d46fa1ca"
+    },
+    {
+      "path": "assets/PretendardJPVariable.woff2",
+      "sha256": "bc47e34e10121f5464c701a5bf463e4f5ab0981bdf2dfaf6459a23059f979ff1"
+    },
+    {
+      "path": "assets/flying-horizontal.svg",
+      "sha256": "1534e2dc6285fe38399bd4ecb9e188ad45d2242faf6a23e4a30f02a7587a64c3"
+    },
+    {
+      "path": "assets/pretendard-license.css",
+      "sha256": "cb14c9dd902252ffc57c127764171b43be19a3c0f2eb16e0038ab3ab0e80417f"
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+// UI copy extracted from v8 eb2d5f1 LuggageReview.tsx. Mock-only fields are not rendered.
+export const luggageCopy = {
+  ko: {
+    entry: '짐 맡기기', entryLead: '센터에서 짐을 맡기기 전에 접수해주세요.',
+    form: '어떤 짐을 맡기시나요?', review: '맡길 내용을 확인해주세요', sample: '샘플 접수 · 실제 정보는 입력하지 마세요.',
+    contact: '연락 정보', bags: '맡길 짐', suitcase: '캐리어 수량', backpack: '배낭·가방 수량', date: '수령 날짜', time: '수령 예정 시간 (대략적인 시간)',
+    hours: '플라잉재팬 여행자센터', companions: '동행 인원', companionsHelp: '본인을 포함한 인원이에요.',
+    bagPhoto: '짐 전체 사진', choosePhoto: '짐 사진 선택', photoHelp: '실제 사진 대신 예시만 선택해요.', failPhoto: '사진 선택 실패 체험', photoTools: '사진 예시 오류 확인',
+    photoFailed: '사진을 선택하지 못했어요. 다시 선택해주세요.', identity: '신분증 확인', identityPolicy: '원래 일반·외국인 접수의 사진 확인 흐름이에요. 실제 신분증은 올리지 않고 예시만 선택해요.', chooseIdentity: '신분증 사진 선택', identityNone: '카카오 계정 확인',
+    payment: '결제 방법', cash: '현금', qr: 'QR 결제', privacyPurpose: '연락 정보와 사진은 접수·본인 확인·고객 안내에 사용하는 흐름을 검토해요. 실제 개인정보는 받지 않아요.',
+    consent: '개인정보 수집·이용에 동의해요', notification: '혜택 소식 받기 (선택)',
+    continue: '맡길 내용 확인하기', sampleContinue: '맡길 내용 확인하기', changeMode: '접수 방법 바꾸기', edit: '내용 수정하기', submit: '접수하기',
+    number: '접수번호', total: '짐', suitcaseSummary: '캐리어', backpackSummary: '배낭·가방', unit: '개', people: '동행', peopleUnit: '명', privacyChecked: '개인정보 동의 확인',
+    received: '접수했어요', stored: '짐을 보관하고 있어요', pickupRequested: '수령을 요청했어요', collected: '짐을 찾았어요',
+    showStaff: '이 화면을 직원에게 보여주세요.', storedHelp: '찾으러 오시면 수령을 요청해주세요.', pickupHelp: '직원이 짐을 확인한 뒤 건네드려요.', collectedHelp: '가볍게 여행을 이어가세요.', requestPickup: '수령 요청하기',
+    contactError: '연락 정보를 확인해주세요.', bagsError: '맡길 짐을 1개 이상 선택해주세요. 종류별 0~99개로 입력해요.', companionsError: '동행 인원은 본인을 포함해 1~99명으로 입력해주세요.', pickupError: '수령 날짜와 영업시간을 확인해주세요.', photoError: '짐 사진을 선택해주세요.', identityError: '신분증 사진을 선택해주세요.', consentError: '개인정보 수집·이용 동의를 확인해주세요.',
+    reviewHelp: '접수할 내용을 확인한 뒤 접수하기를 눌러주세요.', unpaid: '미결제 · 요금 확인 대기', privacyLink: '개인정보 처리방침 보기', centerCompact: '난바 여행자센터 · 09:00~21:00 (JST)', location: '찾아오는 길', help: '카카오톡 상담',
+    notes: '검토 메모', noteOne: '원본의 카카오·일반·외국인 접수를 복구한 합성 검토예요. 실제 인증·사진·결제·발송은 연결하지 않아요. 일반접수는 회원을 만들지 않아요.',
+    noteTwo: '동의·수령·신분증 확인은 운영 정책 확정 전 검토 항목이에요. 사진 자동 삭제를 구현하거나 보장한 화면이 아니에요. 선택 알림은 발송·동의 원장에 기록하지 않아요.',
+    noteThree: '접수·보관·수령은 샘플 상태예요. 결제 완료를 보관 중으로 해석하지 않고, 기존 운영 상태와 직원 권한은 실제 연결 전에 대조해야 해요. 사전예약을 새 접수로 바꾸지 않아요.',
+  },
+  en: {
+    entry: 'Leave your luggage', entryLead: 'Submit your details before leaving luggage at the center.',
+    form: 'What luggage are you leaving?', review: 'Check your luggage details', sample: 'Sample reception · Do not enter real personal information.',
+    contact: 'Contact details', bags: 'Your luggage', suitcase: 'Suitcases', backpack: 'Backpacks and bags', date: 'Pickup date', time: 'Estimated pickup time (approximate)',
+    hours: 'FLYING JAPAN Travel Center', companions: 'People in your group', companionsHelp: 'Include yourself.',
+    bagPhoto: 'Photo of all luggage', choosePhoto: 'Choose luggage photo', photoHelp: 'Choose an example, not a real photo.', failPhoto: 'Try sample photo failure', photoTools: 'Sample photo error check',
+    photoFailed: 'The photo could not be selected. Please try again.', identity: 'Identity check', identityPolicy: 'Review the original general and foreign ID-check flow using an example only. Do not upload an actual ID.', chooseIdentity: 'Choose ID photo', identityNone: 'Kakao account confirmed',
+    payment: 'Payment method', cash: 'Cash', qr: 'QR payment', privacyPurpose: 'This draft reviews contact details and photos for reception, identity checks and customer guidance. No real personal information is collected.',
+    consent: 'I agree to the privacy notice', notification: 'Receive benefit updates (optional)',
+    continue: 'Review luggage details', sampleContinue: 'Review luggage details', changeMode: 'Change reception method', edit: 'Edit details', submit: 'Submit reception',
+    number: 'Reception number', total: 'Luggage', suitcaseSummary: 'Suitcases', backpackSummary: 'Backpacks and bags', unit: 'items', people: 'Group', peopleUnit: 'people', privacyChecked: 'Privacy consent confirmed',
+    received: 'Reception submitted', stored: 'Your luggage is in storage', pickupRequested: 'Pickup requested', collected: 'Luggage collected',
+    showStaff: 'Show this screen to a staff member.', storedHelp: 'Request pickup when you return.', pickupHelp: 'Staff will check and hand over your luggage.', collectedHelp: 'Enjoy the rest of your trip.', requestPickup: 'Request pickup',
+    contactError: 'Check your contact details.', bagsError: 'Choose at least one item. Use 0–99 of each type.', companionsError: 'Enter 1–99 people, including yourself.', pickupError: 'Check the pickup date and opening hours.', photoError: 'Choose a luggage photo.', identityError: 'Choose an ID photo.', consentError: 'Confirm the privacy notice.',
+    reviewHelp: 'Check your details before submitting reception.', unpaid: 'Unpaid · Awaiting price confirmation', privacyLink: 'Read the privacy policy', centerCompact: 'Namba Travel Center · 09:00–21:00 (JST)', location: 'Location & directions', help: 'KakaoTalk help',
+    notes: 'Review notes', noteOne: 'The original reception branches use synthetic data only. Authentication, uploads, payment and messages are not connected. General reception does not create a member.',
+    noteTwo: 'Consent, pickup and identity-check policies need approval. Automatic photo deletion is not implemented or guaranteed. Optional updates are not sent or recorded as real consent.',
+    noteThree: 'Reception, storage and pickup are sample states. Payment does not prove physical custody. Operating states and staff permissions need verification before integration. Prebookings are not converted into new intakes.',
+  },
+  ja: {
+    entry: '荷物を預ける', entryLead: 'センターに荷物を預ける前に受付をお願いします。',
+    form: 'どのような荷物を預けますか？', review: 'お預け内容をご確認ください', sample: 'サンプル受付 · 実際の個人情報は入力しないでください。',
+    contact: '連絡先', bags: 'お預けの荷物', suitcase: 'スーツケースの数', backpack: 'リュック・バッグの数', date: '受取日', time: '受取予定時刻（おおよその時間）',
+    hours: 'FLYING JAPAN旅行者センター', companions: '同行人数', companionsHelp: 'ご本人を含む人数です。',
+    bagPhoto: '荷物全体の写真', choosePhoto: '手荷物写真を選ぶ', photoHelp: '実際の写真ではなくサンプルを選びます。', failPhoto: '写真の読み込み失敗を試す', photoTools: 'サンプル写真のエラー確認',
+    photoFailed: '写真を選択できませんでした。もう一度選んでください。', identity: '本人確認', identityPolicy: '一般・外国語受付の確認フローです。実際の身分証ではなくサンプルだけを選びます。', chooseIdentity: '身分証写真を選ぶ', identityNone: 'Kakaoアカウント確認済み',
+    payment: '支払方法', cash: '現金', qr: 'QR決済', privacyPurpose: '受付・本人確認・お客様へのご案内に連絡先と写真を使う流れを検討します。実際の個人情報は収集しません。',
+    consent: '個人情報の取扱いに同意する', notification: '特典のお知らせを受け取る（任意）',
+    continue: 'お預け内容を確認する', sampleContinue: 'お預け内容を確認する', changeMode: '受付方法を変更する', edit: '内容を修正する', submit: '受付を送信',
+    number: '受付番号', total: '荷物', suitcaseSummary: 'スーツケース', backpackSummary: 'リュック・バッグ', unit: '個', people: '同行', peopleUnit: '名', privacyChecked: '個人情報の同意を確認済み',
+    received: '受付が完了しました', stored: '荷物を保管しています', pickupRequested: '受取を依頼しました', collected: '荷物を受け取りました',
+    showStaff: 'この画面をスタッフにお見せください。', storedHelp: 'お戻りの際に受取を依頼してください。', pickupHelp: 'スタッフが確認して荷物をお渡しします。', collectedHelp: '引き続き旅行をお楽しみください。', requestPickup: '受取を依頼する',
+    contactError: '連絡先を確認してください。', bagsError: '荷物を1個以上選んでください。各種類0〜99個で入力します。', companionsError: 'ご本人を含めて1〜99名で入力してください。', pickupError: '受取日と営業時間を確認してください。', photoError: '手荷物写真を選んでください。', identityError: '身分証写真を選んでください。', consentError: '個人情報の同意を確認してください。',
+    reviewHelp: '内容を確認してから受付を送信してください。', unpaid: '未決済・料金確認待ち', privacyLink: 'プライバシーポリシーを見る', centerCompact: '難波トラベルセンター · 09:00〜21:00（日本時間）', location: '所在地・アクセス', help: 'カカオトークで相談',
+    notes: '確認メモ', noteOne: '元の受付分岐をサンプルで確認します。実際の認証・写真・決済・送信には接続しません。一般受付で会員登録は行いません。',
+    noteTwo: '同意・受取・本人確認の方針は未確定です。写真の自動削除を実装・保証するものではありません。任意のお知らせは実際の送信・同意記録に使いません。',
+    noteThree: '受付・保管・受取はサンプル状態です。支払完了を実際の保管と見なさず、実運用の状態とスタッフ権限は連携前に確認します。事前予約を新しい受付に置き換えません。',
+  },
+} as const
+
+export const pathCopy = {
+  ko: { googleTitle: '외국인 간편접수', googleIntro: 'Google 계정 정보를 확인해주세요.', googleContinue: 'Continue with Google', googleCancel: '접수 방법으로 돌아가기', name: '이름', email: '이메일', phone: '전화번호', googleSummary: 'Google 계정 정보', googlePhoneHelp: '이름·이메일을 확인하고 전화번호를 입력해주세요.', fillPhone: '전화번호 다시 채우기', today: '오늘', deadline: '영업시간 (21:00까지)', deadlineEnd: ' 안에 수령해주세요.', approximate: '대략적인 시간이어도 괜찮아요.', method: '접수 방법', kakao: '카카오 간편접수', general: '일반접수 · 비회원', foreign: '외국인 접수 · Google', cashHelp: '엔화 현금 결제', qrHelp: '카카오페이 외 · 지원수단 확인', paymentHelp: '결제수단은 현장 결제 시 변경·분할 가능한 기존 안내를 확인해요. 선택만으로 결제되지는 않아요.', sampleScope: '실제 개인정보·사진은 받지 않는 검토용 화면이에요.' },
+  en: { googleTitle: 'Foreign reception', googleIntro: 'Check your Google account information.', googleContinue: 'Continue with Google', googleCancel: 'Back to reception methods', name: 'Name', email: 'Email', phone: 'Phone', googleSummary: 'Google account information', googlePhoneHelp: 'Check your name and email, then add your phone number.', fillPhone: 'Fill phone', today: 'Today', deadline: 'Opening hours · until 21:00', deadlineEnd: ' — collect your luggage within these hours.', approximate: 'An approximate time is fine.', method: 'Reception method', kakao: 'Kakao quick reception', general: 'General reception · Guest', foreign: 'Foreign reception · Google', cashHelp: 'Japanese yen cash', qrHelp: 'Check supported QR payment methods', paymentHelp: 'Confirm the existing guidance on changing payment method or splitting payment at the counter. This selection does not take payment.', sampleScope: 'Review only. No real personal information or photos are collected.' },
+  ja: { googleTitle: '外国語受付', googleIntro: 'Googleアカウントの情報をご確認ください。', googleContinue: 'Googleで続ける', googleCancel: '受付方法に戻る', name: '氏名', email: 'メールアドレス', phone: '電話番号', googleSummary: 'Googleアカウント情報', googlePhoneHelp: '氏名・メールを確認して電話番号を入力してください。', fillPhone: '電話番号を入力', today: '今日', deadline: '営業時間（21:00まで）', deadlineEnd: 'にお受け取りください。', approximate: 'おおよその時刻で構いません。', method: '受付方法', kakao: 'Kakao簡単受付', general: '一般受付・ゲスト', foreign: '外国語受付・Google', cashHelp: '日本円の現金', qrHelp: '対応するQR決済を確認', paymentHelp: '現地での支払方法変更・分割は既存案内を確認します。選択だけで決済されることはありません。', sampleScope: '確認用画面です。実際の個人情報・写真は収集しません。' },
+} as const
+
+export const interfaceCopy = {
+  ko: { quick:'간편접수', kakao:'카카오 간편가입', general:'일반접수', manual:'수기 입력', foreign:'Foreign reception', languages:'English · 日本語', method:'접수 방법', kakaoTitle:'카카오로 계속하기', kakaoInfo:'연락 정보와 접수 동의를 확인해주세요.', agree:'동의하고 계속', cancel:'취소하고 돌아가기', cancelGeneral:'취소하고 일반접수로 돌아가기', channel:'여행자센터 채널 추가 (선택)', switchTitle:'입력이 번거로우신가요?', switchAction:'간편접수로 전환', profile:'카카오 계정 정보', restore:'정보 다시 채우기' },
+  en: { quick:'Quick reception', kakao:'Kakao', general:'General reception', manual:'Enter details', foreign:'Google / Foreign reception', languages:'English · 日本語', method:'Reception method', kakaoTitle:'Continue with Kakao', kakaoInfo:'Check your contact details and reception consent.', agree:'Agree and continue', cancel:'Go back', cancelGeneral:'Back to general reception', channel:'Add the travel center channel (optional)', switchTitle:'Prefer a quick reception?', switchAction:'Switch to quick reception', profile:'Kakao account information', restore:'Restore details' },
+  ja: { quick:'簡単受付', kakao:'Kakao', general:'一般受付', manual:'手入力', foreign:'Google / 外国語受付', languages:'English · 日本語', method:'受付方法', kakaoTitle:'Kakaoで続ける', kakaoInfo:'連絡先と受付への同意をご確認ください。', agree:'同意して続ける', cancel:'戻る', cancelGeneral:'一般受付に戻る', channel:'トラベルセンターのチャンネルを追加（任意）', switchTitle:'入力がお手間ですか？', switchAction:'簡単受付に切り替える', profile:'Kakaoアカウント情報', restore:'情報を入力し直す' },
+} as const
+

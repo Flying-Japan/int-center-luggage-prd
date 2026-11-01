@@ -1,0 +1,106 @@
+/* Typography roles for the customer review. Brand colors and flow stay intact. */
+@import './assets/pretendard-license.css';
+
+@font-face {
+  font-family: 'Pretendard JP';
+  src: url('./assets/PretendardJPVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+.rd-root {
+  --rd-type-title: 2rem;
+  --rd-type-section: 1.25rem;
+  --rd-type-subsection: 1.125rem;
+  --rd-type-body: 1rem;
+  --rd-type-label: .9375rem;
+  --rd-type-help: .875rem;
+  --rd-type-caption: .75rem;
+  font-family: 'Pretendard JP', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', 'Noto Sans JP', sans-serif;
+  font-size: var(--rd-type-body);
+  font-weight: 400;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.rd-root h1, .rd-root .rd-title h1 {
+  font-size: var(--rd-type-title);
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: -.025em;
+  text-wrap: balance;
+}
+.rd-root h2, .rd-root .rd-contact legend {
+  font-size: var(--rd-type-section);
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: -.015em;
+}
+.rd-root h3, .rd-root legend {
+  font-size: var(--rd-type-subsection);
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+.rd-root strong, .rd-root b, .rd-root dd { font-weight: 600; }
+.rd-root p { text-wrap: pretty; }
+.rd-root label.rd-field, .rd-root .rd-field > label {
+  font-size: var(--rd-type-label);
+  font-weight: 600;
+  line-height: 1.5;
+}
+.rd-root input:not([type=checkbox]):not([type=radio]), .rd-root select {
+  font-size: var(--rd-type-body);
+  font-weight: 400;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+.rd-root .rd-muted, .rd-root .rd-subtle, .rd-root small,
+.rd-root .rd-contact > p, .rd-root .rd-origin-preview p {
+  font-size: var(--rd-type-help);
+  font-weight: 400;
+  line-height: 1.65;
+}
+.rd-root .rd-title .rd-muted { font-size: var(--rd-type-body); }
+.rd-root .rd-primary, .rd-root .rd-secondary {
+  font-size: var(--rd-type-body);
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+.rd-root [role=alert], .rd-root .rd-field-error {
+  font-size: var(--rd-type-help);
+  font-weight: 500;
+  line-height: 1.65;
+  color: #a22030;
+}
+.rd-root .rd-status { font-size: var(--rd-type-help); font-weight: 600; line-height: 1.5; }
+.rd-root .rd-price-info > strong { font-size: var(--rd-type-body); font-weight: 600; }
+.rd-root .rd-origin-date-label { font-size: var(--rd-type-body); font-weight: 400; }
+.rd-root .rd-origin-deadline { font-size: var(--rd-type-body); font-weight: 600; }
+.rd-root .rd-origin-payments small { font-size: var(--rd-type-help); font-weight: 400; line-height: 1.5; }
+.rd-root .rd-origin-kakao-switch > span { font-size: var(--rd-type-help); }
+.rd-root .rd-origin-kakao-switch button { font-size: var(--rd-type-label); font-weight: 600; }
+.rd-root .rd-draft-badge { font-size: var(--rd-type-caption); font-weight: 400; line-height: 1.5; }
+.rd-root .rd-journey strong { font-size: var(--rd-type-subsection); font-weight: 600; }
+.rd-root .rd-journey small { font-size: var(--rd-type-help); }
+.rd-root .rd-origin-choice-title > strong { font-size: 24px; font-weight: 800; }
+.rd-root .rd-origin-choice-title > span { font-size: 16px; font-weight: 400; }
+.rd-root .rd-origin-choice > strong { font-size: 20px; font-weight: 700; }
+.rd-root .rd-origin-choice small { font-size: var(--rd-type-help); }
+.rd-root .rd-summary { font-variant-numeric: tabular-nums; }
+.rd-root .rd-summary > div { grid-template-columns: minmax(0, 40%) minmax(0, 1fr); align-items: start; }
+.rd-root .rd-summary dt { font-size: var(--rd-type-help); font-weight: 400; }
+.rd-root .rd-summary dd { font-size: var(--rd-type-body); font-weight: 600; overflow-wrap: anywhere; }
+.rd-root .rd-summary > .rd-summary-contact { grid-template-columns: minmax(0,1fr); gap: 6px; }
+.rd-root .rd-summary-contact dd { text-align: left; }
+.rd-root [lang=ja] { word-break: normal; line-break: strict; overflow-wrap: break-word; }
+.rd-root [lang=en] { word-break: normal; overflow-wrap: break-word; }
+.rd-root [lang=ja] h1, .rd-root [lang=en] h1 { letter-spacing: 0; }
+
+@media (max-width:600px) {
+  .rd-root { --rd-type-title: 1.75rem; }
+  .rd-root .rd-brand { flex: 0 1 185px; min-width: 0; }
+  .rd-root .rd-header { gap: 12px; }
+}

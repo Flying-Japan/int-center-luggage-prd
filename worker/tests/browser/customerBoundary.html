@@ -1,0 +1,56 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Local account boundary regression</title>
+<style>body{font:16px system-ui;margin:24px}iframe{width:390px;height:720px;border:1px solid #ccc}pre{white-space:pre-wrap}button,a{padding:12px}</style>
+<h1>Synthetic account boundary and expiry regression</h1><p>Local fixtures only. No OAuth, filesystem uploads or production data.</p>
+<button id="run">Run boundary regression</button><a id="navigate" target="app" hidden>Continue boundary check</a><pre id="result">Ready</pre><iframe name="app" id="app" src="/customer/renewal?lang=en"></iframe>
+<script type="module">
+import {createBrowserDraftStore} from '/__local/store.mjs';
+const frame=document.querySelector('#app'),result=document.querySelector('#result'),key='fj-luggage-current-draft-v1',store=createBrowserDraftStore();
+const doc=()=>frame.contentDocument;
+const wait=async(predicate,message,tries=250)=>{for(let i=0;i<tries;i++){if(predicate())return;await new Promise(r=>setTimeout(r,40));}throw Error(message);};
+const ready=()=>wait(()=>doc()?.querySelector('.rd-root')?.dataset.ready==='true','ready');
+const nav=url=>new Promise(resolve=>{const a=document.querySelector('#navigate');a.href=url;a.hidden=false;a.onclick=()=>{a.hidden=true;};frame.addEventListener('load',resolve,{once:true});});
+const click=s=>doc().querySelector(s).click();
+const fill=(field,value)=>{const el=doc().querySelector('[data-field="'+field+'"]');el.value=value;el.dispatchEvent(new frame.contentWindow.Event('input',{bubbles:true}));};
+const photo=async(field,label)=>{const bytes=await(await fetch('/__local/photo.png')).arrayBuffer(),transfer=new frame.contentWindow.DataTransfer();transfer.items.add(new frame.contentWindow.File([bytes],label+'.png',{type:'image/png'}));const el=doc().querySelector('[data-photo="'+field+'"]');el.files=transfer.files;el.dispatchEvent(new frame.contentWindow.Event('change',{bubbles:true}));await wait(()=>doc().querySelector('[data-photo-name="'+field+'"]').textContent===label+'.png','photo parsed');};
+const masked=()=>[...doc().querySelectorAll('[data-field]')].every(el=>!el.value)&&[...doc().querySelectorAll('[data-photo-preview]')].every(el=>!el.hasAttribute('src'))&&!doc().querySelector('#renewal-summary').textContent;
+document.querySelector('#run').onclick=async()=>{
+ document.querySelector('#run').disabled=true;const logs=[];const check=(ok,message)=>{if(!ok)throw Error(message);logs.push('PASS '+message);result.textContent=logs.join('\n');};
+ try{
+  await ready();sessionStorage.removeItem(key);await nav('/__local/reset');await ready();
+  click('[data-entry="guest"]');fill('name','SYNTHETIC-A-TYPED');fill('phone','000-1111-1111');fill('email','a@example.invalid');click('#renewal-next');await photo('identity','A-identity');click('#renewal-next');fill('suitcaseQty','1');await photo('luggage','A-luggage');
+  click('[data-quick]');click('#renewal-auth-start');await wait(()=>doc().querySelector('#renewal-error').textContent.includes('being connected'),'anonymous snapshot saved');
+  const aDraftId=sessionStorage.getItem(key),old=await store.load(aDraftId);
+  check(old.boundary.mode==='guest','login initiation preserves an anonymous boundary');
+  await nav('/__local/member?as=A');await ready();
+  check(!doc().querySelector('#renewal-boundary').hidden&&masked()&&!doc().body.textContent.includes('SYNTHETIC-A-TYPED'),'verified Account return never renders pre-login PII before confirmation');
+  click('#renewal-boundary-confirm');await wait(()=>!doc().querySelector('#renewal-form').hidden,'confirmed A adoption');
+  check(doc().querySelector('[data-field="phone"]').value==='000-1111-1111'&&doc().querySelector('[data-photo-name="identity"]').textContent==='A-identity.png','explicit anonymous-to-self adoption preserves entries and photos');
+  await wait(()=>doc().querySelector('.rd-root').dataset.savesPending==='0','member A saved');
+  const boundA=await store.load(sessionStorage.getItem(key));check(boundA.boundary.mode==='member'&&boundA.expiresAt===old.expiresAt,'member binding is durable and does not extend original expiry');
+  await nav('/customer/renewal?lang=en');await ready();
+  check(doc().querySelector('[data-field="name"]').value==='SYNTHETIC-A-TYPED'&&doc().querySelector('[data-photo-name="identity"]').textContent==='A-identity.png','same verified member restores its own draft');
+  await nav('/__local/member?as=B');await ready();
+  check(masked()&&!doc().body.textContent.includes('SYNTHETIC-A-TYPED')&&!doc().body.textContent.includes('A-identity.png'),'A to B switch never renders A contact, filenames, summary or photos');
+  check(await store.load(aDraftId)===null,'previous member encrypted draft is deleted before a new owner continues');
+  click('#renewal-boundary-guest');await wait(()=>!doc().querySelector('#renewal-form').hidden,'new guest started');
+  click('[data-quick]');click('#renewal-boundary-confirm');await wait(()=>!doc().querySelector('#renewal-form').hidden&&doc().querySelector('[data-field="name"]').value==='Synthetic Member B','B adoption');
+  fill('phone','000-2222-2222');await photo('identity','B-identity');await photo('luggage','B-luggage');
+  await wait(()=>doc().querySelector('.rd-root').dataset.savesPending==='0','B stored');const bId=sessionStorage.getItem(key);
+  await nav('/__local/logout');await ready();
+  check(masked()&&!doc().body.textContent.includes('000-2222-2222')&&!doc().querySelector('#renewal-boundary-reauth').hidden,'cookie disappearance masks member data and requires reauthentication');
+  check((await store.load(bId)).boundary.mode==='member','missing authentication preserves the protected B draft instead of converting it to guest');
+  const before=(await(await fetch('/__local/summary')).json()).orders;click('#renewal-submit');
+  check((await(await fetch('/__local/summary')).json()).orders===before,'locked member form cannot silently create a guest order');
+  await nav('/__local/member?as=B');await ready();
+  check(doc().querySelector('[data-field="phone"]').value==='000-2222-2222'&&doc().querySelector('[data-photo-name="identity"]').textContent==='B-identity.png','same B reauthentication restores B information and photos');
+  // Simulate a draft created 29m48s ago; the real UI must clear it in 12s.
+  const expiring=await store.load(bId),born=Date.now()-1788000;expiring.id=crypto.randomUUID();expiring.createdAt=born;expiring.expiresAt=born+1800000;expiring.revision=0;
+  await store.save(expiring);sessionStorage.setItem(key,expiring.id);await nav('/customer/renewal?lang=en');await ready();
+  await wait(()=>doc().querySelector('#renewal-boundary-info').textContent.includes('30-minute lifetime'), 'active draft absolute expiry',400);
+  check(masked()&&await store.load(expiring.id)===null,'active absolute expiry clears contact/photo DOM and the stored ciphertext');
+  let rejected=false;try{await store.save({...expiring,revision:10,updatedAt:Date.now()});}catch(error){rejected=error.message==='DRAFT_EXPIRED';}
+  check(rejected&&await store.load(expiring.id)===null,'save after absolute expiry cannot revive the same identity photos');
+  result.textContent=logs.join('\n')+'\nALL '+logs.length+' BOUNDARY CHECKS PASSED';
+ }catch(error){result.textContent=logs.join('\n')+'\nFAIL '+error.message;document.querySelector('#run').disabled=false;}
+};
+</script></html>

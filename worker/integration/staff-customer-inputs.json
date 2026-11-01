@@ -1,0 +1,16 @@
+{
+  "base": "606dc2eed6e148b52b829b5de24d36c015fcbab0",
+  "staff": "a11139f2aebfeac29335a285022e22a81ff66a42",
+  "customer": "bb6d923514adaefcea703d1c2441638d9ce21bb1",
+  "staffStage": [
+    "migrations/20261101_staff_order_corrections.sql",
+    "migrations/20261101_staff_historical_receipts.sql"
+  ],
+  "customerStage": [
+    "migrations/20261101_customer_intake_requests.sql",
+    "migrations/20261101_customer_account_link.sql",
+    "migrations/20261101_customer_intake_hardening.sql"
+  ],
+  "freshStaffSchema": "src/schema.sql",
+  "note": "Local validation manifest only. No automatic remote migration or deployment. StaffStage is skipped when already applied; never run it again after the combined fresh schema."
+}
