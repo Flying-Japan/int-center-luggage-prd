@@ -1,0 +1,81 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Local input control regression</title>
+<style>body{font:16px system-ui;margin:20px}iframe{width:390px;height:800px;border:1px solid #ccc}pre{white-space:pre-wrap}button,a{padding:12px}</style>
+<h1>Synthetic camera and date regression</h1><p>Local generated PNGs only. No real camera, filesystem uploads, OAuth or production data.</p>
+<button id="run">Run input control checks</button><a id="navigate" target="app" hidden>Continue control check</a><pre id="result">Ready</pre>
+<iframe name="app" id="app" src="/customer/renewal?lang=en"></iframe>
+<script type="module">
+import {createBrowserDraftStore} from '/__local/store.mjs';
+const frame=document.querySelector('#app'),result=document.querySelector('#result'),store=createBrowserDraftStore();
+const doc=()=>frame.contentDocument;
+const wait=async(fn,message)=>{for(let i=0;i<200;i++){if(fn())return;await new Promise(r=>setTimeout(r,30));}throw Error(message);};
+const ready=()=>wait(()=>doc()?.querySelector('.rd-root')?.dataset.ready==='true','app ready');
+const click=selector=>doc().querySelector(selector).click();
+const fill=(field,value,event='input')=>{const el=doc().querySelector('[data-field="'+field+'"]');el.value=value;el.dispatchEvent(new frame.contentWindow.Event(event,{bubbles:true}));};
+const navigate=url=>new Promise(resolve=>{const a=document.querySelector('#navigate');a.href=url;a.hidden=false;a.onclick=()=>a.hidden=true;frame.addEventListener('load',resolve,{once:true});});
+const settled=()=>wait(()=>doc().querySelector('.rd-root').dataset.savesPending==='0','encrypted save settled');
+const saved=()=>store.load(frame.contentWindow.sessionStorage.getItem('fj-luggage-current-draft-v1'));
+const name=field=>doc().querySelector('[data-photo-name="'+field+'"]').textContent;
+const hash=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer()))).join(',');
+let bytes;
+function select(selector,label,type='image/png',content=bytes,delayed=false){
+ const win=frame.contentWindow,input=doc().querySelector(selector),transfer=new win.DataTransfer();
+ transfer.items.add(new win.File([content],label,{type}));input.files=transfer.files;
+ let release;if(delayed){let resume;const pending=new Promise(r=>resume=r);Object.defineProperty(input.files[0],'arrayBuffer',{value:async()=>{await pending;return new Uint8Array(content).buffer;}});release=resume;}
+ input.dispatchEvent(new win.Event('change',{bubbles:true}));return release;
+}
+document.querySelector('#run').onclick=async()=>{
+ document.querySelector('#run').disabled=true;const logs=[];
+ const check=(ok,message)=>{if(!ok)throw Error(message);logs.push('PASS '+message);result.textContent=logs.join('\n');};
+ try{
+  bytes=await(await fetch('/__local/photo.png')).arrayBuffer();await ready();
+  frame.contentWindow.sessionStorage.removeItem('fj-luggage-current-draft-v1');await navigate('/__local/reset');await ready();
+  click('[data-entry="guest"]');fill('name','Synthetic Controls');fill('phone','000-1111-2222');fill('email','controls@example.invalid');click('#renewal-next');
+  select('#renewal-identity','synthetic-id.png');await wait(()=>name('identity')==='synthetic-id.png','identity selected');click('#renewal-next');
+  check(doc().querySelectorAll('[data-step]').length===6&&!doc().querySelector('[data-step="luggage"]').hidden,'general reception keeps all six steps');
+  const gallery=doc().querySelector('#renewal-luggage'),camera=doc().querySelector('#renewal-luggage-camera'),button=doc().querySelector('#renewal-camera-open');
+  check(gallery.type==='file'&&gallery.accept==='image/*'&&!gallery.hasAttribute('capture')&&camera.type==='file'&&camera.accept==='image/*'&&camera.getAttribute('capture')==='environment','gallery stays separate from the environment-camera input');
+  check(button.type==='button'&&button.getAttribute('aria-controls')===camera.id&&!!(gallery.compareDocumentPosition(doc().querySelector('[data-field="suitcaseQty"]'))&Node.DOCUMENT_POSITION_FOLLOWING),'camera action does not submit and photos precede quantities');
+  for(const width of [360,390]){frame.style.width=width+'px';await wait(()=>frame.contentWindow.innerWidth===width,'mobile viewport');await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+   check(button.getBoundingClientRect().height>=44&&doc().documentElement.scrollWidth<=width+1,'camera target and form fit '+width+'px viewport');}
+  select('#renewal-luggage','synthetic-gallery.png');await wait(()=>name('luggage')==='synthetic-gallery.png','gallery selected');await settled();
+  check(await hash((await saved()).photos.luggage.blob)===await hash(new Blob([bytes])),'gallery saves actual validated photo bytes to encrypted draft');
+  let opened=0;const nativeClick=camera.click;camera.click=()=>{opened++;};click('#renewal-camera-open');camera.click=nativeClick;
+  camera.files=new frame.contentWindow.DataTransfer().files;camera.dispatchEvent(new frame.contentWindow.Event('change',{bubbles:true}));
+  check(opened===1&&name('luggage')==='synthetic-gallery.png','camera button targets picker; cancellation keeps the saved photo');
+  select('#renewal-luggage-camera','synthetic-camera.png');await wait(()=>name('luggage')==='synthetic-camera.png','camera file selected');await settled();
+  check(camera.files.length===0&&await hash((await saved()).photos.luggage.blob)===await hash(new Blob([bytes])),'camera uses the same real byte validation and clears native input for reselection');
+  select('#renewal-luggage-camera','inert.svg','image/svg+xml',new TextEncoder().encode('inert synthetic invalid image'));
+  await wait(()=>!doc().querySelector('#renewal-error').hidden,'invalid photo rejected');
+  check(name('luggage')==='synthetic-camera.png','unsupported camera file preserves the previous photograph');
+  select('#renewal-luggage-camera','oversize.png','image/png',new Uint8Array(10*1024*1024+1));await wait(()=>camera.files.length===0,'oversize rejected');
+  check(name('luggage')==='synthetic-camera.png','oversize camera file cannot replace the saved photograph');
+  const release=select('#renewal-luggage-camera','synthetic-late.png','image/png',bytes,true);
+  select('#renewal-luggage','synthetic-latest.png');await wait(()=>name('luggage')==='synthetic-latest.png','new gallery selection');release();await settled();
+  await new Promise(r=>setTimeout(r,80));check(name('luggage')==='synthetic-latest.png','late camera decode cannot overwrite a newer gallery selection');
+  const finish=select('#renewal-luggage-camera','synthetic-before-login.png','image/png',bytes,true);click('[data-quick]');
+  check(doc().querySelector('#renewal-auth').hidden,'login waits for the selected photo to finish reading');finish();await wait(()=>!doc().querySelector('#renewal-auth').hidden,'photo completed before login');
+  click('#renewal-auth-start');await wait(()=>doc().querySelector('#renewal-error').textContent.includes('being connected'),'login unavailable');click('#renewal-auth-cancel');
+  check(name('luggage')==='synthetic-before-login.png'&&!doc().querySelector('[data-step="luggage"]').hidden,'login failure/cancellation retains camera photo and current step');
+  select('#renewal-luggage-camera','synthetic-before-login.png');await wait(()=>camera.files.length===0&&name('luggage')==='synthetic-before-login.png','same file reselection');await settled();
+  check((await saved()).photos.luggage.name==='synthetic-before-login.png','same camera filename can be selected again');
+  fill('suitcaseQty','99');fill('backpackQty','11');fill('companionCount','99');await settled();
+  check(['suitcaseQty','backpackQty','companionCount'].every(k=>doc().querySelector('[data-field="'+k+'"]').max==='99')&&(await saved()).visit.suitcaseQty==='99'&&(await saved()).visit.backpackQty==='11','11–99 luggage and group values remain supported and saved');
+  click('#renewal-next');const date=doc().querySelector('[data-field="pickupDate"]'),caption=doc().querySelector('#renewal-pickup-label'),today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo'}).format(new Date());
+  check(date.value===today&&caption.textContent==='Today'&&date.type==='date'&&date.min===today&&!!date.max,'Tokyo Today is a caption over a constrained native date input');
+  const time=doc().querySelector('[data-field="pickupTime"]');
+  check(time.value===''&&time.required&&time.options[0].value==='','new draft requires an explicit pickup time with an empty first option');
+  click('#renewal-next');check(!doc().querySelector('[data-step="pickup"]').hidden&&!doc().querySelector('#renewal-error').hidden,'unselected pickup time blocks the next step');
+  fill('pickupTime','18:00'); // Explicit customer choice, not a default.
+  fill('pickupDate','','change');click('#renewal-next');check(caption.textContent==='Select'&&!doc().querySelector('[data-step="pickup"]').hidden&&!doc().querySelector('#renewal-error').hidden,'native change with empty date updates caption and blocks progress');
+  let picker=0;date.showPicker=()=>{picker++;throw Error('Synthetic unsupported picker');};date.click();
+  check(picker===1&&date.type==='date','unsupported showPicker keeps the native control usable');
+  const tomorrow=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo'}).format(new Date(Date.now()+86400000));fill('pickupDate',tomorrow);await settled();
+  check(caption.textContent!=='Today'&&caption.textContent!=='Select','date input event updates the visible chosen-day caption');
+  const before=await saved();await navigate('/customer/renewal?lang=en');await ready();await wait(()=>doc().querySelector('#renewal-state').textContent.includes('restored'),'restored status');
+  const after=await saved();check(after.id===before.id&&after.createdAt===before.createdAt&&after.expiresAt===before.expiresAt,'reload preserves the original draft and absolute lifetime');
+  check(!doc().querySelector('[data-step="pickup"]').hidden&&doc().querySelector('[data-field="pickupDate"]').value===tomorrow&&doc().querySelector('[data-field="pickupTime"]').value==='18:00'&&doc().querySelector('#renewal-pickup-label').textContent!=='Today','stored chosen date, explicit time and current step restore after full navigation');
+  check(doc().querySelector('#renewal-luggage-camera').files.length===0&&name('identity')==='synthetic-id.png'&&name('luggage')==='synthetic-before-login.png'&&await hash(after.photos.identity.blob)===await hash(new Blob([bytes]))&&await hash(after.photos.luggage.blob)===await hash(new Blob([bytes])),'both photo blobs restore without pretending the native FileList was restored');
+  result.textContent=logs.join('\n')+'\nALL '+logs.length+' CONTROL CHECKS PASSED';
+ }catch(error){result.textContent=logs.join('\n')+'\nFAIL '+error.message;document.querySelector('#run').disabled=false;}
+};
+</script></html>

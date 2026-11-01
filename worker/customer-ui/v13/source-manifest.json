@@ -1,0 +1,8 @@
+{
+  "sourceCommit": "f03926f531bdbdb5b19041b160dccb2129cee896",
+  "bundleSha256": "e0521f5cfcc19da2804a1c443c13bb18b28c0166d290dcc6518ddc92209cae6e",
+  "sourcePath": "src/review/luggage-origin.css",
+  "sourceSha256": "ee6469ee2320d8ff5881490b06af5d229186683ccf75c2539540a6c7b57403ec",
+  "adaptedFile": "luggage-input-controls.css",
+  "scope": "Camera button and native date display only. Existing v8 assets, six-step flow, file upload, draft and server contracts are retained. No v13 mock persistence or Trip code."
+}

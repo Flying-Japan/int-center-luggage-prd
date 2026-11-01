@@ -2,6 +2,7 @@ import { createIntakeDraft, reviseIntakeDraft, INTAKE_STEPS, missingIntakeFields
   mergeMemberContact, confirmAnonymousDraft, draftBoundaryDecision, prepareIntakeAuth, toRenewalIntakeForm, type IntakeDraft } from '../src/customer/intakeDraft';
 import { createBrowserDraftStore } from './intakeDraftStore.mjs';
 import { inspectPhotoContent } from '../src/lib/imageContent';
+import { pickupDateLabel } from '../src/customer/inputControls';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const locale = $('.rd-root').dataset.locale as 'ko' | 'en' | 'ja';
@@ -21,6 +22,10 @@ let currentMember: Member | null = null, boundaryConfirm: (() => Promise<void>) 
 let expiryTimer: ReturnType<typeof setTimeout> | undefined, boundaryBlocked = true;
 let identityGeneration = 0;
 const previews: Record<string, string> = {};
+const photoGeneration = { identity: 0, luggage: 0 };
+const pendingPhotos = new Set<Promise<void>>();
+async function waitForPhotos() { while (pendingPhotos.size) await Promise.allSettled([...pendingPhotos]); }
+function refreshPickupLabel() { $('#renewal-pickup-label').textContent = pickupDateLabel($<HTMLInputElement>('[data-field="pickupDate"]').value, locale); }
 function error(message = '') { $('#renewal-error').textContent = message; $('#renewal-error').hidden = !message; }
 function preserveError(cause?: unknown) {
   if (cause instanceof Error && cause.message === 'DRAFT_EXPIRED') { void expireDraft(); return; }
@@ -33,6 +38,7 @@ function show(next: string) {
   if (next === 'form') render();
 }
 function mask() {
+  photoGeneration.identity++; photoGeneration.luggage++;
   boundaryBlocked = true;
   $('#renewal-form').hidden = true;
   document.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-field]').forEach(el => { el.value = ''; });
@@ -43,6 +49,7 @@ function mask() {
     $(`[data-photo-name="${field}"]`).textContent = '';
   }
   $('#renewal-summary').replaceChildren(); $('#renewal-profile-conflicts').replaceChildren();
+  $('#renewal-pickup-label').textContent = '';
   $('#renewal-profile-conflicts').hidden = true; $('#renewal-member').hidden = true;
   $('#renewal-state').textContent = ''; $('#renewal-receipt-link').hidden = true; error();
   $('#renewal-boundary-info').textContent = '';
@@ -139,6 +146,7 @@ function sync() {
   });
   draft.visit.paymentMethod = $('input[name="renewal-payment"]:checked').getAttribute('value') as 'CASH' | 'PAY_QR';
   draft.privacy.accepted = $<HTMLInputElement>('#renewal-consent').checked;
+  refreshPickupLabel();
 }
 function fill() {
   if (draft.boundary.mode === 'member' && (!currentMember || currentMember.subject !== draft.boundary.subject || Date.now() >= currentMember.expiresAt)) { lockMember(); return; }
@@ -155,6 +163,29 @@ function fill() {
     if (photo) img.src = previews[field] = URL.createObjectURL(photo.blob); else img.removeAttribute('src');
   }
   boundaryBlocked = false;
+  refreshPickupLabel();
+}
+async function readSelectedPhoto(input: HTMLInputElement, file: File) {
+  const field = input.dataset.photo as 'identity' | 'luggage';
+  const generation = ++photoGeneration[field], draftId = draft.id;
+  // Returning from a native camera may resume before visibility revalidation.
+  // A different member/expired draft must never receive the pending photo.
+  if (boundaryBlocked && !document.hidden) {
+    if (!await verifyIdentity() || draft.id !== draftId || photoGeneration[field] !== generation) return;
+    fill(); show('form');
+  }
+  const current = () => draft.id === draftId && photoGeneration[field] === generation
+    && input.files?.[0] === file && !boundaryBlocked && !document.hidden
+    && (panel === 'form' || panel === 'auth') && Date.now() < draft.expiresAt
+    && (draft.boundary.mode === 'guest' || (currentMember?.subject === draft.boundary.subject && Date.now() < currentMember.expiresAt));
+  const bytes = file.size <= 10 * 1024 * 1024 ? await file.arrayBuffer() : null;
+  if (!current()) return;
+  const canonical = bytes ? inspectPhotoContent(bytes, file.type) : null;
+  if (!canonical) {
+    error(word('지원되는 사진 파일과 용량을 확인해주세요.', 'Check the image type and size.', '画像の形式とサイズをご確認ください。')); input.value = ''; return;
+  }
+  draft.photos[field] = { blob: new Blob([bytes!], { type: canonical }), name: file.name, lastModified: file.lastModified };
+  input.value = ''; error(); revise(); fill();
 }
 function render() {
   const index = INTAKE_STEPS.indexOf(draft.step);
@@ -178,6 +209,9 @@ function render() {
 }
 async function refreshPrice() {
   const sequence = ++priceSequence;
+  if (missingIntakeFields(draft, 'pickup').length) {
+    $('#renewal-price').textContent = word('수령 날짜와 시간을 선택해주세요.', 'Choose a pickup date and time.', '受取日と時刻を選択してください。'); return;
+  }
   $('#renewal-price').textContent = '…';
   const query = new URLSearchParams({ suitcase_qty: draft.visit.suitcaseQty, backpack_qty: draft.visit.backpackQty,
     expected_pickup_at: `${draft.visit.pickupDate}T${draft.visit.pickupTime}` });
@@ -187,7 +221,8 @@ async function refreshPrice() {
     $('#renewal-price').textContent = `¥${Number(data.final_prepaid).toLocaleString()} · ${data.expected_storage_days} ${word('일', 'day(s)', '日')}`;
   } catch { if (sequence === priceSequence) $('#renewal-price').textContent = word('현장에서 요금을 확인해주세요.', 'Confirm the price at the counter.', '現地で料金をご確認ください。'); }
 }
-function openAuth(choice: 'kakao' | 'google') {
+async function openAuth(choice: 'kakao' | 'google') {
+  if (pendingPhotos.size) await waitForPhotos();
   if (Date.now() >= draft.expiresAt) { void expireDraft(); return; }
   if (currentMember && Date.now() < currentMember.expiresAt) {
     if (draft.boundary.mode === 'member' && draft.boundary.subject === currentMember.subject) { draft.path = choice; revise(); fill(); show('form'); return; }
@@ -239,7 +274,7 @@ async function boot() {
   document.querySelectorAll<HTMLElement>('[data-entry]').forEach(button => button.addEventListener('click', () => {
     const entry = button.dataset.entry; error();
     if (entry === 'foreign') show('foreign'); else if (entry === 'guest') { void startGuest(); }
-    else openAuth(entry as 'kakao' | 'google');
+    else void openAuth(entry as 'kakao' | 'google').catch(preserveError);
   }));
   async function startGuest() {
     if (draft.boundary.mode === 'member') {
@@ -259,12 +294,12 @@ async function boot() {
     if (draft.boundary.mode !== 'guest') return;
     boundaryConfirm = null; sessionStorage.removeItem('fj-luggage-auth-handoff-v1'); draft.path = 'guest'; revise(); fill(); show('form');
   });
-  $('#renewal-boundary-reauth').addEventListener('click', () => { currentMember = null; memberVerified = false; openAuth(draft.path === 'google' ? 'google' : 'kakao'); });
+  $('#renewal-boundary-reauth').addEventListener('click', () => { currentMember = null; memberVerified = false; void openAuth(draft.path === 'google' ? 'google' : 'kakao').catch(preserveError); });
   $('[data-back-entry]').addEventListener('click', () => show('entry'));
   $('[data-existing-booking]').addEventListener('click', () => {
     error(word('기존 예약은 새 현장접수로 만들지 않습니다. 예약 확인 화면을 직원에게 보여주시면 기존 예약을 확인합니다.', 'Existing bookings are separate from new onsite reception. Show your booking confirmation to staff.', '既存予約は新しい現地受付に変更しません。予約確認画面をスタッフに見せてください。'));
   });
-  document.querySelectorAll('[data-quick]').forEach(button => button.addEventListener('click', () => openAuth(locale === 'ko' ? 'kakao' : 'google')));
+  document.querySelectorAll('[data-quick]').forEach(button => button.addEventListener('click', () => { void openAuth(locale === 'ko' ? 'kakao' : 'google').catch(preserveError); }));
   $('#renewal-auth-cancel').addEventListener('click', () => {
     error(); sessionStorage.removeItem('fj-luggage-auth-handoff-v1');
     if (draft.boundary.mode === 'member') lockMember(); else { fill(); show(returnPanel); }
@@ -272,6 +307,7 @@ async function boot() {
   $('#renewal-auth-start').addEventListener('click', async () => {
     if (busy) return; busy = true; $<HTMLButtonElement>('#renewal-auth-start').disabled = true;
     try {
+      await waitForPhotos();
       await saving;
       const handoff = await prepareIntakeAuth(store, snapshot(), provider);
       sessionStorage.setItem('fj-luggage-auth-handoff-v1', JSON.stringify(handoff));
@@ -286,18 +322,18 @@ async function boot() {
     if (busy || boundaryBlocked || panel !== 'form') return; if ((event.target as HTMLInputElement).type === 'file') return;
     sync(); revise(); error(); if (memberVerified && draft.path !== 'guest') render();
   });
-  document.querySelectorAll<HTMLInputElement>('[data-photo]').forEach(input => input.addEventListener('change', async () => {
-    if (busy || boundaryBlocked || panel !== 'form') return;
-    const file = input.files?.[0]; if (!file) return;
-    const bytes = file.size <= 10 * 1024 * 1024 ? await file.arrayBuffer() : null;
-    const canonical = bytes ? inspectPhotoContent(bytes, file.type) : null;
-    if (!canonical) {
-      error(word('지원되는 사진 파일과 용량을 확인해주세요.', 'Check the image type and size.', '画像の形式とサイズをご確認ください。')); input.value = ''; return;
-    }
-    if (input.files?.[0] !== file || boundaryBlocked || panel !== 'form' || Date.now() >= draft.expiresAt) return;
-    draft.photos[input.dataset.photo as 'identity' | 'luggage'] = { blob: new Blob([bytes!], { type: canonical }), name: file.name, lastModified: file.lastModified };
-    revise(); fill();
-  }));
+  document.querySelectorAll<HTMLInputElement>('[data-photo]').forEach(input => {
+    input.addEventListener('click', () => { photoGeneration[input.dataset.photo as 'identity' | 'luggage']++; input.value = ''; });
+    input.addEventListener('change', () => {
+      if (busy || panel !== 'form') return;
+      const file = input.files?.[0]; if (!file) return;
+      const task = readSelectedPhoto(input, file).catch(() => { if (!boundaryBlocked) preserveError(); }).finally(() => pendingPhotos.delete(task));
+      pendingPhotos.add(task);
+    });
+  });
+  $('#renewal-camera-open').addEventListener('click', () => { if (!busy && !boundaryBlocked && panel === 'form') $<HTMLInputElement>('#renewal-luggage-camera').click(); });
+  date.addEventListener('change', () => { if (!busy && !boundaryBlocked && panel === 'form') { sync(); revise(); error(); } });
+  date.addEventListener('click', () => { try { date.showPicker?.(); } catch { /* Native keyboard/calendar entry remains available. */ } });
   $('#renewal-next').addEventListener('click', () => {
     sync(); const missing = missingIntakeFields(draft, draft.step);
     if (missing.length) { error(word('현재 단계의 필수 정보를 확인해주세요.', 'Check the required details in this step.', 'この手順の必須項目をご確認ください。')); return; }
@@ -308,7 +344,8 @@ async function boot() {
   });
   $('#renewal-back').addEventListener('click', () => { const i = INTAKE_STEPS.indexOf(draft.step); if (!i) return show('entry'); draft.step = INTAKE_STEPS[i - 1]; revise(); error(); render(); });
   $('#renewal-form').addEventListener('submit', async event => {
-    event.preventDefault(); if (busy || boundaryBlocked) return; sync();
+    event.preventDefault(); if (busy || boundaryBlocked) return;
+    await waitForPhotos(); if (busy || boundaryBlocked) return; sync();
     if (!await verifyIdentity()) return;
     if (!noticeReady) { error(word('안내 내용을 불러온 후 동의해주세요.', 'Load and review the notice before agreeing.', '案内を読み込んでから同意してください。')); return; }
     let form: FormData;
@@ -341,7 +378,7 @@ async function boot() {
   $('#renewal-menu-close').addEventListener('click', () => menu.close());
   document.querySelectorAll<HTMLElement>('[data-language]').forEach(button => button.addEventListener('click', async () => {
     if (busy) return;
-    try { draft.locale = button.dataset.language as typeof locale; revise(); await saving; location.assign(`/customer/renewal?lang=${draft.locale}`); } catch { preserveError(); }
+    try { await waitForPhotos(); draft.locale = button.dataset.language as typeof locale; revise(); await saving; location.assign(`/customer/renewal?lang=${draft.locale}`); } catch { preserveError(); }
   }));
   // The brand returns to reception choices without losing an in-progress draft.
   $('.fj-customer-brand').addEventListener('click', event => { event.preventDefault(); if (!busy) show('entry'); });

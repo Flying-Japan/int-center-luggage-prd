@@ -76,6 +76,12 @@ test('renewal request key is random, stays with the draft, and is added only by 
 });
 
 test('submission still requires both photos, valid JST pickup, nonzero bags, and current privacy consent', () => {
+  assert.equal(createIntakeDraft('en','privacy-existing-v1').visit.pickupTime, '');
+  const unselected = sample(); unselected.visit.pickupTime = '';
+  assert.throws(() => toLegacyIntakeForm(unselected,'privacy-existing-v1'), /expected_pickup_at/);
+  assert.throws(() => toRenewalIntakeForm(confirmAnonymousDraft(unselected,'a'.repeat(43),'google',true),'privacy-existing-v1'), /expected_pickup_at/);
+  const early = sample(); early.visit.pickupTime = '08:30';
+  assert.throws(() => toLegacyIntakeForm(early,'privacy-existing-v1'), /expected_pickup_at/);
   const draft = sample(); draft.photos.identity = null;
   assert.throws(() => toLegacyIntakeForm(draft, 'privacy-existing-v1'), /id_image/);
   const late = sample(); late.visit.pickupTime = '21:30';
@@ -85,4 +91,6 @@ test('submission still requires both photos, valid JST pickup, nonzero bags, and
   assert.throws(() => toLegacyIntakeForm(sample(), 'privacy-new'), /privacy_version/);
   const expired=sample();expired.createdAt=Date.now()-1800001;expired.expiresAt=expired.createdAt+1800000;
   assert.throws(()=>toRenewalIntakeForm(expired,'privacy-existing-v1'),/DRAFT_EXPIRED/);
+  const previous = sample(); previous.visit.pickupTime = '18:00';
+  assert.equal(toRenewalIntakeForm(structuredClone(previous),'privacy-existing-v1').get('expected_pickup_at'), '2026-11-02T18:00');
 });

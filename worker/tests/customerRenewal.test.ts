@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { customerFixture, syntheticDraft } from './helpers/customerFixture';
 import { toRenewalIntakeForm, confirmAnonymousDraft } from '../src/customer/intakeDraft';
 import { syntheticPng } from './helpers/syntheticPhoto';
+import { pickupDateLabel, tokyoDay } from '../src/customer/inputControls';
 
 const origin = 'https://luggage.test';
 function submit(c: ReturnType<typeof customerFixture>, draft = syntheticDraft(), headers: Record<string, string> = {}) {
@@ -28,6 +29,28 @@ test('v8 luggage page has six real steps, quick transition, separate existing-bo
   assert.match(html, /<html lang="en"/); assert.doesNotMatch(html, /DRAFT-LUG|SAMPLE_CONTACT|PASS|href=".*trip/i);
   const auth = await c.app.request(`${origin}/customer/renewal/auth?provider=google`, {}, c.env);
   assert.equal(auth.status, 503); assert.equal((await auth.json()).error, 'ACCOUNT_LOGIN_NOT_READY');
+});
+test('camera is separate from gallery and precedes quantities without reducing six steps or 99-item limits', async t => {
+  const c = customerFixture(); t.after(() => c.sqlite.close());
+  const html = await (await c.app.request(`${origin}/customer/renewal?lang=en`, {}, c.env)).text();
+  assert.match(html, /id="renewal-luggage" type="file" accept="image\/\*" data-photo="luggage"/);
+  assert.match(html, /id="renewal-luggage-camera"[^>]+capture="environment"[^>]+data-photo="luggage"/);
+  assert.match(html, /id="renewal-camera-open"[^>]+type="button"[^>]+aria-controls="renewal-luggage-camera"/);
+  assert.ok(html.indexOf('id="renewal-luggage"') < html.indexOf('id="renewal-suitcaseQty"'));
+  assert.equal((html.match(/data-step=/g) || []).length, 6);
+  for (const name of ['suitcaseQty', 'backpackQty', 'companionCount']) assert.match(html, new RegExp(`id="renewal-${name}"[^>]+max="99"`));
+  assert.match(html, /id="renewal-pickupDate"[^>]+type="date"[^>]+aria-describedby="renewal-date-help"/);
+  assert.match(html, /<select id="renewal-pickupTime" data-field="pickupTime" required(?:="")?><option value="">Select<\/option>/);
+});
+test('date caption uses Tokyo day across UTC midnight, handles empty/invalid values and localizes today', () => {
+  const now = new Date('2099-01-01T16:00:00Z');
+  assert.equal(tokyoDay(now), '2099-01-02');
+  for (const [lang, caption] of [['ko','오늘'],['en','Today'],['ja','今日']] as const) assert.equal(pickupDateLabel('2099-01-02',lang,now),caption);
+  assert.equal(pickupDateLabel('', 'en', now), 'Select');
+  assert.equal(pickupDateLabel('2099-02-30','ko',now), '선택');
+  assert.equal(pickupDateLabel('not-a-date','ja',now), '選択');
+  assert.equal(pickupDateLabel('2099-01-03','en',now), 'January 3');
+  assert.equal(pickupDateLabel('2099-01-02','en',new Date('2099-01-01T14:59:59Z')), 'January 2');
 });
 test('renewal endpoints and submit fail closed in production before explicit enablement; legacy form remains available', async t => {
   const c = customerFixture(); t.after(() => c.sqlite.close()); c.env.APP_ENV = 'production';
@@ -87,12 +110,15 @@ test('invalid/stale Account context and cross-origin submit fail before storing 
 });
 test('invalid renewal quantities and forged payment choice are rejected without legacy coercion', async t => {
   const c = customerFixture(); t.after(() => c.sqlite.close());
-  for (const [field, value] of [['suitcase_qty', '1.9'], ['backpack_qty', '-1'], ['companion_count', '100'], ['payment_method', 'PAID']]) {
+  const day=syntheticDraft().visit.pickupDate,yesterday=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Tokyo'}).format(new Date(Date.now()-86400000));
+  for (const [field, value] of [['suitcase_qty', '1.9'], ['backpack_qty', '-1'], ['companion_count', '100'], ['payment_method', 'PAID'],
+    ['expected_pickup_at',day+'T'],['expected_pickup_at',day+'T08:30'],['expected_pickup_at',day+'T21:30'],['expected_pickup_at',yesterday+'T17:00']]) {
     const form = toRenewalIntakeForm(syntheticDraft(), 'existing-storage-notice-v1'); form.set(field, value);
     const response = await c.app.request(`${origin}/customer/submit`, { method: 'POST', headers: { origin }, body: form }, c.env);
     assert.equal(response.status, 400);
   }
   assert.equal(c.objects.size, 0);
+  assert.equal(c.sqlite.prepare('SELECT count(*) n FROM luggage_orders').get()!.n,0);
 });
 test('lost response after the actual D1 commit replays without deleting the committed photos or creating a duplicate', async t => {
   const c = customerFixture(); t.after(() => c.sqlite.close()); const draft = syntheticDraft();

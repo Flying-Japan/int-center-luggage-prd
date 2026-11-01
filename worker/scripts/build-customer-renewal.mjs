@@ -6,6 +6,7 @@ const result = await build({ entryPoints: ['client/renewal.ts'], bundle: true, w
 const files = ['review.css', 'customer-shell.css', 'luggage-origin.css', 'review-typography.css'];
 let css = await readFile('customer-ui/v8/assets/pretendard-license.css', 'utf8');
 for (const file of files) css += '\n' + await readFile(`customer-ui/v8/${file}`, 'utf8');
+css += '\n' + await readFile('customer-ui/v13/luggage-input-controls.css', 'utf8');
 css = css.replace(/@import '\.\/assets\/pretendard-license\.css';/, '').replaceAll("'./assets/PretendardJPVariable.woff2'", "'/customer/renewal/assets/PretendardJPVariable.woff2'");
 // Functional visibility and native-dialog adaptation; source palette/layout retained.
 css += '\n[hidden]{display:none!important}.rd-root fieldset{min-width:0}.rd-root .rd-main{max-width:720px;margin:0 auto;padding:24px 20px 64px}.rd-root .rd-field{display:grid;gap:8px}.rd-root button{cursor:pointer}.rd-root .rd-alert{color:#b42318}.rd-root .fj-customer-menu{position:fixed;inset:0 0 0 auto;margin:0;height:100%;max-height:100%;border:0;padding:0;width:min(420px,100%);background:white;z-index:100}.fj-customer-menu::backdrop{background:#191f2870}.rd-root .fj-customer-menu-panel{width:100%;height:100%;padding:24px}.rd-root .rd-summary{display:grid;grid-template-columns:1fr 2fr;gap:12px}.rd-root .rd-summary dd{margin:0;overflow-wrap:anywhere}.rd-root .rd-origin-kakao-switch{flex-wrap:wrap}\n';

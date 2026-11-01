@@ -34,7 +34,7 @@ export function createIntakeDraft(locale: IntakeLocale, privacyVersion: string, 
   return { version: 2, id: crypto.randomUUID(), requestKey, revision: 0, updatedAt: now,
     createdAt: now, expiresAt: now + INTAKE_DRAFT_TTL, boundary: { mode: 'guest' },
     step: "contact", locale, path: "guest", contact: { name: "", phone: "", email: "" },
-    visit: { suitcaseQty: "0", backpackQty: "0", pickupDate: "", pickupTime: "18:00",
+    visit: { suitcaseQty: "0", backpackQty: "0", pickupDate: "", pickupTime: "",
       paymentMethod: "CASH", companionCount: "1" }, photos: { identity: null, luggage: null },
     privacy: { version: privacyVersion, accepted: false } };
 }

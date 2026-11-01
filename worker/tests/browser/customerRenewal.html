@@ -55,8 +55,12 @@ document.querySelector('#run').onclick=async()=>{
   check(doc().querySelector('[data-field="name"]').value==='Synthetic Member'&&doc().querySelector('[data-field="email"]').value==='synthetic-member@example.invalid','verified synthetic profile fills only missing member fields');
   check(doc().querySelector('[data-field="phone"]').value==='000-9876-5432'&&doc().querySelector('[data-photo-name="identity"]').textContent==='synthetic-identity.png','empty member phone does not erase draft phone or photos');
   check([...doc().querySelectorAll('[data-step]')].every(el=>!el.hidden)&&doc().querySelector('#renewal-next').hidden,'verified member switches to a single quick-reception form');
-  fill('suitcaseQty','1');fill('pickupDate',tomorrow);fill('pickupTime','17:00');
-  const memberConsent=doc().querySelector('#renewal-consent');memberConsent.checked=true;memberConsent.dispatchEvent(new frame.contentWindow.Event('input',{bubbles:true}));click('#renewal-submit');
+  fill('suitcaseQty','1');fill('pickupDate',tomorrow);
+  const memberConsent=doc().querySelector('#renewal-consent');memberConsent.checked=true;memberConsent.dispatchEvent(new frame.contentWindow.Event('input',{bubbles:true}));
+  const beforeMissingTime=(await(await fetch('/__local/summary')).json()).orders;
+  click('#renewal-submit');await wait(()=>!doc().querySelector('#renewal-error').hidden,'missing quick-reception time rejected');
+  check(doc().querySelector('[data-field="pickupTime"]').value===''&&(await(await fetch('/__local/summary')).json()).orders===beforeMissingTime,'quick reception cannot submit an unselected pickup time');
+  fill('pickupTime','17:00');click('#renewal-submit');
   await wait(()=>frame.contentWindow.location.pathname.startsWith('/customer/renewal/receipt/')||(doc().querySelector('#renewal-receipt-link')?.href&&!doc().querySelector('#renewal-receipt-link').hidden),'member saved receipt link');
   if(!frame.contentWindow.location.pathname.startsWith('/customer/renewal/receipt/'))await navigate(doc().querySelector('#renewal-receipt-link').href);
   await wait(()=>frame.contentWindow.location.pathname.startsWith('/customer/renewal/receipt/'),'signed-member saved receipt');

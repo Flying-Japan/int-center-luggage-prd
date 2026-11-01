@@ -1,0 +1,11 @@
+/* Selected camera/date controls adapted from v13 luggage-origin.css.
+   Provenance is in source-manifest.json. Existing six-step layout is retained. */
+.rd-root .rd-origin-photo-button{min-height:44px;width:fit-content;max-width:100%;padding:10px 14px;border:0;border-radius:8px;background:#0f4dbf;color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+.rd-root .rd-luggage-origin .renewal-camera-input{position:absolute;width:1px;height:1px;min-height:0;padding:0;border:0;clip-path:inset(50%);overflow:hidden;white-space:nowrap}
+.rd-root [data-photo-name]{overflow-wrap:anywhere;margin:0}
+.rd-root input[type=file]{max-width:100%;min-width:0}
+.rd-origin-date-picker{position:relative;display:flex;align-items:center;justify-content:space-between;min-height:56px;padding:0 16px;border:1px solid #8b95a1;border-radius:10px;background:#fff}
+.rd-origin-date-label{font-size:18px;font-weight:750}
+.rd-root .rd-origin-date-picker input[type=date]{position:absolute;inset:0;width:100%;height:100%;min-height:0;padding:0;border:0;opacity:0;cursor:pointer}
+.rd-origin-date-picker:focus-within,.rd-origin-photo-button:focus-visible{outline:3px solid #3182f6;outline-offset:3px}
+.rd-origin-date-picker:has([aria-invalid=true]){border-color:#a22030}

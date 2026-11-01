@@ -4,14 +4,16 @@ import { readFileSync } from 'node:fs';
 import { customerFixture } from '../tests/helpers/customerFixture';
 import { syntheticPng } from '../tests/helpers/syntheticPhoto';
 const c = customerFixture();
+const port = Number(process.env.CUSTOMER_LOCAL_PORT ?? 8797);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) throw Error('INVALID_LOCAL_PORT');
 c.env.ACCOUNT_CONTEXT_SECRET = 'synthetic-local-account-context-only';
 const font = readFileSync('customer-ui/v8/assets/PretendardJPVariable.woff2');
 c.objects.set('static/customer-renewal/PretendardJPVariable.woff2', { body: font.buffer.slice(font.byteOffset, font.byteOffset + font.byteLength), contentType: 'font/woff2' });
 globalThis.fetch = async () => { throw Error('LOCAL_HARNESS_EXTERNAL_FETCH_FORBIDDEN'); };
 createServer(async (request, response) => {
   try {
-    if (request.headers.host !== '127.0.0.1:8797') { response.writeHead(403); response.end(); return; }
-    const url = new URL(request.url!, 'http://127.0.0.1:8797');
+    if (request.headers.host !== `127.0.0.1:${port}`) { response.writeHead(403); response.end(); return; }
+    const url = new URL(request.url!, `http://127.0.0.1:${port}`);
     if (request.method === 'POST') console.log('Local synthetic POST received:', url.pathname);
     if (url.pathname === '/__local/checks') {
       response.writeHead(200, { 'content-type': 'text/html', 'cache-control': 'no-store' });
@@ -19,6 +21,9 @@ createServer(async (request, response) => {
     }
     if (url.pathname === '/__local/boundary-checks') {
       response.writeHead(200, { 'content-type':'text/html', 'cache-control':'no-store' });response.end(readFileSync('tests/browser/customerBoundary.html'));return;
+    }
+    if (url.pathname === '/__local/input-controls-checks') {
+      response.writeHead(200, { 'content-type':'text/html', 'cache-control':'no-store' });response.end(readFileSync('tests/browser/customerInputControls.html'));return;
     }
     if (url.pathname === '/__local/store.mjs') {
       response.writeHead(200, { 'content-type':'text/javascript', 'cache-control':'no-store' });response.end(readFileSync('client/intakeDraftStore.mjs'));return;
@@ -52,4 +57,4 @@ createServer(async (request, response) => {
     if (request.method === 'POST') console.log('Local synthetic POST status:', result.status);
     response.writeHead(result.status, Object.fromEntries(result.headers)); response.end(Buffer.from(await result.arrayBuffer()));
   } catch (error) { console.error(error); response.writeHead(500); response.end('LOCAL_TEST_ERROR'); }
-}).listen(8797, '127.0.0.1', () => console.log('Synthetic renewal server: http://127.0.0.1:8797/customer/renewal · checks: /__local/checks'));
+}).listen(port, '127.0.0.1', () => console.log(`Synthetic renewal server: http://127.0.0.1:${port}/customer/renewal · checks: /__local/checks`));
