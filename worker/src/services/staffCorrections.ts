@@ -18,7 +18,9 @@ export type ReturnAllocation = {
     correctionId: string;
     method: 'CASH' | 'PAY_QR';
 };
+export type HistoricalReceipt = { receiptId: string; amount: number; tenderType: "CASH" | "PAY_QR"; businessDate: string; occurredAt: string | null; timeNote: string | null; confirmedAlreadyReceived: true };
 export type CorrectionChanges = {
+    historicalReceipts?: HistoricalReceipt[];
     finalAmount: number;
     suitcaseQty?: number;
     backpackQty?: number;
@@ -30,6 +32,9 @@ export type CorrectionChanges = {
         businessDate: string;
         occurredAt: string | null;
         confirmedAlreadyReturned: true;
+        kind?: "GENERAL" | "DISCOUNT_ALREADY_PAID";
+        discountTier?: "BLUE" | "SILVER" | "GOLD" | "PLATINUM" | "BLACK";
+        timeNote?: string | null;
     } | null;
 };
 export type CorrectionActor = {
@@ -38,11 +43,23 @@ export type CorrectionActor = {
     isManager: boolean;
     nameStatements?: D1PreparedStatement[];
 };
+const validDay = (v:unknown):v is string => typeof v==='string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && Number.isFinite(Date.parse(v)) && new Date(v).toISOString().slice(0,10)===v;
+const validOccurrence = (v:unknown) => v===null || typeof v==='string' && Number.isFinite(Date.parse(v)) && /(?:Z|[+-]\d{2}:\d{2})$/.test(v);
 export function parseCorrectionChanges(value: unknown): CorrectionChanges {
-    const v = strict(value, ['finalAmount', 'suitcaseQty', 'backpackQty', 'tenderChanges', 'returnAllocations', 'returned']);
+    const v = strict(value, ['historicalReceipts', 'finalAmount', 'suitcaseQty', 'backpackQty', 'tenderChanges', 'returnAllocations', 'returned']);
     if (!integer(v.finalAmount))
         fail('INVALID_REQUEST', '최종 청구금액을 정수 엔으로 입력해 주세요.', 400);
     const out: CorrectionChanges = { finalAmount: v.finalAmount as number, tenderChanges: [], returnAllocations: [], returned: null };
+    if (v.historicalReceipts !== undefined) {
+        if (!Array.isArray(v.historicalReceipts) || v.historicalReceipts.length > 20) fail('INVALID_REQUEST', '이미 받은 누락 수납 내역을 확인해 주세요.', 400);
+        const parsedHistorical = (v.historicalReceipts as unknown[]).map(raw => {
+            const h = strict(raw, ['receiptId','amount','tenderType','businessDate','occurredAt','timeNote','confirmedAlreadyReceived']);
+            if (!uuid(h.receiptId) || !integer(h.amount) || h.amount===0 || !['CASH','PAY_QR'].includes(String(h.tenderType)) || h.confirmedAlreadyReceived!==true || !validDay(h.businessDate) || !validOccurrence(h.occurredAt) || !(h.timeNote===null || typeof h.timeNote==='string'&&h.timeNote.length<=100)) fail('INVALID_REQUEST','누락 수납의 실제 금액·수단·업무일과 이미 받은 사실을 확인해 주세요. 정확한 시각은 미상으로 남길 수 있습니다.',400);
+            return h as HistoricalReceipt;
+        });
+        out.historicalReceipts = parsedHistorical;
+        if (new Set(parsedHistorical.map(h=>h.receiptId)).size!==parsedHistorical.length) fail('INVALID_REQUEST','같은 누락 수납을 중복 기록할 수 없습니다.',400);
+    }
     for (const [key, label] of [['suitcaseQty', '캐리어'], ['backpackQty', '작은 가방']] as const)
         if (key in v) {
             if (!integer(v[key], 99))
@@ -74,16 +91,19 @@ export function parseCorrectionChanges(value: unknown): CorrectionChanges {
     if (new Set(out.returnAllocations.map(x => x.correctionId)).size !== out.returnAllocations.length)
         fail('INVALID_REQUEST', '같은 반환을 중복 선택할 수 없습니다.', 400);
     if (v.returned !== undefined && v.returned !== null) {
-        const r = strict(v.returned, ['amount', 'method', 'businessDate', 'occurredAt', 'confirmedAlreadyReturned']);
+        const r = strict(v.returned, ['amount', 'method', 'businessDate', 'occurredAt', 'confirmedAlreadyReturned', 'kind', 'discountTier', 'timeNote']);
         if (!integer(r.amount) || r.amount === 0 || !['CASH', 'PAY_QR', 'UNKNOWN'].includes(String(r.method)) || r.confirmedAlreadyReturned !== true || typeof r.businessDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(r.businessDate) || !Number.isFinite(Date.parse(r.businessDate)) || new Date(r.businessDate).toISOString().slice(0, 10) !== r.businessDate || !(r.occurredAt === null || typeof r.occurredAt === 'string' && Number.isFinite(Date.parse(r.occurredAt)) && /(?:Z|[+-]\d{2}:\d{2})$/.test(r.occurredAt)))
             fail('INVALID_REQUEST', '이미 반환한 금액·업무일을 확인해 주세요. 정확한 시각·수단이 미상이면 미상으로 남겨 주세요.', 400);
+        if (r.kind!==undefined && !['GENERAL','DISCOUNT_ALREADY_PAID'].includes(String(r.kind)) || r.kind==='DISCOUNT_ALREADY_PAID' && !['BLUE','SILVER','GOLD','PLATINUM','BLACK'].includes(String(r.discountTier)) || r.kind!=='DISCOUNT_ALREADY_PAID' && r.discountTier!==undefined || !(r.timeNote===undefined || r.timeNote===null || typeof r.timeNote==='string'&&r.timeNote.length<=100)) fail('INVALID_REQUEST','이미 지급한 할인 내역의 구분·직원 확인 등급을 확인해 주세요.',400);
         out.returned = r as CorrectionChanges['returned'];
     }
     return out;
 }
 export async function correctionHash(value: unknown) { const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(value))); return Array.from(new Uint8Array(bytes), x => x.toString(16).padStart(2, '0')).join(''); }
-const fields = 'order_id,status,parent_order_id,created_at,expected_pickup_at,expected_storage_days,suitcase_qty,backpack_qty,set_qty,price_per_day,prepaid_amount,final_amount,extra_amount,flying_pass_tier,flying_pass_discount_amount,staff_prepaid_override_amount,payment_method,updated_at';
+const fields = 'actual_pickup_at,tag_no,order_id,status,parent_order_id,created_at,expected_pickup_at,expected_storage_days,suitcase_qty,backpack_qty,set_qty,price_per_day,prepaid_amount,final_amount,extra_amount,flying_pass_tier,flying_pass_discount_amount,staff_prepaid_override_amount,payment_method,updated_at';
 type Order = {
+    actual_pickup_at: string | null;
+    tag_no: string | null;
     order_id: string;
     status: string;
     parent_order_id: string | null;
@@ -134,7 +154,7 @@ export async function previewStaffCorrection(db: D1Database, orderId: string, ch
     if (!b || !s.receipts.length || b.legacy_paid_estimate || b.unbilled_days || b.pending_refund_count)
         fail('BILLING_REVIEW_REQUIRED', '원수납·연장·진행 중 환급을 먼저 확인해 주세요.');
     const today = new Date(now.getTime() + 9 * 3600000).toISOString().slice(0, 10), r = changes.returned;
-    const affectedDays = new Set([today, ...s.receipts.map(x => String(x.business_date)), ...s.returns.filter(x => changes.returnAllocations.some(a => a.correctionId === x.correction_id)).map(x => String(x.business_date)), ...(r ? [r.businessDate] : [])]);
+    const affectedDays = new Set([today, ...s.receipts.map(x => String(x.business_date)), ...s.returns.filter(x => changes.returnAllocations.some(a => a.correctionId === x.correction_id)).map(x => String(x.business_date)), ...(r ? [r.businessDate] : []), ...(changes.historicalReceipts??[]).map(h=>h.businessDate)]);
     const closed = s.closings.filter(x => affectedDays.has(String(x.business_date)));
     const suitcase = changes.suitcaseQty ?? o.suitcase_qty, backpack = changes.backpackQty ?? o.backpack_qty;
     if (suitcase + backpack < 1)
@@ -157,17 +177,25 @@ export async function previewStaffCorrection(db: D1Database, orderId: string, ch
     for (const a of changes.returnAllocations)
         if (!s.returns.some(x => x.correction_id === a.correctionId && x.method === 'UNKNOWN'))
             fail('STALE', '이미 확인됐거나 다른 주문의 반환입니다.');
+    const historical = changes.historicalReceipts ?? [], historicalAmount = historical.reduce((sum,h)=>sum+h.amount,0);
+    const firstDay = new Date(Date.parse(o.created_at.includes('T')?o.created_at:o.created_at.replace(' ','T')+'Z')+9*3600000).toISOString().slice(0,10);
+    for (const h of historical) {
+        if (h.businessDate<firstDay || h.businessDate>today || h.occurredAt!==null&&(Date.parse(h.occurredAt)>now.getTime() || new Date(Date.parse(h.occurredAt)+9*3600000).toISOString().slice(0,10)!==h.businessDate)) fail('INVALID_REQUEST','누락 수납 업무일·실제 시각이 주문 및 기록 시점과 맞지 않습니다.',400);
+        if (await db.prepare('SELECT 1 FROM luggage_order_payments WHERE receipt_request_id=?').bind('historical:'+h.receiptId).first()) fail('HISTORICAL_RECEIPT_DUPLICATE','이미 기록한 누락 수납입니다. 새로고침해 주세요.');
+    }
     const netBefore = b.net_received_amount, returned = r?.amount ?? 0;
-    if (returned > Math.max(0, netBefore - changes.finalAmount))
+    if (historicalAmount>0 && (historicalAmount>500000 || b.recorded_amount+historicalAmount>500000 || historicalAmount>Math.max(0,changes.finalAmount+returned-netBefore))) fail('HISTORICAL_RECEIPT_EXCEEDS_GAP','누락 수납은 최종 청구와 이미 반환한 금액에 필요한 차액을 넘을 수 없습니다.');
+    if (r?.kind==='DISCOUNT_ALREADY_PAID' && (b.cash_refunded_amount>0 || s.returns.some(x=>x.kind==='DISCOUNT_ALREADY_PAID'))) fail('DISCOUNT_ALREADY_RECORDED','이미 지급한 할인 기록이 있습니다. 다시 반환 기록을 만들지 말고 기존 이력을 확인해 주세요.');
+    if (returned > Math.max(0, netBefore + historicalAmount - changes.finalAmount))
         fail('RETURN_EXCEEDS_OVERPAYMENT', '이미 반환한 금액이 원수납과 최종 청구의 차액보다 큽니다.');
-    if (r && (r.businessDate > today || r.businessDate < s.receipts.map(x => String(x.business_date)).sort()[0] || (r.occurredAt !== null && (Date.parse(r.occurredAt) > now.getTime() || new Date(Date.parse(r.occurredAt) + 9 * 3600000).toISOString().slice(0, 10) !== r.businessDate))))
+    if (r && (r.businessDate > today || r.businessDate < [...s.receipts.map(x => String(x.business_date)),...historical.map(h=>h.businessDate)].sort()[0] || (r.occurredAt !== null && (Date.parse(r.occurredAt) > now.getTime() || new Date(Date.parse(r.occurredAt) + 9 * 3600000).toISOString().slice(0, 10) !== r.businessDate))))
         fail('INVALID_REQUEST', '반환 업무일과 실제 시각을 확인해 주세요.', 400);
-    const tenders = s.receipts.filter(x=>x.order_id===orderId).map(x => changes.tenderChanges.find(t => t.paymentId === x.payment_id)?.after ?? x.tender_type);
+    const tenders = [...historical.map(h=>h.tenderType), ...s.receipts.filter(x=>x.order_id===orderId).map(x => changes.tenderChanges.find(t => t.paymentId === x.payment_id)?.after ?? x.tender_type)];
     after.payment_method = tenders.every(x => x === 'CASH') ? 'CASH' : tenders.every(x => x === 'PAY_QR') ? 'PAY_QR' : 'MIXED';
-    const target = changes.finalAmount, netAfter = netBefore - returned;
+    const target = changes.finalAmount, netAfter = netBefore + historicalAmount - returned;
     if (o.status === 'PICKED_UP' && target > netAfter)
         fail('PICKED_UP_DEBT', '수령완료 주문에 미수납을 만들 수 없습니다. 담당자에게 이미 받은 금액을 확인해 주세요.');
-    return { fingerprint: s.fingerprint, before: {...o,billing_total:b.total_effective_billed_amount}, after, scopeJson:s.scopeJson,familyDelta:familyAmountOnly?target-b.total_effective_billed_amount:0, billingBefore: b, netReceivedAfter: netAfter, finalBilledAfter: target, outstandingAfter: Math.max(0, target - netAfter), returnDueAfter: Math.max(0, netAfter - target), closedDays: closed.map(x => String(x.business_date)), receipts: s.receipts, sequence: s.history.length + 1, changes };
+    return { fingerprint: s.fingerprint, before: {...o,billing_total:b.total_effective_billed_amount}, after, scopeJson:s.scopeJson,familyDelta:familyAmountOnly?target-b.total_effective_billed_amount:0, billingBefore: b, netReceivedAfter: netAfter, finalBilledAfter: target, outstandingAfter: Math.max(0, target - netAfter), returnDueAfter: Math.max(0, netAfter - target), closedDays: closed.map(x => String(x.business_date)), historicalAmount, receipts: s.receipts, sequence: s.history.length + 1, changes };
 }
 export async function applyStaffCorrection(db: D1Database, orderId: string, input: {
     correctionId: string;
@@ -197,9 +225,9 @@ export async function applyStaffCorrection(db: D1Database, orderId: string, inpu
     const originalReceipts = q.receipts.map(p => ({ ...p, tender_type: p.original_tender_type }));
     const detail = JSON.stringify({ requestHash, reason: input.reason.trim(), before: q.before, after, changes: input.changes, actor: who.actor, staffId: who.staffId, recordedAt });
     const statements = [db.prepare(`INSERT INTO luggage_audit_logs(order_id,staff_id,device_id,action,details,timestamp) VALUES(?,?,?,'STAFF_ORDER_CORRECTION',?,?)`).bind(orderId, who.staffId, input.correctionId, detail, recordedAt),
-        db.prepare(`INSERT INTO luggage_staff_corrections(correction_id,order_id,family_delta,scope_json,before_billed_amount,after_billed_amount,sequence,request_hash,before_json,after_json,receipts_json,tender_changes_json,return_allocations_json,returned_amount,return_method,return_business_date,return_occurred_at,reason,staff_id,actor_json,is_manager,recorded_at,audit_id)
- VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT log_id FROM luggage_audit_logs WHERE device_id=? AND action='STAFF_ORDER_CORRECTION'))`).bind(input.correctionId, orderId,q.familyDelta,q.scopeJson,q.billingBefore.total_effective_billed_amount,q.finalBilledAfter, q.sequence, requestHash, beforeJson, afterJson, JSON.stringify(originalReceipts), JSON.stringify(input.changes.tenderChanges), JSON.stringify(input.changes.returnAllocations), r?.amount ?? 0, r?.method ?? null, r?.businessDate ?? null, r?.occurredAt ?? null, input.reason.trim(), who.staffId, JSON.stringify(who.actor), who.isManager ? 1 : 0, recordedAt, input.correctionId),
-        db.prepare(`SELECT json_extract('{}',CASE WHEN EXISTS(SELECT 1 FROM luggage_staff_corrections WHERE correction_id=? AND request_hash=?) AND EXISTS(SELECT 1 FROM luggage_billing_balances WHERE root_id=? AND recorded_amount=? AND net_received_amount=? AND total_effective_billed_amount=? AND outstanding_amount=? AND overpaid_amount=? AND root_review_required=0 AND invalid_amount=0) THEN '$' ELSE 'CORRECTION_POSTCONDITION_FAILED' END)`).bind(input.correctionId, requestHash, orderId, q.billingBefore.recorded_amount, q.netReceivedAfter, q.finalBilledAfter, q.outstandingAfter, q.returnDueAfter), ...(who.nameStatements ?? [])];
+        db.prepare(`INSERT INTO luggage_staff_corrections(correction_id,order_id,family_delta,scope_json,before_billed_amount,after_billed_amount,sequence,request_hash,before_json,after_json,receipts_json,tender_changes_json,return_allocations_json,returned_amount,return_method,return_business_date,return_occurred_at,reason,staff_id,actor_json,is_manager,recorded_at,historical_receipts_json,return_context_json,audit_id)
+ VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT log_id FROM luggage_audit_logs WHERE device_id=? AND action='STAFF_ORDER_CORRECTION'))`).bind(input.correctionId, orderId,q.familyDelta,q.scopeJson,q.billingBefore.total_effective_billed_amount,q.finalBilledAfter, q.sequence, requestHash, beforeJson, afterJson, JSON.stringify(originalReceipts), JSON.stringify(input.changes.tenderChanges), JSON.stringify(input.changes.returnAllocations), r?.amount ?? 0, r?.method ?? null, r?.businessDate ?? null, r?.occurredAt ?? null, input.reason.trim(), who.staffId, JSON.stringify(who.actor), who.isManager ? 1 : 0, recordedAt, JSON.stringify(input.changes.historicalReceipts??[]), JSON.stringify(r?{kind:r.kind??'GENERAL',discountTier:r.discountTier??null,timeNote:r.timeNote??null}:{}), input.correctionId),
+        db.prepare(`SELECT json_extract('{}',CASE WHEN EXISTS(SELECT 1 FROM luggage_staff_corrections WHERE correction_id=? AND request_hash=?) AND EXISTS(SELECT 1 FROM luggage_billing_balances WHERE root_id=? AND recorded_amount=? AND net_received_amount=? AND total_effective_billed_amount=? AND outstanding_amount=? AND overpaid_amount=? AND root_review_required=0 AND invalid_amount=0) THEN '$' ELSE 'CORRECTION_POSTCONDITION_FAILED' END)`).bind(input.correctionId, requestHash, orderId, q.billingBefore.recorded_amount+q.historicalAmount, q.netReceivedAfter, q.finalBilledAfter, q.outstandingAfter, q.returnDueAfter), ...(who.nameStatements ?? [])];
     try {
         await db.batch(statements);
     }

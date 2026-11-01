@@ -1258,6 +1258,7 @@ test('prepared policy upgrade preserves claim/receipt/audit rows and matches all
   ctx.sqlite.exec(readFileSync('migrations/20261029_flying_pass_refund_handover.sql', 'utf8'));
   ctx.sqlite.exec(readFileSync('migrations/20261030_bag_additions.sql', 'utf8'));
   ctx.sqlite.exec(readFileSync('migrations/20261101_staff_order_corrections.sql', 'utf8'));
+  ctx.sqlite.exec(readFileSync('migrations/20261101_staff_historical_receipts.sql', 'utf8'));
   assert.deepEqual(definitions(), expected);
   assert.deepEqual(ctx.sqlite.prepare('SELECT * FROM luggage_orders').all(), orders);
   assert.deepEqual(payments(ctx), ledger);
