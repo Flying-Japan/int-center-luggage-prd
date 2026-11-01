@@ -27,9 +27,12 @@ export async function securityHeaders(c: Context, next: Next) {
   const path = new URL(c.req.url).pathname;
   const isStaffPage = path.startsWith("/staff/") || path === "/staff";
   const isCustomerPage = path === "/customer" || path.startsWith("/customer/");
+  const isPrivateRenewal = path === '/customer/renewal' || path.startsWith('/customer/renewal/');
   if (contentType.includes("text/html")) {
     const html = await c.res.text();
-    const injectedHtml = isStaffPage ? html : injectGa4Snippet(html);
+    // Renewal contains private draft/photo state and bearer receipt URLs. Do not
+    // newly expose those pages to the global third-party analytics injection.
+    const injectedHtml = isStaffPage || isPrivateRenewal ? html : injectGa4Snippet(html);
     c.res = new Response(injectedHtml, {
       status: c.res.status,
       statusText: c.res.statusText,
@@ -55,6 +58,16 @@ export async function securityHeaders(c: Context, next: Next) {
     "Content-Security-Policy",
     "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://browser.sentry-cdn.com https://www.clarity.ms https://*.clarity.ms https://www.googletagmanager.com https://*.googletagmanager.com https://www.google-analytics.com https://*.google-analytics.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self' https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://www.clarity.ms https://*.clarity.ms https://www.google-analytics.com https://*.google-analytics.com https://analytics.google.com https://*.analytics.google.com https://www.googletagmanager.com https://*.googletagmanager.com https://stats.g.doubleclick.net https://static.cloudflareinsights.com; frame-src https://calendar.google.com https://docs.google.com; frame-ancestors 'none'"
   );
+  // Photo responses are isolated from staff's HTML/script policy. Even existing
+  // stored objects must pass the shared download byte/MIME validator first.
+  if (/^\/staff\/orders\/[^/]+\/(?:id-image|luggage-image)$/.test(path)
+    || /^\/internal\/luggage-orders\/[^/]+\/images\/(?:id|luggage)$/.test(path)) {
+    c.res.headers.set('Content-Security-Policy', "default-src 'none'; sandbox; frame-ancestors 'none'");
+    c.res.headers.set('Content-Disposition', 'inline');
+    c.res.headers.set('Cache-Control', 'private, no-store, max-age=0');
+    c.res.headers.set('Cross-Origin-Resource-Policy', 'same-origin');
+    c.res.headers.set('Referrer-Policy', 'no-referrer');
+  }
 }
 
 /**

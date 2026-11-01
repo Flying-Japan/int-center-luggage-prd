@@ -4,6 +4,7 @@ import { t, normalizeLang } from "../lib/i18n";
 import { FLYING_PASS_TIERS, type FlyingPassTier } from "../services/pricing";
 import { loadCompletionMessages, applyAmountTemplate } from "../services/completionMessages";
 import { uploadImage, buildImageKey, extFromContentType, validateImageUpload } from "../lib/r2";
+import { inspectPhotoContent } from '../lib/imageContent';
 import { sendOrderConfirmation } from "../lib/brevo";
 import { RENTAL_PROMO_LINKS } from "../lib/rentalLinks";
 import {
@@ -16,8 +17,12 @@ import { calculateStorageDays } from "../services/storage";
 import { buildOrderId, buildSameDayTag, buildOvernightTag } from "../services/orderNumber";
 import { escapeHtml } from "../lib/escapeHtml";
 import { captureOperationalError } from "../lib/observability";
+import customerRenewal from './customerRenewal';
+import { readIntakeIdentity, intakeSubject, renewalEnabled, type RenewalEnv } from '../customer/accountContext';
+import { claimCustomerIntake, commitCustomerIntake, failCustomerIntakeBeforeCommit, fingerprintCustomerIntake, reserveIntakeUpload, cleanupIntakeUploads, IntakeTagConflict, type IntakeClaim } from '../services/customerIntakeRequests';
 
 const customer = new Hono<AppType>();
+customer.route('/', customerRenewal);
 const LUGGAGE_GA4_MEASUREMENT_ID = "G-GQMCKME20J";
 const STATIC_ASSET_VERSION = "20260505-rental-hq";
 const SENTRY_BROWSER_SDK_URL = "https://browser.sentry-cdn.com/8.51.0/bundle.tracing.min.js";
@@ -137,6 +142,10 @@ window.clarity && window.clarity("set", "page", ${JSON.stringify(pageName)});
 // ---------------------------------------------------------------------------
 customer.get("/customer", (c) => {
   const lang = normalizeLang(c.req.query("lang"));
+  // Explicit release switch only. The original online/form entry stays unchanged
+  // until the integrated release is approved; legal text remains server-owned.
+  if ((c.env as RenewalEnv).CUSTOMER_RENEWAL_ENABLED === '1' && c.req.query('notice') !== '1')
+    return c.redirect(`/customer/renewal?lang=${lang}`);
   const error = c.req.query("error") || "";
 
   const MAX_BAG_QTY = 99;
@@ -1616,9 +1625,14 @@ form { margin-top: 16px; }
 customer.post("/customer/submit", async (c) => {
   const body = await c.req.parseBody();
   const lang = normalizeLang(String(body.lang || ""));
+  const requestKey = String(body.intake_request_key || '');
+  if (!requestKey && (body.intake_mode || body.intake_member_subject)) return c.json({ error: 'INTAKE_REQUEST_KEY_REQUIRED' }, 400);
+  const env: RenewalEnv = c.env;
+  if (requestKey && !renewalEnabled(env)) return c.json({ error: 'CUSTOMER_RENEWAL_DISABLED' }, 404);
+  if (requestKey && c.req.header('origin') !== new URL(c.req.url).origin) return c.json({ error: 'INVALID_ORIGIN' }, 403);
 
   const redirect = (msg: string) =>
-    c.redirect(`/customer?error=${encodeURIComponent(msg)}&lang=${lang}`);
+    requestKey ? c.json({ error: msg }, 400) : c.redirect(`/customer?error=${encodeURIComponent(msg)}&lang=${lang}`);
 
   // --- Field extraction ---
   const name = String(body.name || "").trim();
@@ -1630,7 +1644,7 @@ customer.post("/customer/submit", async (c) => {
   const suitcaseQty = Math.min(99, parseInt(String(body.suitcase_qty || "0"), 10) || 0);
   const backpackQty = Math.min(99, parseInt(String(body.backpack_qty || "0"), 10) || 0);
   const expectedPickupAt = String(body.expected_pickup_at || "").trim();
-  const flyingPassTier = normalizeFlyingPassTier(String(body.flying_pass_tier || ""));
+  const flyingPassTier = normalizeFlyingPassTier(requestKey ? '' : String(body.flying_pass_tier || ""));
   const consentChecked = String(body.consent_checked || "") === "1";
   const idImageFile = body.id_image;
   const luggageImageFile = body.luggage_image;
@@ -1648,6 +1662,13 @@ customer.post("/customer/submit", async (c) => {
   if (!isUploadedImageFile(idImageFile)) return redirect(t("required", lang) + ": " + t("id_image", lang));
   if (!isUploadedImageFile(luggageImageFile)) return redirect(t("required", lang) + ": " + t("luggage_image", lang));
   if (!consentChecked) return redirect(t("consent_label", lang));
+  if (requestKey) {
+    const quantity = (value: unknown, min: number) => /^\d{1,2}$/.test(String(value)) && Number(value) >= min && Number(value) <= 99;
+    if (!quantity(body.suitcase_qty, 0) || !quantity(body.backpack_qty, 0) || !quantity(body.companion_count, 1)
+      || !['CASH', 'PAY_QR'].includes(rawPayment) || !/^[^\s@]+@[^\s@]+$/.test(email)
+      || name.length > 120 || email.length > 254 || !/^\d{4}-\d{2}-\d{2}T(?:09|1\d|20):(?:00|30)$|^\d{4}-\d{2}-\d{2}T21:00$/.test(expectedPickupAt)
+      || !/^[A-Za-z0-9_-]{43}$/.test(requestKey)) return redirect('INVALID_INTAKE_FIELDS');
+  }
 
   // Form sends JST time as "YYYY-MM-DDTHH:MM" — append +09:00 so JS treats it as JST
   const pickupDateStr = expectedPickupAt.includes("+") || expectedPickupAt.includes("Z")
@@ -1662,29 +1683,88 @@ customer.post("/customer/submit", async (c) => {
     return redirect(t("pickup_note", lang));
   }
 
+  let claim: IntakeClaim | undefined;
+  let accountPersonId: string | null = null;
+  const imageBytes = new Map<File,ArrayBuffer>();
+  if (requestKey) {
+    const identity = await readIntakeIdentity(c.req.raw.headers, env.ACCOUNT_CONTEXT_SECRET);
+    if (identity.kind === 'invalid') return c.json({ error: 'ACCOUNT_CONTEXT_INVALID' }, 401);
+    const mode = String(body.intake_mode || '');
+    if (mode !== 'guest' && mode !== 'member') return c.json({ error: 'INTAKE_MODE_REQUIRED' }, 400);
+    if (mode === 'member') {
+      if (identity.kind !== 'verified') return c.json({ error: 'MEMBER_REAUTHENTICATION_REQUIRED', keepDraft: true }, 401);
+      const subject = await intakeSubject(identity.customer.personId, env.ACCOUNT_CONTEXT_SECRET!);
+      if (body.intake_member_subject !== subject) return c.json({ error: 'ACCOUNT_BOUNDARY_CHANGED', keepDraft: true }, 409);
+      accountPersonId = identity.customer.personId;
+    } else if (body.intake_member_subject) return c.json({ error: 'EXPLICIT_GUEST_RESTART_REQUIRED', keepDraft: true }, 409);
+    for (const file of [idImageFile, luggageImageFile]) {
+      const checked = validateImageUpload(file.size, file.type);
+      if (!checked.valid) return redirect(checked.error!);
+      const bytes = await file.arrayBuffer();
+      if (!inspectPhotoContent(bytes, file.type)) return c.json({ error: 'IMAGE_CONTENT_INVALID', keepDraft: true }, 400);
+      imageBytes.set(file,bytes);
+    }
+    const todayJst = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date());
+    const pickupJst = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(pickupDate);
+    const maxJst = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Tokyo' }).format(new Date(Date.now() + 14 * 86400000));
+    if (pickupJst !== expectedPickupAt.slice(0, 10) || pickupJst < todayJst || pickupJst > maxJst) return redirect(t('pickup_note', lang));
+    try {
+      const fingerprint = await fingerprintCustomerIntake({ actorScope: accountPersonId ? `account:${accountPersonId}` : 'anonymous',
+        name, phone, email, lang, suitcaseQty, backpackQty, companionCount, pickupISO: pickupDate.toISOString(),
+        paymentMethod, privacyVersion: 'existing-storage-notice-v1', identityPhoto: idImageFile, luggagePhoto: luggageImageFile,
+        identityBytes:imageBytes.get(idImageFile), luggageBytes:imageBytes.get(luggageImageFile) });
+      const result = await claimCustomerIntake(c.env.DB, requestKey, fingerprint);
+      if (result.kind === 'busy') return c.json({ error: 'INTAKE_PROCESSING', keepDraft: true }, 409);
+      if (result.kind === 'conflict') return c.json({ error: 'INTAKE_REQUEST_CHANGED', keepDraft: true }, 409);
+      if (result.kind === 'replay') {
+        const saved = await c.env.DB.prepare('SELECT view_token,updated_at FROM luggage_orders WHERE order_id=?').bind(result.orderId).first<{ view_token: string; updated_at: string }>();
+        if (!saved?.view_token) return c.json({ error: 'INTAKE_RECEIPT_UNAVAILABLE', keepDraft: true }, 409);
+        return c.json({ orderId: result.orderId, replayed: true, receiptUrl: `/customer/renewal/receipt/${result.orderId}?lang=${lang}&token=${encodeURIComponent(saved.view_token)}` });
+      }
+      claim = result.claim;
+      if (result.previousClaim) try { await cleanupIntakeUploads(c.env.DB, c.env.IMAGES, result.previousClaim); } catch { /* Durable orphan evidence remains. */ }
+    } catch {
+      return c.json({ error: 'INTAKE_UNAVAILABLE', keepDraft: true }, 503);
+    }
+  }
+  // Legacy and renewed paths both validate BOTH files before the first R2 write.
+  // Cached immutable input copies also avoid repeated 10MB multipart reads.
+  if (!requestKey) for (const file of [idImageFile,luggageImageFile]) {
+    const checked=validateImageUpload(file.size,file.type);if(!checked.valid)return redirect(checked.error!);
+    const bytes=await file.arrayBuffer();if(!inspectPhotoContent(bytes,file.type))return redirect('IMAGE_CONTENT_INVALID');
+    imageBytes.set(file,bytes);
+  }
+
   // --- Upload images BEFORE counter allocation ---
   // Prevents tag number gaps when image upload fails (race condition fix).
   // Uses null orderId for key generation since orderId doesn't exist yet.
   let idImageUrl: string | null = null;
   let luggageImageUrl: string | null = null;
+  const releaseBeforeOrderInsert = async () => {
+    if (claim) { await failCustomerIntakeBeforeCommit(c.env.DB,claim); await cleanupIntakeUploads(c.env.DB,c.env.IMAGES,claim); }
+    else for (const key of [idImageUrl,luggageImageUrl]) if (key) try { await c.env.IMAGES.delete(key); } catch { /* Best effort for the unchanged legacy path. */ }
+  };
 
   try {
     const idValidation = validateImageUpload(idImageFile.size, idImageFile.type);
     if (!idValidation.valid) return redirect(idValidation.error || t("upload_error", lang));
     const idExt = extFromContentType(idImageFile.type);
     const idKey = buildImageKey("id", null, idExt);
-    const idBuffer = await idImageFile.arrayBuffer();
-    await uploadImage(c.env.IMAGES, idKey, idBuffer, idImageFile.type);
+    const idBuffer = imageBytes.get(idImageFile)!;
+    if (claim) await reserveIntakeUpload(c.env.DB, claim, idKey, 'id');
     idImageUrl = idKey;
+    await uploadImage(c.env.IMAGES, idKey, idBuffer, idImageFile.type);
 
     const luggageValidation = validateImageUpload(luggageImageFile.size, luggageImageFile.type);
     if (!luggageValidation.valid) return redirect(luggageValidation.error || t("upload_error", lang));
     const luggageExt = extFromContentType(luggageImageFile.type);
     const luggageKey = buildImageKey("luggage", null, luggageExt);
-    const luggageBuffer = await luggageImageFile.arrayBuffer();
-    await uploadImage(c.env.IMAGES, luggageKey, luggageBuffer, luggageImageFile.type);
+    const luggageBuffer = imageBytes.get(luggageImageFile)!;
+    if (claim) await reserveIntakeUpload(c.env.DB, claim, luggageKey, 'luggage');
     luggageImageUrl = luggageKey;
+    await uploadImage(c.env.IMAGES, luggageKey, luggageBuffer, luggageImageFile.type);
   } catch (e) {
+    try { await releaseBeforeOrderInsert(); } catch { /* Retain durable uncertain cleanup evidence. */ }
     console.error("Image upload failed:", e);
     captureOperationalError(e, {
       operation: "customer.submit.upload_image",
@@ -1710,12 +1790,19 @@ customer.post("/customer/submit", async (c) => {
   const isOvernight = pickupJST.getUTCDate() !== nowJST.getUTCDate()
     || pickupJST.getUTCMonth() !== nowJST.getUTCMonth()
     || pickupJST.getUTCFullYear() !== nowJST.getUTCFullYear();
-  const orderId = await buildOrderId(c.env.DB, undefined, isOvernight);
-  // Tag assignment: overnight → dedicated 141-150, same-day → Phase 1/2 (1-140)
-  const tagNo = isOvernight
-    ? await buildOvernightTag(c.env.DB)
-    : await buildSameDayTag(c.env.DB);
+  let orderId: string, tagNo: string | null;
+  try {
+    orderId = await buildOrderId(c.env.DB, undefined, isOvernight);
+    // Tag assignment: overnight → dedicated 141-150, same-day → Phase 1/2 (1-140)
+    tagNo = isOvernight ? await buildOvernightTag(c.env.DB) : await buildSameDayTag(c.env.DB);
+  } catch {
+    // No order INSERT has been invoked. A counter write may be uncertain, but it
+    // cannot create an order; releasing this claim does not guess commit status.
+    try { await releaseBeforeOrderInsert(); } catch { /* Fail closed if durable release cannot be confirmed. */ }
+    return requestKey ? c.json({error:'INTAKE_PRECOMMIT_RETRY',retryable:true,keepDraft:true},503) : redirect(t('upload_error',lang));
+  }
   if (tagNo === null) {
+    try { await releaseBeforeOrderInsert(); } catch { /* Keep cleanup evidence. */ }
     return redirect(t(isOvernight ? "overnight_capacity_full" : "capacity_full", lang));
   }
 
@@ -1727,9 +1814,13 @@ customer.post("/customer/submit", async (c) => {
   const passDiscount = flyingPassDiscountAmount(prepaidAmount, flyingPassTier);
   const finalPrepaid = Math.max(0, prepaidAmount - passDiscount);
 
+  // Receipt capability is persisted atomically with the order, not in a later UPDATE.
+  const rawToken = crypto.getRandomValues(new Uint8Array(16));
+  const viewToken = btoa(String.fromCharCode(...rawToken)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
   // --- Insert order (clean up R2 on failure) ---
   try {
-    const inserted = await c.env.DB.prepare(
+    const orderInsert = c.env.DB.prepare(
       `INSERT INTO luggage_orders (
         order_id, tag_no, name, phone, email, payment_method, companion_count,
         suitcase_qty, backpack_qty, set_qty,
@@ -1737,8 +1828,8 @@ customer.post("/customer/submit", async (c) => {
         price_per_day, discount_rate, prepaid_amount,
         flying_pass_tier, flying_pass_discount_amount, final_amount,
         id_image_url, luggage_image_url,
-        consent_checked, status
-      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING'
+        consent_checked, status, view_token${claim ? ', account_person_id' : ''}
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PAYMENT_PENDING', ?${claim ? ', ?' : ''}
         WHERE NOT EXISTS (
           SELECT 1 FROM luggage_orders
           WHERE CAST(tag_no AS INTEGER) = CAST(? AS INTEGER)
@@ -1768,9 +1859,14 @@ customer.post("/customer/submit", async (c) => {
         idImageUrl,
         luggageImageUrl,
         1,
+        viewToken,
+        ...(claim ? [accountPersonId] : []),
         tagNo
-      )
-      .first<{ order_id: string }>();
+      );
+
+    const inserted = claim
+      ? await commitCustomerIntake(c.env.DB, claim, orderId, orderInsert)
+      : await orderInsert.first<{ order_id: string }>();
 
     if (!inserted) {
       if (idImageUrl) try { await c.env.IMAGES.delete(idImageUrl); } catch { /* best-effort */ }
@@ -1778,6 +1874,13 @@ customer.post("/customer/submit", async (c) => {
       return redirect(t(isOvernight ? "overnight_capacity_full" : "capacity_full", lang));
     }
   } catch (e) {
+    if (claim && e instanceof IntakeTagConflict) {
+      try { await cleanupIntakeUploads(c.env.DB, c.env.IMAGES, claim); } catch { /* Durable rows remain. */ }
+      return c.json({ error: 'INTAKE_TAG_RETRY', retryable: true, keepDraft: true }, 409);
+    }
+    // A lost D1 response may have committed. Keep photos and the PROCESSING claim
+    // for reconciliation; never erase objects potentially linked to an order.
+    if (claim) return c.json({ error: 'INTAKE_COMMIT_UNCERTAIN', keepDraft: true }, 503);
     // Clean up orphaned R2 objects
     if (idImageUrl) try { await c.env.IMAGES.delete(idImageUrl); } catch { /* best-effort */ }
     if (luggageImageUrl) try { await c.env.IMAGES.delete(luggageImageUrl); } catch { /* best-effort */ }
@@ -1802,7 +1905,9 @@ customer.post("/customer/submit", async (c) => {
   }
 
   // Send confirmation email (best-effort, keep worker alive via waitUntil)
-  if (email && c.env.BREVO_API_KEY) {
+  // Renewal receipt is local/SOT-backed. Do not reuse the legacy “storage
+  // confirmed” email for a new intake before notification events are approved.
+  if (!requestKey && email && c.env.BREVO_API_KEY) {
     c.executionCtx.waitUntil(
       sendOrderConfirmation(c.env.BREVO_API_KEY, {
         orderId, name, email, phone,
@@ -1822,11 +1927,7 @@ customer.post("/customer/submit", async (c) => {
     );
   }
 
-  // Generate 128-bit cryptographically random view token
-  const rawToken = crypto.getRandomValues(new Uint8Array(16));
-  const viewToken = btoa(String.fromCharCode(...rawToken)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-  await c.env.DB.prepare("UPDATE luggage_orders SET view_token = ?, updated_at = datetime('now') WHERE order_id = ?").bind(viewToken, orderId).run();
-
+  if (requestKey) return c.json({ orderId, replayed: false, receiptUrl: `/customer/renewal/receipt/${orderId}?lang=${lang}&token=${encodeURIComponent(viewToken)}` });
   return c.redirect(`/customer/orders/${orderId}?lang=${lang}&token=${viewToken}`);
 });
 
@@ -1869,9 +1970,8 @@ customer.get("/customer/orders/:id", async (c) => {
     }>();
 
   // Token valid for 5 minutes after creation
-  const tokenExpired = order?.view_token && order.updated_at
-    ? (Date.now() - new Date(order.updated_at).getTime()) > 5 * 60 * 1000
-    : false;
+  const receiptIssued = order?.created_at ? Date.parse(order.created_at.includes('T') ? order.created_at : order.created_at.replace(' ', 'T') + 'Z') : NaN;
+  const tokenExpired = !Number.isFinite(receiptIssued) || Date.now() < receiptIssued || Date.now() - receiptIssued >= 5 * 60 * 1000;
 
   if (!order || !token || order.view_token !== token || tokenExpired) {
     return c.html(

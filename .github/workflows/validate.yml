@@ -15,6 +15,9 @@ jobs:
         working-directory: worker
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Staged integration exports the immutable staff parent from Git.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
         with:
           version: 10
@@ -25,4 +28,11 @@ jobs:
           cache-dependency-path: worker/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
+      - name: Typecheck customer browser client
+        run: pnpm exec tsc -p tsconfig.customer-client.json --noEmit
       - run: pnpm test
+      - name: Test customer intake and ownership boundaries
+        run: node scripts/test-customer-intake.mjs
+      - name: Test staff-first customer upgrade on isolated D1 and R2
+        run: node --test tests/staffCustomerIntegration.test.mjs
+      - run: pnpm run check:customer-assets

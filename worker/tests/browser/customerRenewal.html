@@ -1,0 +1,71 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Local renewal browser checks</title>
+<style>body{font:16px system-ui;margin:24px}iframe{width:390px;height:780px;border:1px solid #ccc}pre{white-space:pre-wrap}button{padding:12px}</style>
+<h1>Synthetic renewal browser checks</h1><p>Local SQLite and memory-only photos. No production/OAuth/messages.</p>
+<button id="run">Run browser checks</button> <a id="navigate" target="app" hidden>Continue browser check</a><pre id="result">Ready</pre><iframe name="app" id="app" src="/customer/renewal?lang=en"></iframe>
+<script type="module">
+const frame=document.querySelector('#app'), result=document.querySelector('#result');
+const wait=async(predicate,message)=>{for(let i=0;i<150;i++){if(predicate())return;await new Promise(r=>setTimeout(r,40));}throw Error(message);};
+const doc=()=>frame.contentDocument;
+// Explicit native-link activation also works when this browser restricts
+// script-driven frame navigation after form input. No special permissions.
+const navigate=url=>new Promise(resolve=>{const link=document.querySelector('#navigate');link.href=url;link.hidden=false;link.onclick=()=>{link.hidden=true;};frame.addEventListener('load',resolve,{once:true});});
+// A full same-tab document navigation avoids iframe reload-event differences.
+const reload=()=>navigate('/customer/renewal?lang=en&reload-check='+Date.now());
+const click=selector=>doc().querySelector(selector).click();
+const fill=(field,value)=>{const el=doc().querySelector('[data-field="'+field+'"]');el.value=value;el.dispatchEvent(new frame.contentWindow.Event('input',{bubbles:true}));};
+const photo=async(field)=>{const transfer=new frame.contentWindow.DataTransfer();const bytes=await(await fetch('/__local/photo.png')).arrayBuffer();transfer.items.add(new frame.contentWindow.File([bytes],'synthetic-'+field+'.png',{type:'image/png'}));const el=doc().querySelector('[data-photo="'+field+'"]');el.files=transfer.files;el.dispatchEvent(new frame.contentWindow.Event('change',{bubbles:true}));await wait(()=>doc().querySelector('[data-photo-name="'+field+'"]').textContent==='synthetic-'+field+'.png','photo parsed');};
+document.querySelector('#run').onclick=async()=>{
+ document.querySelector('#run').disabled=true;const logs=[];
+ const check=(ok,message)=>{if(!ok)throw Error(message);logs.push('PASS '+message);result.textContent=logs.join('\n');};
+ try{
+  await wait(()=>doc()?.querySelector('.rd-root')?.dataset.ready==='true','app ready');
+  frame.contentWindow.sessionStorage.removeItem('fj-luggage-current-draft-v1');await navigate('/__local/reset');
+  await wait(()=>doc()?.querySelector('.rd-root')?.dataset.ready==='true'&&!doc().querySelector('#renewal-entry').hidden,'fresh app ready');
+  // The frame session is fresh in this test tab. No customers or real photos.
+  click('[data-entry="guest"]');fill('name','Synthetic Browser');fill('phone','000-1234-5678');fill('email','browser@example.invalid');click('#renewal-next');
+  check(!doc().querySelector('[data-step="identity"]').hidden,'general reception advances through real steps');
+  await photo('identity');click('[data-quick]');await wait(()=>!doc().querySelector('#renewal-auth').hidden,'auth panel');click('#renewal-auth-start');
+  await wait(()=>doc().querySelector('#renewal-error').textContent.includes('being connected'),'truthful auth readiness');
+  check(doc().querySelector('#renewal-error').textContent.includes('draft is saved'),'unavailable login preserves the encrypted draft and makes no fake member');
+  click('#renewal-auth-cancel');check(!doc().querySelector('[data-step="identity"]').hidden,'cancel returns to original step');
+  click('#renewal-next');fill('suitcaseQty','2');await photo('luggage');
+  click('[data-quick]');click('#renewal-auth-start');await wait(()=>doc().querySelector('#renewal-error').textContent.includes('being connected'),'photo snapshot saved');click('#renewal-auth-cancel');
+  await wait(()=>doc().querySelector('.rd-root').dataset.savesPending==='0','draft saves settled');
+  await reload();
+  await wait(()=>doc()?.querySelector('.rd-root')?.dataset.ready==='true'&&doc()?.querySelector('#renewal-state')?.textContent.includes('restored'),'draft reload');
+  check(doc().querySelector('[data-field="phone"]').value==='000-1234-5678','full reload restores typed contact');
+  check(doc().querySelector('[data-photo-name="identity"]').textContent==='synthetic-identity.png'&&doc().querySelector('[data-photo-name="luggage"]').textContent==='synthetic-luggage.png','both actual photo files restore after reload');
+  check(!doc().querySelector('[data-step="luggage"]').hidden,'current step is preserved across login cancel and reload');
+  click('#renewal-next');const tomorrow=new Date(Date.now()+33*3600000).toISOString().slice(0,10);fill('pickupDate',tomorrow);fill('pickupTime','17:00');click('#renewal-next');
+  await wait(()=>doc().querySelector('#renewal-price').textContent.includes('¥'),'real price preview');
+  check(doc().querySelector('#renewal-price').textContent.includes('¥'),'existing server price preview is connected');click('#renewal-next');
+  await wait(()=>doc().querySelector('#renewal-notice').textContent.trim(),'notice restored after reload');
+  const consent=doc().querySelector('#renewal-consent');consent.checked=true;consent.dispatchEvent(new frame.contentWindow.Event('input',{bubbles:true}));click('#renewal-submit');
+  await wait(()=>frame.contentWindow.location.pathname.startsWith('/customer/renewal/receipt/')||(doc().querySelector('#renewal-receipt-link')?.href&&!doc().querySelector('#renewal-receipt-link').hidden),'saved receipt link');
+  if(!frame.contentWindow.location.pathname.startsWith('/customer/renewal/receipt/'))await navigate(doc().querySelector('#renewal-receipt-link').href);
+  await wait(()=>frame.contentWindow.location.pathname.startsWith('/customer/renewal/receipt/'),'real saved receipt');
+  check(doc().body.textContent.includes('Synthetic Browser')&&doc().body.textContent.includes('physical luggage handover require staff confirmation'),'actual synthetic save reaches protected receipt and separates physical handover');
+  await navigate('/customer/renewal?lang=en');await wait(()=>doc()?.querySelector('.rd-root')?.dataset.ready==='true','new draft ready');
+  click('[data-entry="guest"]');fill('phone','000-9876-5432');await photo('identity');await photo('luggage');
+  click('[data-quick]');click('#renewal-auth-start');await wait(()=>doc().querySelector('#renewal-error').textContent.includes('being connected'),'member draft saved');
+  // Test-only local signer. This does NOT exercise or claim Google/Kakao OAuth.
+  await navigate('/__local/member');await wait(()=>doc()?.querySelector('.rd-root')?.dataset.ready==='true','signed-member return ready');
+  check(!doc().querySelector('#renewal-boundary').hidden&&doc().querySelector('[data-field="phone"]').value==='','anonymous draft is masked until explicit ownership confirmation');
+  click('#renewal-boundary-confirm');await wait(()=>!doc().querySelector('#renewal-form').hidden,'confirmed member adoption');
+  check(doc().querySelector('[data-field="name"]').value==='Synthetic Member'&&doc().querySelector('[data-field="email"]').value==='synthetic-member@example.invalid','verified synthetic profile fills only missing member fields');
+  check(doc().querySelector('[data-field="phone"]').value==='000-9876-5432'&&doc().querySelector('[data-photo-name="identity"]').textContent==='synthetic-identity.png','empty member phone does not erase draft phone or photos');
+  check([...doc().querySelectorAll('[data-step]')].every(el=>!el.hidden)&&doc().querySelector('#renewal-next').hidden,'verified member switches to a single quick-reception form');
+  fill('suitcaseQty','1');fill('pickupDate',tomorrow);
+  const memberConsent=doc().querySelector('#renewal-consent');memberConsent.checked=true;memberConsent.dispatchEvent(new frame.contentWindow.Event('input',{bubbles:true}));
+  const beforeMissingTime=(await(await fetch('/__local/summary')).json()).orders;
+  click('#renewal-submit');await wait(()=>!doc().querySelector('#renewal-error').hidden,'missing quick-reception time rejected');
+  check(doc().querySelector('[data-field="pickupTime"]').value===''&&(await(await fetch('/__local/summary')).json()).orders===beforeMissingTime,'quick reception cannot submit an unselected pickup time');
+  fill('pickupTime','17:00');click('#renewal-submit');
+  await wait(()=>frame.contentWindow.location.pathname.startsWith('/customer/renewal/receipt/')||(doc().querySelector('#renewal-receipt-link')?.href&&!doc().querySelector('#renewal-receipt-link').hidden),'member saved receipt link');
+  if(!frame.contentWindow.location.pathname.startsWith('/customer/renewal/receipt/'))await navigate(doc().querySelector('#renewal-receipt-link').href);
+  await wait(()=>frame.contentWindow.location.pathname.startsWith('/customer/renewal/receipt/'),'signed-member saved receipt');
+  check(doc().body.textContent.includes('Synthetic Member')&&doc().body.textContent.includes('Reception saved'),'signed synthetic member quick-reception saves through the real route');
+  result.textContent=logs.join('\n')+'\nALL '+logs.length+' CHECKS PASSED';
+ }catch(error){result.textContent=logs.join('\n')+'\nFAIL '+error.message;document.querySelector('#run').disabled=false;}
+};
+</script></html>

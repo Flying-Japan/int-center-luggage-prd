@@ -1,0 +1,13 @@
+import { createRequire } from 'node:module';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+const require = createRequire(import.meta.url);
+const { build } = createRequire(require.resolve('wrangler/package.json'))('esbuild');
+const temp = await mkdtemp(join(tmpdir(), 'luggage-renewal-local-'));
+const output = join(temp, 'server.cjs');
+await build({ entryPoints: ['scripts/local-customer-renewal.ts'], outfile: output, bundle: true, platform: 'node', format: 'cjs', target: 'node22' });
+const child = spawn(process.execPath, [output], { stdio: 'inherit', env: { ...process.env, TZ: 'UTC' } });
+process.on('SIGINT', () => child.kill('SIGINT')); process.on('SIGTERM', () => child.kill('SIGTERM'));
+child.on('exit', async code => { await rm(temp, { recursive: true, force: true }); process.exit(code ?? 0); });

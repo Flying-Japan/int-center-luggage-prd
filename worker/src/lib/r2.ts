@@ -3,7 +3,8 @@
  * Replaces the old REST API approach via httpx.
  */
 
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
+import { MAX_PHOTO_BYTES, normalizedPhotoMime, inspectPhotoContent, readBoundedPhoto } from './imageContent';
+const MAX_IMAGE_SIZE = MAX_PHOTO_BYTES;
 
 /**
  * Upload an image to R2.
@@ -18,8 +19,11 @@ export async function uploadImage(
   body: ArrayBuffer | ReadableStream,
   contentType: string
 ): Promise<void> {
-  await bucket.put(key, body, {
-    httpMetadata: { contentType },
+  const bytes = body instanceof ArrayBuffer ? body : await readBoundedPhoto(body);
+  const canonical = bytes && inspectPhotoContent(bytes, contentType);
+  if (!canonical || !bytes) throw Error('IMAGE_CONTENT_INVALID');
+  await bucket.put(key, bytes, {
+    httpMetadata: { contentType: canonical },
   });
 }
 
@@ -33,9 +37,14 @@ export async function downloadImage(
 ): Promise<{ body: ReadableStream; contentType: string } | null> {
   const obj = await bucket.get(key);
   if (!obj) return null;
+  const declared = normalizedPhotoMime(obj.httpMetadata?.contentType ?? null);
+  if (!declared) { await obj.body.cancel(); return null; }
+  const bytes = await readBoundedPhoto(obj.body);
+  const contentType = bytes && inspectPhotoContent(bytes, declared);
+  if (!bytes || !contentType) return null;
   return {
-    body: obj.body,
-    contentType: obj.httpMetadata?.contentType || "application/octet-stream",
+    body: new Blob([bytes]).stream(),
+    contentType,
   };
 }
 
@@ -69,7 +78,7 @@ export function extFromContentType(contentType: string): string {
     "image/heic": "heic",
     "image/heif": "heif",
   };
-  return map[contentType.toLowerCase()] || "jpg";
+  return map[normalizedPhotoMime(contentType) ?? ''] || "jpg";
 }
 
 /**
@@ -79,14 +88,10 @@ export function validateImageUpload(
   size: number,
   contentType: string | null
 ): { valid: boolean; error?: string } {
-  if (!contentType || !contentType.startsWith("image/")) {
+  if (!normalizedPhotoMime(contentType)) {
     return { valid: false, error: "파일은 이미지 형식이어야 합니다." };
   }
-  const blocked = ["image/svg+xml", "image/svg"];
-  if (blocked.includes(contentType.toLowerCase())) {
-    return { valid: false, error: "SVG 파일은 업로드할 수 없습니다." };
-  }
-  if (size > MAX_IMAGE_SIZE) {
+  if (size <= 0 || size > MAX_IMAGE_SIZE) {
     return { valid: false, error: "이미지 크기는 10MB 이하여야 합니다." };
   }
   return { valid: true };
