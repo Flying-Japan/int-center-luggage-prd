@@ -6,6 +6,7 @@ test('closed-hour guard enforces JST boundaries independently of host timezone',
 });
 test('deploy verifies the complete immutable financial guard and rejects historical manager-only schema',()=>{
  const sql=readFileSync('migrations/20261121_staff_late_refund_confirmation.sql','utf8');assert.doesNotThrow(()=>assertRefundGuard(sql));
+ assert.throws(()=>assertRefundGuard(sql.replace("OLD.status != 'PAYOUT_PENDING'","OLD.status != 'CONFIRMED'")));
  assert.throws(()=>assertRefundGuard(readFileSync('migrations/20261029_flying_pass_refund_handover.sql','utf8')));
  for(const token of ['NEW.amount IS NOT OLD.amount',"closing_type = 'FINAL_CLOSE'",'NEW.receipt_snapshot IS NOT','luggage_bag_additions ba WHERE ba.order_id=o.order_id'])assert.throws(()=>assertRefundGuard(sql.replaceAll(token,'missing')));
 });

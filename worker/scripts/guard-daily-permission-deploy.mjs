@@ -19,6 +19,9 @@ export function assertStaffFlags(bindings) {
  }
 }
 export function assertRefundGuard(sql) {
+ const canonical=s=>s.slice(s.indexOf('CREATE TRIGGER luggage_refund_transition_guard')).trim().replace(/;$/,'').replace(/\s+/g,' ');
+ const approved=readFileSync('migrations/20261121_staff_late_refund_confirmation.sql','utf8');
+ assert.equal(canonical(sql),canonical(approved),'The entire deployed financial trigger must match the reviewed migration.');
  assert.ok(sql.includes("NOT IN ('center_staff', 'part_time', 'manager', 'super_admin')")&&sql.includes("NEW.terminal_by_staff_id IS NOT 'pt:' ||"),'Staff late-confirm schema migration is required before deploying the Worker.');
  for(const token of ['NEW.root_snapshot IS NOT','NEW.receipt_snapshot IS NOT',"closing_type = 'FINAL_CLOSE'",'NEW.amount IS NOT OLD.amount','$.lateConfirm.reason','luggage_bag_additions ba WHERE ba.order_id=o.order_id'])assert.ok(sql.includes(token),`Financial guard missing: ${token}`);
 }
