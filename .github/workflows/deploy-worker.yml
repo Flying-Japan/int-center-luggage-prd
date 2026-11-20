@@ -1,9 +1,6 @@
 name: Deploy Worker
 
 on:
-  push:
-    branches: [main]
-    paths: ['worker/**']
   workflow_dispatch:
 
 jobs:
@@ -40,10 +37,22 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      - name: Guard closed hours, F1, schema prerequisite and existing flags
+        run: node scripts/guard-daily-permission-deploy.mjs before
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Deploy to Cloudflare
         run: |
           SENTRY_RELEASE="int-center-luggage-prd@${GITHUB_SHA}"
-          pnpm exec wrangler deploy --keep-vars --upload-source-maps --tag "$GITHUB_SHA" --message "Deploy $SENTRY_RELEASE" --var "SENTRY_RELEASE:$SENTRY_RELEASE"
+          pnpm exec wrangler deploy --keep-vars --config wrangler.f1.toml --upload-source-maps --tag "$GITHUB_SHA" --message "Deploy $SENTRY_RELEASE" --var "SENTRY_RELEASE:$SENTRY_RELEASE"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify existing flags, variables and secrets preserved
+        run: node scripts/guard-daily-permission-deploy.mjs after
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

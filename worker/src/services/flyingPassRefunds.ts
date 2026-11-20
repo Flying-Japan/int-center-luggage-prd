@@ -65,7 +65,7 @@ async function openDay(db: D1Database, day: string, late = false) {
     fail('CLOSING_CLOSED', '환급 지급일의 최종 현금마감이 완료되어 지급을 시작하거나 확정할 수 없습니다');
   }
 }
-const LATE_CONFIRM_ROLES = new Set(['manager', 'super_admin']);
+const LATE_CONFIRM_ROLES = new Set(['center_staff', 'part_time', 'manager', 'super_admin']);
 const jstTime = (ms: number) => new Date(ms + 9 * 3600000).toISOString().slice(0, 19).replace('T', ' ');
 function eligibility(c: Context, pendingId?: string) {
   const r = c.root, b = c.billing;
@@ -169,9 +169,9 @@ export type LateConfirm = { paidAt: string; reason: string };
 export async function finishFlyingPassRefund(db: D1Database, orderId: string, refundId: string, input:
   { action: 'confirm'; cashPaid: true; expectedAmount: number; lateConfirm?: LateConfirm } | { action: 'cancel'; confirmNotPaid: true; reason: string },
   who: RefundActor, now = new Date()): Promise<{ refund: FlyingPassRefund; replayed: boolean }> {
-  // Late confirmation = recording a past JST day's real cash payout. Manager/super_admin only (signed actor role; the DB re-checks the audited role).
+  // Late confirmation = recording a past JST day's real cash payout. Verified field staff only (signed actor identity; the DB re-checks the audited role).
   const late = input.action === 'confirm' ? input.lateConfirm : undefined;
-  if (late && !LATE_CONFIRM_ROLES.has(who.actor.role)) fail('MANAGER_REQUIRED', '날짜가 지난 지급 건의 지연 확정은 매니저·최고관리자만 할 수 있습니다. 현금을 다시 지급하지 마세요', 403);
+  if (late && !LATE_CONFIRM_ROLES.has(who.actor.role)) fail('FORBIDDEN_ACTOR', '인증된 센터 직원만 지연 확정할 수 있습니다. 현금을 다시 지급하지 마세요', 403);
   const terminalHash = await sha256({ ...input, userId: who.actor.userId, staffId: who.staff.id });
   // Shift handover: any permitted staff (center_staff/part_time/manager/super_admin) may finish another staff's payout.
   // The terminal actor is recorded separately (terminal_by_staff_id + terminal audit actor); terminalHash binds the replay to that actor.

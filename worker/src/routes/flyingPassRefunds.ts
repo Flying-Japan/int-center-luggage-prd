@@ -79,7 +79,7 @@ export function createFlyingPassRefundRoutes(localTestOnly = false) {
   routes.post(`${prefix}/register`, handle('register'));
   routes.post(`${prefix}/:refundId/lookup`, handle('lookup'));
   routes.post(`${prefix}/:refundId/confirm`, handle('confirm'));
-  // Manager/super_admin only (checked in the service): a past JST day's PAYOUT_PENDING whose cash was really paid. Not flag-gated, like confirm.
+  // Verified field staff only (checked in the service): a past JST day's PAYOUT_PENDING whose cash was really paid. Not flag-gated, like confirm.
   routes.post(`${prefix}/:refundId/late-confirm`, handle('late-confirm'));
   routes.post(`${prefix}/:refundId/cancel`, handle('cancel'));
   return routes;
