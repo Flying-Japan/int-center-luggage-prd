@@ -106,3 +106,35 @@ test('representative 10000-row synthetic read remains bounded without schema/ind
   const query=c.timings.find(r=>r.sql.includes('LIMIT ? OFFSET ?'))!;assert.ok(query.ms<2000,`Synthetic list SQL took ${query.ms}ms`);
   console.log(JSON.stringify({syntheticTagSortRows:10000,offset:5000,listSqlMilliseconds:query.ms}));
 });
+
+test('ascending sorts globally before pagination, with deterministic ties and missing tags last', async t => {
+  const c=setup(); t.after(() => c.sqlite.close());
+  seed(c,[
+    {id:'unassigned',tag:null},
+    {id:'tag-150',tag:'150'},
+    {id:'tag-02',tag:'2'},
+    {id:'old-27',tag:'027',at:'2031-05-09T01:00:00Z'},
+    {id:'new-27',tag:'27.0',at:'2031-05-11T01:00:00Z'},
+    {id:'invalid',tag:'x'},
+  ]);
+  const first=await get(c,'?sort=tag_asc&limit=3&offset=0');
+  const second=await get(c,'?sort=tag_asc&limit=3&offset=3');
+  assert.equal(first.status,200); assert.equal(second.status,200);
+  assert.equal(first.body.total,6); assert.equal(second.body.total,6);
+  assert.deepEqual([...ids(first.body),...ids(second.body)], ['tag-02','new-27','old-27','tag-150','unassigned','invalid']);
+  const untouched=(await get(c,'')).body;
+  assert.equal(untouched.total,6);
+});
+
+test('ascending preserves status/search/JST filtering and billing while default and descending are unchanged', async t => {
+  const c=setup();t.after(() => c.sqlite.close());
+  seed(c,[{id:'low',tag:'2',status:'PAID'},{id:'high',tag:'150',status:'PAID'},{id:'pending',tag:'1',status:'PAYMENT_PENDING'}]);
+  const legacy=(await get(c,'?status=PAID')).body;
+  const asc=(await get(c,'?sort=tag_asc&status=PAID')).body;
+  const desc=(await get(c,'?sort=tag_desc&status=PAID')).body;
+  assert.deepEqual(ids(asc),['low','high']);
+  assert.deepEqual(ids(desc),['high','low']);
+  assert.deepEqual(asc.statusCounts,legacy.statusCounts);
+  assert.equal(asc.total,legacy.total);
+  assert.deepEqual(asc.orders.map((o:any)=>o.billing),desc.orders.slice().reverse().map((o:any)=>o.billing));
+});
