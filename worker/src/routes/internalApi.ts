@@ -2125,13 +2125,17 @@ internalApi.get("/internal/luggage-orders", async (c) => {
   // Opt-in for the Unified order screen only. Sort before LIMIT/OFFSET; legacy callers keep newest-first.
   // Match String.trim() used by the existing Unified normalizer, including legacy Unicode whitespace.
   const tag = "trim(o.tag_no, char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279))";
-  const orderBy = c.req.query("sort") === "tag_desc"
-    ? `CASE WHEN (${tag} <> '' AND ${tag} NOT GLOB '*[^0-9]*'
+  const tagNumberSql = `CASE WHEN (${tag} <> '' AND ${tag} NOT GLOB '*[^0-9]*'
                   OR length(${tag}) > 2 AND ${tag} GLOB '*.0'
                      AND substr(${tag}, 1, length(${tag}) - 2) NOT GLOB '*[^0-9]*')
                 AND CAST(${tag} AS REAL) BETWEEN 1 AND 9007199254740991
-            THEN CAST(${tag} AS INTEGER) END DESC, o.created_at DESC, o.order_id DESC`
-    : "o.created_at DESC, o.order_id DESC";
+            THEN CAST(${tag} AS INTEGER) END`;
+  const sort = c.req.query("sort");
+  const orderBy = sort === "tag_desc"
+    ? `${tagNumberSql} DESC, o.created_at DESC, o.order_id DESC`
+    : sort === "tag_asc"
+      ? `(${tagNumberSql}) IS NULL ASC, ${tagNumberSql} ASC, o.created_at DESC, o.order_id DESC`
+      : "o.created_at DESC, o.order_id DESC";
   const clauses: string[] = [];
   const params: Array<string | number> = [];
   const countClauses: string[] = [];
