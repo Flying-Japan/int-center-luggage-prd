@@ -550,9 +550,9 @@ const ledgerState = async (s: Awaited<ReturnType<typeof setup>>) => JSON.stringi
   'luggage_cash_closing_audits ORDER BY audit_id', 'luggage_flying_pass_refunds ORDER BY refund_id', 'luggage_audit_logs ORDER BY log_id', 'luggage_orders ORDER BY order_id',
   'luggage_order_payments ORDER BY payment_id'].map(t => s.db.prepare(`SELECT * FROM ${t}`)))).map(r => r.results));
 
-for (const finisher of [manager, superAdmin]) {
-  test(`late confirm (${finisher.role}): past-day payout paid on the registration day; staff roles refused, strict paid time, audited, billing/sales/closing follow the payout day`, async () => {
-    const s = await setup({ migrate: true });
+for (const finisher of [actor, staffB, partTime, manager, superAdmin]) {
+  test(`late confirm (${finisher.role}): past-day payout paid on the registration day; field roles allowed, strict paid time, audited, billing/sales/closing follow the payout day`, async () => {
+    const s = await setup({ migrate: !['center_staff','part_time'].includes(finisher.role) });
     const { refundId, row } = await pastPending(s, 1); const before = await s.original();
     const R = row.business_date, created = Date.parse(row.created_at);
     for (const who of [actor, partTime, manager, superAdmin]) {
@@ -561,9 +561,9 @@ for (const finisher of [manager, superAdmin]) {
     }
     await assert.rejects(finalClose(s, R, 1200), /REFUND_PAYOUT_PENDING/, 'a past-day pending payout still blocks that day');
     const paidMs = created + 90_000, paidAtJst = finisher === manager ? jstWall(paidMs) : jstWall(paidMs, true);
-    for (const who of [actor, staffB, partTime]) {
+    for (const who of [{...actor, role:'viewer'}, {...actor, role:'office_staff'}]) {
       const r = await lateConfirm(s, refundId, who, paidAtJst);
-      assert.deepEqual([r.status, r.body.code], [403, 'MANAGER_REQUIRED'], who.role);
+      assert.equal(r.status, 403, who.role);
     }
     for (const [extra, status, code] of [
       [{ paidAtJst: undefined }, 400, 'INVALID_REQUEST'], [{ paidAtJst: '2026-02-30T10:00' }, 400, 'INVALID_REQUEST'],
@@ -659,8 +659,8 @@ test('late confirm keeps the billing guards: new extension debt blocks it (OUTST
   assert.equal((await lateConfirm(s, refundId, manager, jstWall(Date.now() - 60000))).status, 200);
 });
 
-test('DB guard: a late CONFIRMED needs a manager/super_admin terminal audit with the same paidAt and a reason, paid_at within registration..now, and an open payout day', async () => {
-  const s = await setup({ migrate: true }); const { refundId, row } = await pastPending(s, 2);
+test('DB guard: a late CONFIRMED needs a verified field terminal audit with the same paidAt and a reason, paid_at within registration..now, and an open payout day', async () => {
+  const s = await setup(); const { refundId, row } = await pastPending(s, 2);
   const created = Date.parse(row.created_at), paid = new Date(created + 60000).toISOString(), laterPaid = new Date(Date.now() - 86400000).toISOString();
   const attempt = (o: { role?: string; late?: unknown; paidAt?: string; at?: string }) => {
     const hash = 'a'.repeat(64), at = o.at ?? new Date().toISOString(), paidAt = o.paidAt ?? paid;
@@ -675,7 +675,7 @@ test('DB guard: a late CONFIRMED needs a manager/super_admin terminal audit with
   };
   const future = new Date(Date.now() + 3600000).toISOString(), early = new Date(created - 1000).toISOString();
   await finalClose(s, jstDayOf(Date.parse(laterPaid)), 0);
-  for (const bad of [{ role: 'center_staff' }, { role: 'part_time' }, { late: null }, { late: { paidAt: paid } }, { late: { paidAt: paid, reason: ' ' } },
+  for (const bad of [{ role: 'viewer' }, { role: 'office_staff' }, { role: 'part_time' }, { late: null }, { late: { paidAt: paid } }, { late: { paidAt: paid, reason: ' ' } },
     { late: { paidAt: new Date(created + 61000).toISOString(), reason: 'x' } }, { paidAt: early }, { paidAt: future, at: new Date(Date.now() + 7200000).toISOString() },
     { paidAt: laterPaid }]) {
     await assert.rejects(attempt(bad), undefined, JSON.stringify(bad));
@@ -930,4 +930,20 @@ test('phase2 actual migration upgrades existing phase1-format confirmed refunds 
   const b=(await getBillingSummary(s.db,ID))!;
   assert.deepEqual([b.total_effective_billed_amount,b.net_received_amount,b.outstanding_amount],[1200,1200,0]);
   assert.equal(await s.scalar('SELECT total_amount AS n FROM luggage_sales_daily'),1200);
+});
+
+
+test('daily late-confirm permission migration preserves all financial rows and the latest guard, and is repeatable', async () => {
+  const s=await setup();
+  await pastPending(s,1);
+  const before=await ledgerState(s);
+  const sql=readFileSync('migrations/20261121_staff_late_refund_confirmation.sql','utf8');
+  const original=(await s.db.prepare("SELECT sql FROM sqlite_master WHERE name='luggage_refund_transition_guard'").first<{sql:string}>())!.sql;
+  const liveBaseline=splitSql(readFileSync('migrations/20261030_bag_additions.sql','utf8')).find(statement=>/^CREATE TRIGGER luggage_refund_transition_guard/.test(statement));
+  assert.ok(liveBaseline,'the deployed additional-bag guard is the upgrade baseline');
+  await s.db.prepare('DROP TRIGGER luggage_refund_transition_guard').run();
+  await s.db.prepare(liveBaseline).run();
+  for(let i=0;i<2;i++)for(const statement of splitSql(sql))await s.db.prepare(statement).run();
+  assert.equal(await ledgerState(s),before,'no order, receipt, refund, closing or audit rows changed');
+  assert.equal((await s.db.prepare("SELECT sql FROM sqlite_master WHERE name='luggage_refund_transition_guard'").first<{sql:string}>())!.sql,original,'latest snapshot, closing and immutable-ledger checks preserved byte for byte');
 });

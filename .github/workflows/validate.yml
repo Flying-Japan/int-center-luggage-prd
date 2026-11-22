@@ -1,7 +1,7 @@
 name: Validate Luggage
 on:
   pull_request:
-    branches: [main, "release/**"]
+    branches: [main, "release/**", "codex/center-daily-permissions-20261121"]
   push:
     branches-ignore: [main]
     paths: ['worker/**', '.github/workflows/validate.yml']
@@ -24,5 +24,10 @@ jobs:
           cache: pnpm
           cache-dependency-path: worker/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod
       - run: pnpm run typecheck
       - run: pnpm test
+      - name: Verify F1 production bundle without uploading
+        run: pnpm exec wrangler deploy --config wrangler.f1.toml --dry-run --outdir "$RUNNER_TEMP/luggage-worker-build"
+      - name: Smoke test the compiled F1 Worker in local workerd
+        run: node scripts/test-f1-bundle.local.mjs "$RUNNER_TEMP/luggage-worker-build/index.js"
